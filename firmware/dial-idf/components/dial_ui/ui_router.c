@@ -46,8 +46,8 @@ void ui_router_knob_input(int detents)
 screen_id_t ui_router_current(void) { return s_current; }
 
 // Swipe gestures arrive on the screen object; forward to the active screen.
-// All four directions are forwarded (SCR_BOOST/SCR_UPDATE_PROMPT dismiss on a
-// down swipe) — screens that only care about left/right (scr_dial) filter the
+// All four directions are forwarded (SCR_UPDATE_PROMPT dismisses on a down
+// swipe) — screens that only care about left/right (scr_dial) filter the
 // rest out themselves and return false.
 static void gesture_cb(lv_event_t *e)
 {
@@ -73,11 +73,10 @@ static void gesture_cb(lv_event_t *e)
 
 // Screens that must not let the display sleep underneath the user. Every one
 // of these is a task with natural thinking pauses and no input: typing a
-// password one detent per letter, holding a QR code up to a phone, watching
-// an install run, choosing a boost duration, or reading the update sheet's
-// three options. The rest of the UI — the dial face, the menu and its
-// settings sub-screens — is deliberately NOT here: someone can wander off
-// mid-menu and the standby clock taking over is exactly right.
+// password one detent per letter, watching an install run, or reading the
+// update sheet's three options. The rest of the UI — the dial face, the menu
+// and its settings sub-screens — is deliberately NOT here: someone can
+// wander off mid-menu and the standby clock taking over is exactly right.
 static bool screen_blocks_sleep(screen_id_t id)
 {
     switch (id) {
@@ -85,11 +84,9 @@ static bool screen_blocks_sleep(screen_id_t id)
     case SCR_WIFI_PORTAL:    // "join this AP" instructions
     case SCR_NETPICK:        // picking a network with the knob
     case SCR_PASSKEY:        // one letter per detent — the worst case by far
-    case SCR_OAUTH_QR:       // being scanned by a phone
     case SCR_SIDEPICK:       // first-run side choice
     case SCR_UPDATING:       // install in progress; screen is the progress bar
     case SCR_UPDATE_PROMPT:  // an offer the user is reading
-    case SCR_BOOST:          // choosing a duration
     case SCR_BRIGHTNESS:     // live backlight preview — sleeping mid-adjust
                              // would both hide and change what is being set
         return true;

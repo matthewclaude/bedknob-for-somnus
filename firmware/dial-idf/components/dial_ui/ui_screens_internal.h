@@ -11,11 +11,9 @@ extern const ui_screen_t scr_connecting;
 extern const ui_screen_t scr_wifi_portal;
 extern const ui_screen_t scr_netpick;
 extern const ui_screen_t scr_passkey;
-extern const ui_screen_t scr_oauth_qr;
 extern const ui_screen_t scr_dial;
 extern const ui_screen_t scr_menu;
 extern const ui_screen_t scr_standby;
-extern const ui_screen_t scr_boost;
 extern const ui_screen_t scr_welcome;
 extern const ui_screen_t scr_sidepick;
 extern const ui_screen_t scr_settings;
@@ -36,13 +34,19 @@ extern const ui_screen_t scr_update_prompt;
  */
 typedef enum { ZK_OFFLINE, ZK_STANDBY, ZK_HEATING, ZK_COOLING, ZK_HOLDING } zone_kind_t;
 
+// Somnus's local API reports only a setpoint and a measured reading, not a
+// thermal_state string (that was Orion's get_device_state) -- so heating/
+// cooling/holding is derived here from the same two numbers
+// dial_state_predict_thermal used to use, with the same 0.5C deadband.
 static inline zone_kind_t dial_zone_kind(const zone_state_t *z, bool device_online)
 {
     if (!device_online)               return ZK_OFFLINE;
-    if (!z->on)                       return ZK_STANDBY;   // off IS standby, regardless of stale telemetry text
-    if (!strcmp(z->thermal_state, "heating")) return ZK_HEATING;
-    if (!strcmp(z->thermal_state, "cooling")) return ZK_COOLING;
-    return ZK_HOLDING;               // "holding", empty, or anything else while on
+    if (!z->on)                       return ZK_STANDBY;   // off IS standby, regardless of stale telemetry
+    if (z->actual_c < 0)              return ZK_HOLDING;   // nothing measured yet to compare against
+    float delta = z->temp_c - z->actual_c;
+    if (delta > 0.5f)  return ZK_HEATING;
+    if (delta < -0.5f) return ZK_COOLING;
+    return ZK_HOLDING;
 }
 
 /*

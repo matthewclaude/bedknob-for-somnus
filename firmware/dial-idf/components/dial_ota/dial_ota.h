@@ -7,8 +7,12 @@
  * public repo's GitHub API (api.github.com), and the image itself is
  * esp_https_ota'd from the release's "orion-dial.bin" asset (a 302 to
  * objects.githubusercontent.com, which esp_https_ota follows natively). TLS
- * on both hosts verifies against dial_oauth_root_ca() -- the same embedded
- * multi-root PEM used for Orion already covers GitHub's chains too.
+ * on both hosts verifies against an embedded multi-root PEM (trust_roots.pem,
+ * EMBED_TXTFILES -- see dial_ota.c) curated to survive a routine CA rotation
+ * on either host without bricking OTA. This bundle used to be shared with
+ * dial_oauth/dial_mcp (the Orion cloud client, now removed along with the
+ * rest of that pipeline -- see components/dial_somnus); dial_ota is its only
+ * remaining consumer, so the anchors now live here directly.
  *
  * Beta channel: dial_ota_check(beta) takes the caller's current
  * dial_state.beta preference (SCR_UPDATE's "Beta builds" toggle). Off, this
@@ -19,11 +23,10 @@
  * tiebreak in the .c file.
  *
  * Threading: dial_ota_check/download_and_apply are blocking and worker-task
- * only (same discipline as dial_mcp/dial_oauth). dial_ota_get() is a
- * mutex-guarded snapshot safe to call from any task (mirrors dial_state_get,
- * so the LVGL-side settings screen can read progress without touching the
- * worker directly -- though in practice the worker mirrors this into
- * app_state_t and screens read that instead).
+ * only. dial_ota_get() is a mutex-guarded snapshot safe to call from any task
+ * (mirrors dial_state_get, so the LVGL-side settings screen can read progress
+ * without touching the worker directly -- though in practice the worker
+ * mirrors this into app_state_t and screens read that instead).
  */
 
 typedef enum {

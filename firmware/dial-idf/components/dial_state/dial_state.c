@@ -111,7 +111,6 @@ void dial_state_init(void)
     for (int z = 0; z < ZONE_COUNT; z++) {
         s_state.ui_temp_f[z]         = -1;
         s_state.zones[z].actual_c    = -1.0f;
-        s_state.zones[z].hold_until_min = -1;   // "Holding" until the worker's first idle tick says otherwise
     }
 }
 
@@ -258,51 +257,22 @@ void dial_state_set_rotation(uint8_t quarters)
     }
 }
 
-/*
- * thermal_state is device truth and only lands on a poll, so anything the user
- * does — switching a zone on, turning the knob past the water temperature —
- * would leave the arc and pill rendering the OLD state until the next read.
- * Predict it from the two things already known: where the water is, and where
- * they just asked it to go. The next poll overwrites this with the truth, so a
- * wrong guess self-corrects within seconds.
- *
- * Uses the optimistic target (ui_temp_f) when one is pending, because that is
- * what the user is looking at — not the setpoint the device has been told about
- * so far. Caller must hold the lock.
- */
-void dial_state_predict_thermal(app_state_t *st, zone_idx_t zone)
-{
-    zone_state_t *zs = &st->zones[zone];
-    const char *s;
-    if (!zs->on)               s = "standby";
-    else if (zs->actual_c < 0) s = "holding";   // nothing measured to compare against
-    else {
-        float target_c = (st->ui_temp_f[zone] >= 0) ? dial_f_to_c(st->ui_temp_f[zone])
-                                                    : zs->temp_c;
-        float delta = target_c - zs->actual_c;
-        s = (delta > 0.5f) ? "heating" : (delta < -0.5f) ? "cooling" : "holding";
-    }
-    strlcpy(zs->thermal_state, s, sizeof(zs->thermal_state));
-}
-
 void dial_state_set_ui_temp(zone_idx_t zone, int temp_f)
 {
     xSemaphoreTake(s_mux, portMAX_DELAY);
     s_state.ui_temp_f[zone] = temp_f;
-    dial_state_predict_thermal(&s_state, zone);   // the pill follows the knob, not the poll
     s_state.generation++;
     xSemaphoreGive(s_mux);
 }
 
 // Optimistic power flip, committed by the UI the instant the disc is tapped.
 // The worker used to be the only one to set this — but it commits only AFTER
-// the write to Orion returns, so the face sat unchanged for a whole TLS round
-// trip while the user waited on a button they had already pressed.
+// the write to the pad returns, so the face sat unchanged for a whole HTTP
+// round trip while the user waited on a button they had already pressed.
 void dial_state_set_zone_on(zone_idx_t zone, bool on)
 {
     xSemaphoreTake(s_mux, portMAX_DELAY);
     s_state.zones[zone].on = on;
-    dial_state_predict_thermal(&s_state, zone);
     s_state.generation++;
     xSemaphoreGive(s_mux);
 }
@@ -425,37 +395,6 @@ void dial_state_set_rel_mode(bool rel_mode)
     }
 }
 
-void dial_state_set_relief_optimistic(int zone, bool active, bool heat, int64_t end_ms)
-{
-    xSemaphoreTake(s_mux, portMAX_DELAY);
-    for (int z = 0; z < ZONE_COUNT; z++) {
-        if (zone >= 0 && z != zone) continue;
-        if (active && !s_state.zones[z].relief_active) {
-            // Capture what the boost is about to displace, at the instant it
-            // starts. Without this, relief_prev_on held whatever the last
-            // get_device_state poll left (false on a zone that has never had
-            // relief this boot), and cancelling before the first poll landed
-            // restored that stale value — switching a bed that was ON to OFF.
-            // Doing it here covers BOTH callers, the LVGL task and the worker.
-            s_state.zones[z].relief_prev_on     = s_state.zones[z].on;
-            s_state.zones[z].relief_prev_temp_c = s_state.zones[z].temp_c;
-        }
-        if (!active && s_state.zones[z].relief_active) {
-            // Cancelling restores what the relief displaced. Without this the
-            // zone still looks ON for one render and the chip flashes
-            // "Holding" before settling — exactly what the owner saw.
-            s_state.zones[z].on     = s_state.zones[z].relief_prev_on;
-            s_state.zones[z].temp_c = s_state.zones[z].relief_prev_temp_c;
-        }
-        s_state.zones[z].relief_active  = active;
-        s_state.zones[z].relief_heat    = heat;
-        s_state.zones[z].relief_end_ms  = active ? end_ms : 0;
-        s_state.zones[z].relief_opt_us  = esp_timer_get_time();
-    }
-    s_state.generation++;
-    xSemaphoreGive(s_mux);
-}
-
 void dial_state_set_haptics_level(uint8_t level)
 {
     level = clamp_haptics_level(level);
@@ -474,8 +413,7 @@ void dial_state_set_haptics_level(uint8_t level)
 
 // Cheap single-field reads (mutex held only long enough to copy one byte) —
 // dial_power's power_task calls these from its 100ms apply tick, and a full
-// dial_state_get() snapshot (the app_state_t struct is large, e.g. the 600B
-// oauth_url) would be needless work on that hot-ish loop.
+// dial_state_get() snapshot would be needless work on that hot-ish loop.
 uint8_t dial_state_get_bri_day_pct(void)
 {
     xSemaphoreTake(s_mux, portMAX_DELAY);

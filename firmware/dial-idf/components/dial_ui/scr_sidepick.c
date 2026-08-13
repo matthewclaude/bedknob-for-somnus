@@ -109,17 +109,12 @@ static void on_state(const app_state_t *st)
     lv_obj_set_style_text_color(s_title, pal->ink_primary, 0);
     lv_obj_set_style_bg_color(s_divider, pal->track, 0);
 
-    for (int z = 0; z < ZONE_COUNT; z++) {
-        const char *name = st->zones[z].user_name;
-        char buf[24];
-        if (name[0]) {
-            strlcpy(buf, name, sizeof(buf));
-            for (char *p = buf; *p; p++) if (*p >= 'a' && *p <= 'z') *p -= 32;
-        } else {
-            strlcpy(buf, z == ZONE_A ? "RIGHT" : "LEFT", sizeof(buf));
-        }
-        lv_label_set_text(s_half_lbl[z], buf);
-    }
+    (void)st;
+    // Somnus's local API carries no per-side name (unlike Orion's
+    // list_devices zones[].user.first_name) -- just the fixed generic label,
+    // same left/right convention as this screen's create()-time fallback.
+    for (int z = 0; z < ZONE_COUNT; z++)
+        lv_label_set_text(s_half_lbl[z], z == ZONE_A ? "RIGHT" : "LEFT");
     apply_highlight();
 }
 

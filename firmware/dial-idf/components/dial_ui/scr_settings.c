@@ -16,12 +16,16 @@
  * summarize two independent percentages.
  *
  * Row order (owner-approved): Back, Adjustment mode, Brightness, Scale,
- * Units, Haptics, Rotation, Away mode, Re-link Orion, Factory reset. Settings
- * a user returns to sit on top — what the knob does to the bed (Adjustment
- * mode) and brightness on a bedside device are the two people actually
- * revisit. Install-once display prefs (Scale/Units/Haptics/Rotation) sit
- * below that; Away mode (moved here from the now-removed SCR_QUICK sheet)
- * sits directly above the destructive rows, which stay last, unchanged.
+ * Units, Haptics, Rotation, Factory reset. Settings a user returns to sit on
+ * top — what the knob does to the bed (Adjustment mode) and brightness on a
+ * bedside device are the two people actually revisit. Install-once display
+ * prefs (Scale/Units/Haptics/Rotation) sit below that; the destructive row
+ * stays last.
+ *
+ * Away mode and Re-link Orion were removed along with the rest of the Orion
+ * OAuth/MCP pipeline (see components/dial_somnus): the pad's local API has
+ * no away-mode endpoint, and dial_somnus is an unauthenticated local client
+ * with no token to re-link.
  *
  * "Screen timeout" (the lock-screen/standby idle threshold, dial_power's
  * STANDBY level — owner request: "a configurable lock screen timer... in an
@@ -43,10 +47,10 @@
 
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
-static lv_obj_t *s_val_scale, *s_val_units, *s_val_adjust_mode, *s_val_haptics, *s_val_rotation, *s_val_away;
+static lv_obj_t *s_val_scale, *s_val_units, *s_val_adjust_mode, *s_val_haptics, *s_val_rotation;
 static lv_obj_t *s_val_screen_timeout;
 
-typedef enum { CONFIRM_RELINK = 0, CONFIRM_FACTORY, CONFIRM_COUNT } confirm_id_t;
+typedef enum { CONFIRM_FACTORY = 0, CONFIRM_COUNT } confirm_id_t;
 static lv_obj_t   *s_val_confirm[CONFIRM_COUNT];
 static confirm_id_t s_armed = CONFIRM_COUNT;   // CONFIRM_COUNT = "none armed"
 static uint32_t     s_armed_at_ms;
@@ -246,30 +250,6 @@ static void row_screen_timeout_cb(lv_event_t *e)
     dial_state_set_screen_timeout_s(next);
 }
 
-// Away mode (moved here from the removed SCR_QUICK sheet — owner decision,
-// §4): "is_away" posted straight to the worker via the existing CMD_AWAY,
-// rendered from app_state_t.away, which is session-optimistic (set_away has
-// no readback — see that field's own comment in dial_state.h) same as it
-// always was on the sheet.
-static void row_away_cb(lv_event_t *e)
-{
-    (void)e;
-    app_state_t st;
-    dial_state_get(&st);
-    dial_haptics_play(HAPTIC_CONFIRM);
-    app_cmd_t cmd = { .kind = CMD_AWAY, .a = st.away ? 0 : 1 };
-    dial_cmd_post(&cmd);
-}
-
-static void row_relink_cb(lv_event_t *e)
-{
-    (void)e;
-    if (!confirm_tap(CONFIRM_RELINK)) return;
-    dial_haptics_play(HAPTIC_CONFIRM);
-    app_cmd_t cmd = { .kind = CMD_RELINK };
-    dial_cmd_post(&cmd);
-}
-
 static void row_factory_reset_cb(lv_event_t *e)
 {
     (void)e;
@@ -332,17 +312,15 @@ static void create(lv_obj_t *scr, void *arg)
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
     make_row(s_list, "Haptics",       row_haptics_cb,       &s_val_haptics);
     make_row(s_list, "Rotation",      row_rotation_cb,      &s_val_rotation);
-    make_row(s_list, "Away mode",     row_away_cb,          &s_val_away);
-    make_row(s_list, "Re-link Orion", row_relink_cb,        &s_val_confirm[CONFIRM_RELINK]);
     make_row(s_list, "Factory reset", row_factory_reset_cb, &s_val_confirm[CONFIRM_FACTORY]);
 
-    // "Tap again to confirm" is too long to share one line with "Re-link
-    // Orion"/"Factory reset" — right-aligned beside them it ran INTO them
-    // (same collision scr_about.c's Software update row had). So these two
-    // rows' value labels sit on a second left-aligned line under the label
-    // instead (scr_about.c's stacked treatment), width-capped with LONG_DOT.
-    // They hold "" except while armed, so every other state keeps the
-    // two-column label+value look of the rest of the list untouched.
+    // "Tap again to confirm" is too long to share one line with "Factory
+    // reset" — right-aligned beside it it ran INTO it (same collision
+    // scr_about.c's Software update row had). So this row's value label sits
+    // on a second left-aligned line under the label instead (scr_about.c's
+    // stacked treatment), width-capped with LONG_DOT. It holds "" except
+    // while armed, so every other state keeps the two-column label+value
+    // look of the rest of the list untouched.
     for (int i = 0; i < CONFIRM_COUNT; i++) {
         lv_obj_set_width(s_val_confirm[i], LV_PCT(100));
         lv_label_set_long_mode(s_val_confirm[i], LV_LABEL_LONG_DOT);
@@ -366,7 +344,7 @@ static void destroy(void)
     if (s_confirm_timer) { lv_timer_del(s_confirm_timer); s_confirm_timer = NULL; }
     s_list = NULL;
     s_title_lbl = NULL;
-    s_val_scale = s_val_units = s_val_adjust_mode = s_val_haptics = s_val_rotation = s_val_away = NULL;
+    s_val_scale = s_val_units = s_val_adjust_mode = s_val_haptics = s_val_rotation = NULL;
     s_val_screen_timeout = NULL;
     for (int i = 0; i < CONFIRM_COUNT; i++) s_val_confirm[i] = NULL;
     s_armed = CONFIRM_COUNT;
@@ -388,7 +366,6 @@ static void on_state(const app_state_t *st)
     else
         lv_label_set_text(s_val_units, st->units_c ? "\xC2\xB0" "C" : "\xC2\xB0" "F");
     lv_label_set_text(s_val_adjust_mode, st->sched_follow ? "Schedule" : "Hold");
-    lv_label_set_text(s_val_away, st->away ? "On" : "Off");
     lv_label_set_text(s_val_screen_timeout, dial_scr_timeout_label(st->screen_timeout_s));
     // Indexed directly by the stored value (see app_state_t.haptics_level):
     // 0=Off, 1=Auto, 2=Low, 3=High.

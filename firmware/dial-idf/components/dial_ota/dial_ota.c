@@ -18,7 +18,12 @@
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
 #include "cJSON.h"
-#include "dial_oauth.h"   // dial_oauth_root_ca() -- covers GitHub's chains too
+
+// Embedded multi-root PEM (EMBED_TXTFILES, CMakeLists.txt) -- see dial_ota.h's
+// header comment for what's in it and why. Used to be dial_oauth_root_ca(),
+// shared with the now-removed Orion client; this component is its only
+// remaining consumer, so the anchors are embedded directly here.
+extern const char trust_roots_pem_start[] asm("_binary_trust_roots_pem_start");
 
 static const char *TAG = "ota";
 
@@ -198,7 +203,7 @@ bool dial_ota_check(bool beta)
         .url           = beta ? GITHUB_API_URL_LIST : GITHUB_API_URL,
         .event_handler = on_check_http,
         .user_data     = &r,
-        .cert_pem      = dial_oauth_root_ca(),
+        .cert_pem      = trust_roots_pem_start,
         .user_agent    = user_agent,   // required by the GitHub API
         .timeout_ms    = 15000,
     };
@@ -327,7 +332,7 @@ bool dial_ota_download_and_apply(void (*progress_cb)(int pct))
 
     esp_http_client_config_t http_cfg = {
         .url        = asset_url,
-        .cert_pem   = dial_oauth_root_ca(),
+        .cert_pem   = trust_roots_pem_start,
         .timeout_ms = 30000,
         .buffer_size = 4096,
         /* GitHub 302s the asset to a signed URL ~900 bytes long; the default

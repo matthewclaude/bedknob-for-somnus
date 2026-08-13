@@ -65,33 +65,23 @@ static void on_state(const app_state_t *st)
         main_txt = "Wi-Fi lost";
         snprintf(sub_txt, sizeof(sub_txt), "Reconnecting...");
         break;
-    case PH_OAUTH_DISCOVER:    main_txt = "Linking to Orion..."; break;
-    case PH_MCP_CONNECTING:    main_txt = "Connecting to your bed..."; break;
+    case PH_SOMNUS_CONNECTING: main_txt = "Connecting to your bed..."; break;
     case PH_DEGRADED: {
-        // A cert-classified failure carries its own honest headline (set
-        // verbatim as phase_err by main.c — see DIAL_CERT_ERR_MSG) instead of
-        // the generic "Orion unreachable": a device whose embedded trust
-        // anchors have gone stale isn't looking at a routine outage.
-        bool cert = !strncmp(st->phase_err, DIAL_CERT_ERR_TITLE, strlen(DIAL_CERT_ERR_TITLE));
-        main_txt = cert ? DIAL_CERT_ERR_TITLE : "Orion unreachable";
+        // dial_somnus talks plain local HTTP (no TLS -- see dial_somnus.h),
+        // so there is no cert-classified failure mode to special-case here
+        // the way the old Orion/OAuth/MCP pipeline needed (DIAL_CERT_ERR_MSG
+        // is still defined in dial_state.h for whatever sets phase_err
+        // verbatim, but nothing in main.c does anymore).
+        main_txt = "Pad unreachable";
         // Night-quiet errors (design-spec.md's "silent staleness at night"):
         // dim to ink_secondary instead of a bright warning tone at 3am.
         main_color = dial_palette_is_night() ? PAL()->ink_secondary : PAL()->warning;
-        const char *why, *nl;
-        if (cert) {
-            // Everything after the title line (already newline-separated).
-            why = strchr(st->phase_err, '\n');
-            why = why ? why + 1 : "";
-            nl  = "\n";
-        } else {
-            // phase_err carries the specific reason; only echo it in the
-            // subtitle when it adds something the "Orion unreachable" title
-            // doesn't already say (the discover/registration path sets
-            // phase_err to that same string, which used to render twice).
-            bool echo = st->phase_err[0] && strcmp(st->phase_err, main_txt) != 0;
-            why = echo ? st->phase_err : "";
-            nl  = echo ? "\n" : "";
-        }
+        // phase_err carries the specific reason (dial_somnus_last_error());
+        // only echo it in the subtitle when it adds something the headline
+        // doesn't already say.
+        bool echo = st->phase_err[0] && strcmp(st->phase_err, main_txt) != 0;
+        const char *why = echo ? st->phase_err : "";
+        const char *nl  = echo ? "\n" : "";
         if (st->retry_in_s > 0)
             snprintf(sub_txt, sizeof(sub_txt), "%s%sRetrying in %ds", why, nl, st->retry_in_s);
         else

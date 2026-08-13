@@ -1,13 +1,16 @@
 /*
- * Orion dial — app wiring.
+ * Somnus dial — app wiring.
  *
  * Structure:
  *   dial_display  LCD/touch/LVGL bring-up + the LVGL task and lock
  *   dial_state    snapshot store + UI->worker command queue + input stamp
  *   dial_ui       screen router (LVGL task) + screens
- *   worker_task   (here) the single network task: Wi-Fi -> OAuth -> MCP ->
- *                 command/poll loop, as a supervisor state machine. Every
- *                 failure is a phase + backoff, never a dead end.
+ *   worker_task   (here) the single network task: Wi-Fi -> Somnus pad
+ *                 connect -> command/poll loop, as a supervisor state
+ *                 machine. Every failure is a phase + backoff, never a dead
+ *                 end. Replaces the earlier Orion OAuth->MCP pipeline —
+ *                 dial_somnus (components/dial_somnus) talks a plain local
+ *                 JSON REST API straight to the pad, no cloud/auth involved.
  *
  * Threading: the worker never touches LVGL; it commits to dial_state and the
  * router's dispatcher renders. Knob callbacks (esp_timer task) only feed the
@@ -30,15 +33,13 @@
 #include "ui_router.h"
 #include "ui_screens.h"
 #include "dial_wifi.h"
-#include "dial_oauth.h"
-#include "dial_mcp.h"
+#include "dial_somnus.h"
 #include "dial_time.h"
 #include "dial_haptics.h"
 #include "dial_power.h"
 #include "dial_palette.h"
 #include "dial_ota.h"
 #include "bidi_switch_knob.h"
-#include "mdns.h"
 // secrets.h is an optional dev convenience (git-ignored) that pre-seeds Wi-Fi
 // creds so a developer build skips on-device provisioning; a fresh clone has
 // none, and WIFI_SSID falls back to dial_net_seed's own placeholder string so
@@ -49,7 +50,6 @@
 #define WIFI_SSID     "your-wifi-ssid"
 #define WIFI_PASSWORD ""
 #endif
-#include "cJSON.h"
 
 static const char *TAG = "app";
 
@@ -69,30 +69,12 @@ static const char *TAG = "app";
 #define POLL_CONFIRM_US   2000000    // 2s between the confirm polls after a write
 #define POLL_CONFIRM_N          3    // how many of them before returning to idle cadence
 
-// Thermal-relief ("boost") optimistic window: CMD_BOOST_START/CANCEL commit
-// their guess of relief_active/heat/end/prev BEFORE issuing the MCP call (see
-// handle_immediate_cmd), so the chip reacts on the same tick as the tap
-// instead of after a multi-second (sometimes 10-20s) round trip. The server
-// can be slow to actually reflect a just-issued relief change -- even in the
-// call's OWN response -- so both mut_device_state's poll and mut_relief_ack's
-// own ack keep the optimistic guess alive, via relief_should_preserve_
-// optimistic(), while it's younger than this AND the incoming data disagrees
-// with it. Long enough to outlast a slow ack or the fast post-write confirm-
-// poll cadence (POLL_CONFIRM_US * POLL_CONFIRM_N ~= 6s), short enough that a
-// genuine disagreement (relief actually expired, or was cancelled from
-// elsewhere) still resolves quickly instead of wedging the chip.
-#define RELIEF_OPTIMISTIC_WINDOW_US 9000000
-
-// Sleep schedules (M5) don't change minute to minute — refresh far less
-// often than device state, piggybacked on the same idle poll path.
-#define SCHED_INTERVAL_US (30LL * 60 * 1000000)   // ~30 min
-
 // Auto OTA check (M6): once per uptime-day, and only checks (never applies)
 // — see the gating comment at its call site for the full safe-window rule.
 // 6h, not 24h (owner asked what it costs to check more often, 2026-08-04).
 // One check is a single GitHub request against a 60/hour per-IP limit, so
 // frequency is free on that side; the only real cost is briefly handing the
-// TLS session over from the MCP client, which is noise a few times a day.
+// TLS session over from the Somnus client, which is noise a few times a day.
 // The old 24h interval combined with a narrow daytime band meant a release
 // took up to a full day to be noticed — the band, not the interval, was the
 // binding constraint (see the window gate below, now widened to "any time
@@ -107,26 +89,6 @@ static const char *TAG = "app";
 
 #define BACKOFF_MIN_S  5
 #define BACKOFF_MAX_S 60
-
-// Discovery + anonymous client registration are the steps that must complete
-// before the Orion-link QR can even be built (the authorize URL needs the
-// authorization_endpoint from discovery and the client_id from registration).
-// They're quick public-metadata/registration calls that have nothing to do with
-// the user's account yet. The very first HTTPS request after a fresh Wi-Fi
-// association routinely misses (DNS/ARP/TLS warmup), so retry these fast and
-// quietly — staying on "Linking to Orion..." — for the first several attempts
-// before treating it as a real outage. Without this, a freshly flashed dial fell
-// into the steady-state "Orion unreachable" 5->60s backoff and made the user sit
-// through several retry cycles before the QR appeared.
-#define PREP_FAST_RETRIES 3      // fast attempts before falling to slow backoff
-// 5s, not the old 1.5s: rapid fresh TLS connections are exactly what home-
-// router flood protection rate-limits per device (field incident 2026-07-28
-// — the dial's own retry pace kept the throttle tripped for hours). Still
-// covers the boot-time SNTP race the fast window exists for, at a cadence
-// that reads as a polite client instead of an attack.
-#define PREP_RETRY_MS  5000
-
-static const char *zone_id_str(zone_idx_t z) { return z == ZONE_A ? "zone_a" : "zone_b"; }
 
 /* ---- rotary knob ------------------------------------------------------ */
 // GPIO8 (A) / GPIO7 (B); only electrically live under the full board init.
@@ -255,7 +217,6 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
         if (cur == SCR_NETPICK || cur == SCR_PASSKEY) return cur;
         return SCR_WIFI_PORTAL;
     }
-    case PH_OAUTH_WAIT_CONSENT: return SCR_OAUTH_QR;
     case PH_READY:
     case PH_DEGRADED:
     case PH_WIFI_LOST:
@@ -316,7 +277,7 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             // passive set above): both are Settings sub-screens reached by a
             // deliberate tap, and a routine poll landing mid-choice must not
             // yank the user off either one.
-            if (passive || cur == SCR_BOOST || cur == SCR_SETTINGS ||
+            if (passive || cur == SCR_SETTINGS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE) return cur;
             // First link on a fresh device: pick a default side before showing
             // the dial (SCR_SIDEPICK). Nothing to pick on a single-zone topper,
@@ -351,113 +312,41 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
 
 typedef struct {
     zone_state_t zones[ZONE_COUNT];
-    bool present[ZONE_COUNT];  // zone ids actually carried by this response
+    bool present[ZONE_COUNT];  // sides actually in play this poll (see dial_somnus_get_zone_mode)
     bool online;
-    bool safety_error;
-    char safety_desc[96];
-    char water_fill[12];
-    int64_t poll_started_us;   // when the get_device_state round-trip began
+    bool system_error;
+    int64_t poll_started_us;   // when the /api/state round-trip began
 } device_snapshot_t;
-
-// Shared by mut_device_state (a poll) and mut_relief_ack (the direct result
-// of the boost call we just issued): true when `keep` -- the zone's
-// currently-committed relief_active/heat/end/prev -- was set optimistically
-// (relief_opt_us != 0) more recently than RELIEF_OPTIMISTIC_WINDOW_US, AND
-// `fresh` -- the incoming poll/ack data -- disagrees with it on the one bit
-// the chip actually renders (relief_active). Disagreeing on anything else
-// (exact end time, say) is not treated as a conflict -- once the two sides
-// agree the zone is (in)active, the incoming data's own end/heat/prev is
-// trusted immediately, no reason to hold those back too. `as_of_us` is
-// passed in (poll_started_us for a poll, a freshly-read "now" for an ack)
-// rather than re-read here, so every zone this call touches agrees on the
-// same instant.
-static bool relief_should_preserve_optimistic(const zone_state_t *keep,
-                                               const zone_state_t *fresh,
-                                               int64_t as_of_us)
-{
-    if (!keep->relief_opt_us) return false;
-    if (as_of_us - keep->relief_opt_us >= RELIEF_OPTIMISTIC_WINDOW_US) return false;
-    return keep->relief_active != fresh->relief_active;
-}
 
 static void mut_device_state(app_state_t *st, void *arg)
 {
     device_snapshot_t *d = arg;
-    // A response that LEFT the device before the user's last input cannot know
-    // about what they just did. Taking its control fields (on / setpoint /
-    // thermal_state) would visibly undo the optimistic update for a beat and
-    // then redo it on the following poll — the "jumpy" flicker after a tap or a
-    // knob turn. Its telemetry (measured water, safety, fill) is still good:
-    // the user's input didn't change those, so only the control state is held.
+    // A response that LEFT the pad before the user's last input cannot know
+    // about what they just did. Taking its control fields (on/setpoint)
+    // would visibly undo the optimistic update for a beat and then redo it
+    // on the following poll — the "jumpy" flicker after a tap or a knob
+    // turn. Its telemetry (measured water, water-low) is still good: the
+    // user's input didn't change those, so only the control state is held.
     bool predates_input = dial_state_last_input_us() > d->poll_started_us;
 
     for (int z = 0; z < ZONE_COUNT; z++) {
-        // Two things about a zone don't come from THIS call and must survive
-        // it: the name (list_devices) and the M5 sleep-schedule fields
-        // (get_sleep_schedules, refreshed on its own much slower cadence —
-        // see SCHED_INTERVAL_US) — save the whole zone, overwrite with the
-        // poll's fresh values, then restore just those fields.
         zone_state_t keep = st->zones[z];
         st->zones[z] = d->zones[z];
-        strlcpy(st->zones[z].user_name, keep.user_name, sizeof(st->zones[z].user_name));
-        st->zones[z].sched_valid              = keep.sched_valid;
-        strlcpy(st->zones[z].sched_bedtime, keep.sched_bedtime, sizeof(st->zones[z].sched_bedtime));
-        st->zones[z].sched_bedtime_temp_c      = keep.sched_bedtime_temp_c;
-        strlcpy(st->zones[z].sched_wakeup, keep.sched_wakeup, sizeof(st->zones[z].sched_wakeup));
-        st->zones[z].sched_wakeup_temp_c        = keep.sched_wakeup_temp_c;
-        st->zones[z].sched_smart_temp_active    = keep.sched_smart_temp_active;
-        st->zones[z].sched_phase1_offset_min    = keep.sched_phase1_offset_min;
-        st->zones[z].sched_phase1_temp_c        = keep.sched_phase1_temp_c;
-        st->zones[z].sched_phase2_offset_min    = keep.sched_phase2_offset_min;
-        st->zones[z].sched_phase2_temp_c        = keep.sched_phase2_temp_c;
-        // hold_until_min is worker-computed (compute_hold_until_min), not
-        // carried by get_device_state, so it belongs in this preserve list
-        // like every sched_* field above. Without it each ~10s poll zeroed
-        // the field -- and 0 is a LEGAL value (midnight), so the pill read
-        // "Until 12:00" on an idle dial with no active phase at all, which
-        // is exactly what the owner saw. The worker only re-commits on a
-        // CHANGE, so once the poll clobbered it to 0 it stayed there.
-        st->zones[z].hold_until_min             = keep.hold_until_min;
-
         if (predates_input) {                       // see the note above
             st->zones[z].on     = keep.on;
             st->zones[z].temp_c = keep.temp_c;
-            strlcpy(st->zones[z].thermal_state, keep.thermal_state,
-                    sizeof(st->zones[z].thermal_state));
-        }
-
-        // relief_opt_us is dial-local (see its comment in dial_state.h) and
-        // never carried by get_device_state, so -- like hold_until_min above
-        // -- it must survive the wholesale copy or every poll would zero it
-        // and permanently disable the optimistic-preserve check below.
-        st->zones[z].relief_opt_us = keep.relief_opt_us;
-        if (relief_should_preserve_optimistic(&keep, &d->zones[z], d->poll_started_us)) {
-            // This poll's relief_active hasn't caught up to the boost start/
-            // cancel we just optimistically committed -- keep our guess
-            // (the wholesale copy above already applied the poll's version;
-            // put ours back) rather than let the chip flicker to the stale
-            // answer and then flicker again on the next poll once the server
-            // does catch up.
-            st->zones[z].relief_active      = keep.relief_active;
-            st->zones[z].relief_heat        = keep.relief_heat;
-            st->zones[z].relief_end_ms      = keep.relief_end_ms;
-            st->zones[z].relief_prev_temp_c = keep.relief_prev_temp_c;
-            st->zones[z].relief_prev_on     = keep.relief_prev_on;
-        } else {
-            st->zones[z].relief_opt_us = 0;   // poll agrees, or the window lapsed -- server wins from here
         }
     }
     for (int z = 0; z < ZONE_COUNT; z++) st->zone_present[z] = d->present[z];
-    // A single-zone topper has no partner face to show. If the persisted side
-    // names a zone this device doesn't have (a dial moved between beds, or a
-    // NVS value from before this field existed), fall back to the one it does —
-    // otherwise nav_policy would keep routing to a face built from an empty zone.
+    // A single-zone bed (Somnus "One Bed" mode) has no partner face to show.
+    // If the persisted side names a zone this device doesn't have (a dial
+    // moved between beds, a zone-mode flip, or an NVS value from before this
+    // field existed), fall back to the one it does — otherwise nav_policy
+    // would keep routing to a face built from an empty zone.
     if (!st->zone_present[st->ui_zone])
         st->ui_zone = dial_state_primary_zone(st);
     st->device_online = d->online;
-    st->safety.error = d->safety_error;
-    strlcpy(st->safety.desc, d->safety_desc, sizeof(st->safety.desc));
-    strlcpy(st->water_fill, d->water_fill, sizeof(st->water_fill));
+    st->system_error = d->system_error;
     st->have_state = true;
     // Clear optimistic intent ONLY if no input arrived after this poll's
     // round-trip began (the failed-write case still converges: the next
@@ -467,29 +356,15 @@ static void mut_device_state(app_state_t *st, void *arg)
             st->ui_temp_f[z] = -1;
 }
 
-// temp_min_f/temp_max_f: -1 = temperature_range wasn't present/numeric this
-// discovery (see orion_discover_device()) -- mut_identity below leaves the
-// store's existing value alone then, rather than clobbering a previously
-// good range with "unknown".
-typedef struct {
-    char names[ZONE_COUNT][24];
-    char serial[16];
-    int  temp_min_f, temp_max_f;
-} device_identity_t;
-
-static void mut_identity(app_state_t *st, void *arg)
+// temp_min_f/temp_max_f: the pad's fixed range (local_api spec, dial_somnus.h
+// -- no discovery call reports it, unlike Orion's list_devices), seeded once
+// after a successful dial_somnus_connect(). See worker_task's call site.
+typedef struct { int temp_min_f, temp_max_f; } temp_range_t;
+static void mut_temp_range(app_state_t *st, void *arg)
 {
-    device_identity_t *n = arg;
-    for (int z = 0; z < ZONE_COUNT; z++)
-        strlcpy(st->zones[z].user_name, n->names[z], sizeof(st->zones[z].user_name));
-    strlcpy(st->serial, n->serial, sizeof(st->serial));
-    // Device-reported absolute temperature range (owner: "use the Orion
-    // reported min/max for limits, not our own") -- see app_state_t.temp_min_f's
-    // comment for what reads this and the DIAL_TEMP_MIN_F/MAX_F fallback.
-    if (n->temp_min_f >= 0 && n->temp_max_f >= 0) {
-        st->temp_min_f = n->temp_min_f;
-        st->temp_max_f = n->temp_max_f;
-    }
+    temp_range_t *r = arg;
+    st->temp_min_f = r->temp_min_f;
+    st->temp_max_f = r->temp_max_f;
 }
 
 /*
@@ -504,14 +379,13 @@ static void mut_zone_on(app_state_t *st, void *arg)
     zone_on_t *u = arg;
     if (dial_state_last_input_us() > u->issued_us) return;   // user moved on; leave their state alone
     st->zones[u->zone].on = u->on;
-    dial_state_predict_thermal(st, u->zone);
 }
 
 typedef struct { int zone; float temp_c; int64_t issued_us; } zone_temp_t;
 static void mut_zone_temp(app_state_t *st, void *arg)
 {
     zone_temp_t *u = arg;
-    st->zones[u->zone].temp_c = u->temp_c;          // the device now holds this target
+    st->zones[u->zone].temp_c = u->temp_c;          // the pad now holds this target
 
     // Only retire the optimistic display value if nothing newer has been dialled
     // in since this write left. Clearing it unconditionally is what made the
@@ -520,221 +394,8 @@ static void mut_zone_temp(app_state_t *st, void *arg)
     // past. The newer value has its own CMD_SET_TEMP queued behind this one.
     if (dial_state_last_input_us() <= u->issued_us)
         st->ui_temp_f[u->zone] = -1;
-
-    dial_state_predict_thermal(st, u->zone);
 }
 
-// Response shape shared by start_thermal_relief / cancel_thermal_relief:
-// {success, zones:[{id,temp,on,thermal_relief?}, ...]}. `touched` marks which
-// zones this particular response actually described.
-typedef struct {
-    zone_state_t zones[ZONE_COUNT];
-    bool touched[ZONE_COUNT];
-} relief_ack_t;
-
-// Ack-commit for start/cancel_thermal_relief: applies the response's zones[]
-// (temp/on/relief) directly, not gated by poll_started_us — unlike
-// mut_device_state this isn't a background poll racing user input, it's the
-// direct result of a command the user just issued. Deliberately leaves
-// ui_temp_f alone (these commands come from the dial face's boost buttons /
-// SCR_BOOST, never from a knob turn on the dial, so there's normally no
-// optimistic temp in flight for this zone to clobber or preserve).
-//
-// This IS normally the authoritative settling point for the optimistic guess
-// handle_immediate_cmd commits before issuing the call — CMD_BOOST_START/
-// CANCEL only need the guess to survive until this ack lands. But the owner
-// has observed the server take a beat to actually reflect a just-issued
-// relief change, sometimes even in this call's OWN response — an ack that
-// arrives saying "not active yet" would otherwise stomp the correct
-// optimistic state right back out. So this is gated by the same
-// relief_should_preserve_optimistic() check as mut_device_state's poll: if
-// the response disagrees with a still-fresh optimistic guess, keep the guess
-// (still apply temp/on — this ack IS the authoritative answer for those) and
-// let a later poll or a retried ack settle it; only once they agree (or the
-// window lapses) does the ack's own relief_* win and retire the guess.
-static void mut_relief_ack(app_state_t *st, void *arg)
-{
-    relief_ack_t *r = arg;
-    int64_t now_us = esp_timer_get_time();
-    for (int z = 0; z < ZONE_COUNT; z++) {
-        if (!r->touched[z]) continue;
-        zone_state_t keep = st->zones[z];
-        st->zones[z].temp_c = r->zones[z].temp_c;
-        st->zones[z].on     = r->zones[z].on;
-        if (relief_should_preserve_optimistic(&keep, &r->zones[z], now_us))
-            continue;   // relief_active/heat/end/prev + relief_opt_us stay as they are (the optimistic guess)
-        st->zones[z].relief_active      = r->zones[z].relief_active;
-        st->zones[z].relief_heat        = r->zones[z].relief_heat;
-        st->zones[z].relief_end_ms      = r->zones[z].relief_end_ms;
-        st->zones[z].relief_prev_temp_c = r->zones[z].relief_prev_temp_c;
-        st->zones[z].relief_opt_us      = 0;   // ack agrees — server wins from here
-    }
-}
-
-// Optimistic relief commit for CMD_BOOST_START/CANCEL (main.c's
-// handle_immediate_cmd) — mirrors dial_state_set_zone_on's "flip it before
-// the round trip" shape for the boost chip instead of the power disc.
-// `optimistic` distinguishes the two callers: true stamps relief_opt_us to
-// esp_timer_get_time() (a guess made ahead of the call, which
-// mut_device_state/mut_relief_ack must protect for a while — see
-// RELIEF_OPTIMISTIC_WINDOW_US); false is a revert-on-failure back to the
-// pre-tap truth, which needs no protecting (it isn't a guess, and stamping it
-// would only block the very next poll from correcting a genuinely stale
-// revert).
-typedef struct {
-    zone_idx_t zone;
-    bool    active;
-    bool    heat;
-    int64_t end_ms;
-    float   prev_temp_c;
-    bool    optimistic;
-} relief_optimistic_t;
-
-static void mut_relief_optimistic(app_state_t *st, void *arg)
-{
-    relief_optimistic_t *o = arg;
-    zone_state_t *zs = &st->zones[o->zone];
-    zs->relief_active      = o->active;
-    zs->relief_heat        = o->heat;
-    zs->relief_end_ms      = o->end_ms;
-    zs->relief_prev_temp_c = o->prev_temp_c;
-    zs->relief_opt_us      = o->optimistic ? esp_timer_get_time() : 0;
-}
-
-
-static void mut_away(app_state_t *st, void *arg) { st->away = *(bool *)arg; }
-
-// Tonight schedule (M5) snapshot from get_sleep_schedules — TODAY's entry
-// only, one per zone (via the worker's uuid map, see s_zone_uuid below).
-typedef struct {
-    bool  valid;
-    char  bedtime[6];
-    float bedtime_temp_c;
-    char  wakeup[6];
-    float wakeup_temp_c;
-    // Smart-temperature phase fields — see zone_state_t's comment in
-    // dial_state.h for what these mean.
-    bool  smart_temp_active;
-    int   phase1_offset_min;
-    float phase1_temp_c;
-    int   phase2_offset_min;
-    float phase2_temp_c;
-} sched_zone_t;
-typedef struct { sched_zone_t zones[ZONE_COUNT]; } sched_snapshot_t;
-
-static void mut_schedules(app_state_t *st, void *arg)
-{
-    sched_snapshot_t *s = arg;
-    for (int z = 0; z < ZONE_COUNT; z++) {
-        st->zones[z].sched_valid = s->zones[z].valid;
-        if (!s->zones[z].valid) continue;
-        strlcpy(st->zones[z].sched_bedtime, s->zones[z].bedtime, sizeof(st->zones[z].sched_bedtime));
-        st->zones[z].sched_bedtime_temp_c      = s->zones[z].bedtime_temp_c;
-        strlcpy(st->zones[z].sched_wakeup, s->zones[z].wakeup, sizeof(st->zones[z].sched_wakeup));
-        st->zones[z].sched_wakeup_temp_c        = s->zones[z].wakeup_temp_c;
-        st->zones[z].sched_smart_temp_active    = s->zones[z].smart_temp_active;
-        st->zones[z].sched_phase1_offset_min    = s->zones[z].phase1_offset_min;
-        st->zones[z].sched_phase1_temp_c        = s->zones[z].phase1_temp_c;
-        st->zones[z].sched_phase2_offset_min    = s->zones[z].phase2_offset_min;
-        st->zones[z].sched_phase2_temp_c        = s->zones[z].phase2_temp_c;
-    }
-}
-
-/*
- * "Dial adjusts" (Follow schedule vs. Hold tonight): which segment of
- * tonight's sleep schedule is active RIGHT NOW, so a knob turn during that
- * segment can retarget just that segment's temp field via
- * override_sleep_schedule_tonight instead of blindly holding for the rest of
- * the night (see orion_set_temp below). Schedule markers, in order from
- * bedtime: bedtime -> bedtime+phase_1_offset -> bedtime+phase_2_offset ->
- * wakeup; each marker's temp field governs from itself up to the next one.
- * wakeup's own temp is treated as active for a grace window after the wake
- * clock time too (SLEEP_PHASE_WAKE_GRACE_MIN, the same +30min slop the
- * steady-state loop below already uses to call the palette/haptics window
- * "still nighttime") — someone who turns the dial in the few minutes after
- * their alarm is still adjusting tonight's session, not starting a fresh
- * daytime hold. Past that grace, or before bedtime, this is SLEEP_PHASE_NONE
- * ("outside the sleep window") and the caller must fall back to a plain hold.
- *
- * All arithmetic is done in minutes-SINCE-BEDTIME on a rolling 24h wheel, not
- * raw clock minutes, so a boundary crossing midnight — bedtime 21:30 -> wake
- * 08:00 is the normal case, and a phase offset can independently push its own
- * boundary past midnight too — is not a special case: every boundary just
- * wraps the same way.
- */
-typedef enum {
-    SLEEP_PHASE_NONE = 0,   // outside tonight's sleep window, or schedule unusable
-    SLEEP_PHASE_BEDTIME,
-    SLEEP_PHASE_1,
-    SLEEP_PHASE_2,
-    SLEEP_PHASE_WAKEUP,
-} sleep_phase_t;
-
-#define SLEEP_PHASE_WAKE_GRACE_MIN 30
-
-// `out_boundary_since` (nullable): when a phase IS active, receives the
-// clock-minutes-from-midnight at which it hands off to the next one — the
-// dial's status pill (§3, scr_dial.c) reads this as "Until H:MM" via
-// compute_hold_until_min() below. NULL for callers (temp_write_phase) that
-// only care which field to override, not when it expires.
-static sleep_phase_t sleep_phase_now(const zone_state_t *z, int now_min, int *out_boundary_since)
-{
-    if (!z->sched_valid || !z->sched_smart_temp_active) return SLEEP_PHASE_NONE;
-    int bed_min, wake_min;
-    if (!dial_parse_hhmm(z->sched_bedtime, &bed_min)) return SLEEP_PHASE_NONE;
-    if (!dial_parse_hhmm(z->sched_wakeup, &wake_min))  return SLEEP_PHASE_NONE;
-
-    int since      = ((now_min  - bed_min) % 1440 + 1440) % 1440;   // now,     minutes-since-bedtime
-    int wake_since = ((wake_min - bed_min) % 1440 + 1440) % 1440;   // wakeup,  minutes-since-bedtime
-    if (wake_since == 0) wake_since = 1440;   // wakeup == bedtime clock time: a full 24h window, not zero-length
-
-    // Clamp the offsets so a bad/duplicate/overrunning value from the API can
-    // never order phase_2 before phase_1 or push either past the window it
-    // lives in — worst case a clamped offset just collapses that phase to
-    // zero width rather than misreporting which one is active.
-    int p1 = z->sched_phase1_offset_min < 0 ? 0 : z->sched_phase1_offset_min;
-    int p2 = z->sched_phase2_offset_min < p1 ? p1 : z->sched_phase2_offset_min;
-    if (p1 > wake_since) p1 = wake_since;
-    if (p2 > wake_since) p2 = wake_since;
-
-    sleep_phase_t phase;
-    int boundary_since;   // minutes-since-bedtime the ACTIVE phase hands off at
-    if (since < p1)                                       { phase = SLEEP_PHASE_BEDTIME; boundary_since = p1; }
-    else if (since < p2)                                  { phase = SLEEP_PHASE_1;       boundary_since = p2; }
-    else if (since < wake_since)                          { phase = SLEEP_PHASE_2;       boundary_since = wake_since; }
-    else if (since < wake_since + SLEEP_PHASE_WAKE_GRACE_MIN)
-                                                           { phase = SLEEP_PHASE_WAKEUP;  boundary_since = wake_since + SLEEP_PHASE_WAKE_GRACE_MIN; }
-    else return SLEEP_PHASE_NONE;
-
-    if (out_boundary_since) *out_boundary_since = ((bed_min + boundary_since) % 1440 + 1440) % 1440;
-    return phase;
-}
-
-// The exact get_sleep_schedules/override_sleep_schedule_tonight field name
-// for a phase's temp — the ONLY field an override write may carry (see
-// orion_set_temp below): sending bedtime/wakeup alongside it would silently
-// move the schedule's clock times too.
-static const char *sleep_phase_field(sleep_phase_t p)
-{
-    switch (p) {
-    case SLEEP_PHASE_BEDTIME: return "bedtime_temp";
-    case SLEEP_PHASE_1:       return "phase_1_temp";
-    case SLEEP_PHASE_2:       return "phase_2_temp";
-    case SLEEP_PHASE_WAKEUP:  return "wakeup_temp";
-    default:                  return NULL;
-    }
-}
-
-// Commits one zone's compute_hold_until_min() result (§3) into the store —
-// see zone_state_t.hold_until_min's own comment for what it drives.
-typedef struct { zone_idx_t zone; int16_t hold_until_min; } hold_until_t;
-static void mut_hold_until(app_state_t *st, void *arg)
-{
-    hold_until_t *u = arg;
-    st->zones[u->zone].hold_until_min = u->hold_until_min;
-}
-
-static void mut_oauth_url(app_state_t *st, void *arg) { strlcpy(st->oauth_url, arg, sizeof(st->oauth_url)); }
 static void mut_retry_in(app_state_t *st, void *arg)  { st->retry_in_s = *(int *)arg; }
 static void mut_ap_ssid(app_state_t *st, void *arg)   { strlcpy(st->ap_ssid, arg, sizeof(st->ap_ssid)); }
 static void mut_sta_ssid(app_state_t *st, void *arg)  { strlcpy(st->sta_ssid, arg, sizeof(st->sta_ssid)); }
@@ -816,8 +477,8 @@ static dial_power_level_t s_ota_prev_pwr_level = DPWR_ACTIVE;
 // for the rest of the device's uptime.
 //
 // Field incident: this used to be the ONLY confirm path, reached solely via
-// "first successful Orion poll" below (and its steady-state twin) — 30-60+s
-// after boot, and hostage to Wi-Fi + TLS + OAuth + MCP + a poll ALL
+// "first successful pad poll" below (and its steady-state twin) — 30-60+s
+// after boot, and hostage to Wi-Fi + the pad + a poll ALL
 // succeeding. A user power-cycled inside that window and the bootloader
 // silently reverted a good install because it never got the chance to
 // confirm; worse, on a network outage post-update it could never confirm at
@@ -871,478 +532,46 @@ static bool s_ui_night;
 // s_ui_night's pattern, so the commit only fires on an actual transition.
 static bool s_ui_clock_valid;
 
-// Per-zone hold_until_min actually committed to the store (§3's pill),
-// mirroring s_ui_night's edge-triggered shape so a tick where neither zone's
-// value moved doesn't bump the generation for no reason. -2 (not a legal
-// minutes-from-midnight value, nor -1's "Holding") so the very first idle
-// tick always commits the real answer instead of assuming it agrees with
-// dial_state_init()'s -1 default.
-static int16_t s_ui_hold_until[ZONE_COUNT] = { -2, -2 };
+/* ---- Somnus pad calls (worker task only) -------------------------------- */
 
-/* ---- Orion MCP calls (worker task only) -------------------------------- */
+// zone_idx_t (ZONE_A=0/ZONE_B=1, dial_state.h) and somnus_side_t
+// (SOMNUS_SIDE_0=0/SOMNUS_SIDE_1=1, dial_somnus.h) are deliberately the same
+// small int enum shape, so a zone index casts straight to a pad side and
+// back — no id-string mapping to maintain, unlike Orion's "zone_a"/"zone_b".
 
-static char s_serial[16];
-
-// Set by orion_discover_device: list_devices answered (no transport/auth
-// failure) but the account has no topper registered at all. Distinct from
-// every other discovery failure, which is why the supervisor loop below
-// gives it its own phase_err instead of dial_mcp_last_error()'s generic text.
-static bool s_no_orion_devices;
-
-// zone -> Orion user uuid (list_devices zones[].user.id), captured once in
-// orion_discover_device. get_sleep_schedules keys its "schedules" object by
-// this same uuid, so it's how orion_refresh_schedules matches a schedule
-// entry back to a zone. Worker-side only — deliberately NOT in app_state_t
-// (dial_state stays lean; nothing outside the worker needs the raw uuid).
-static char s_zone_uuid[ZONE_COUNT][40];
-
-static zone_idx_t zone_idx_from_id(const char *id)
-{
-    return (id && strcmp(id, "zone_b") == 0) ? ZONE_B : ZONE_A;
-}
-
-// thermal_relief is an object|null field carried on a zone entry in three
-// response shapes: get_device_state's top-level zones[], and the
-// start/cancel_thermal_relief responses' zones[] — same shape every time.
-// Null/absent means no active relief on that zone.
-static void parse_thermal_relief(cJSON *zone_obj, zone_state_t *zs)
-{
-    cJSON *relief = cJSON_GetObjectItem(zone_obj, "thermal_relief");
-    if (!cJSON_IsObject(relief)) {
-        zs->relief_active = false;
-        return;
-    }
-    cJSON *type = cJSON_GetObjectItem(relief, "type");
-    cJSON *end  = cJSON_GetObjectItem(relief, "end_time");
-    cJSON *prev = cJSON_GetObjectItem(relief, "previous_temp");
-    cJSON *prev_on = cJSON_GetObjectItem(relief, "previous_on");
-    zs->relief_active       = true;
-    zs->relief_heat         = (type && type->valuestring && !strcmp(type->valuestring, "heat"));
-    zs->relief_end_ms       = cJSON_IsNumber(end) ? (int64_t)end->valuedouble : 0;
-    zs->relief_prev_temp_c  = cJSON_IsNumber(prev) ? (float)prev->valuedouble : zs->temp_c;
-    zs->relief_prev_on      = cJSON_IsBool(prev_on) ? cJSON_IsTrue(prev_on) : zs->on;
-}
-
-// Parser for start_thermal_relief / cancel_thermal_relief responses (shape:
-// relief_ack_t, above) — a subset of the get_device_state shape (no
-// status/actual-temp block), so only touch the fields this response carries.
-static bool parse_relief_ack(const char *json, relief_ack_t *out)
-{
-    cJSON *root = cJSON_Parse(json);
-    if (!root) return false;
-    cJSON *z;
-    cJSON_ArrayForEach(z, cJSON_GetObjectItem(root, "zones")) {
-        cJSON *id = cJSON_GetObjectItem(z, "id");
-        if (!id || !id->valuestring) continue;
-        zone_idx_t zi = zone_idx_from_id(id->valuestring);
-        zone_state_t *zs = &out->zones[zi];
-        cJSON *t = cJSON_GetObjectItem(z, "temp");
-        if (cJSON_IsNumber(t)) zs->temp_c = (float)t->valuedouble;
-        zs->on = cJSON_IsTrue(cJSON_GetObjectItem(z, "on"));
-        parse_thermal_relief(z, zs);
-        out->touched[zi] = true;
-    }
-    cJSON_Delete(root);
-    return true;
-}
-
-static bool orion_refresh_state(void)
+// Poll: GET /api/state (dial_somnus_get_state), copied into a device_snapshot_t
+// exactly like orion_refresh_state used to build one from get_device_state.
+static bool somnus_refresh_state(void)
 {
     int64_t started_us = esp_timer_get_time();
-    char args[48];
-    snprintf(args, sizeof(args), "{\"serial\":\"%s\"}", s_serial);
-    char *json = NULL;
-    if (!dial_mcp_call_tool("get_device_state", args, &json) || !json) return false;
-    cJSON *root = cJSON_Parse(json);
-    free(json);
-    if (!root) return false;
+    somnus_state_t s;
+    if (!dial_somnus_get_state(&s)) return false;
 
-    device_snapshot_t d = { .poll_started_us = started_us };
-    for (int z = 0; z < ZONE_COUNT; z++) d.zones[z].actual_c = -1.0f;
-    strlcpy(d.water_fill, "unknown", sizeof(d.water_fill));
-
-    cJSON *z;
-    cJSON_ArrayForEach(z, cJSON_GetObjectItem(root, "zones")) {
-        cJSON *id = cJSON_GetObjectItem(z, "id");
-        if (!id || !id->valuestring) continue;
-        // zones[] is the authority on how many sides this topper has: a
-        // single-zone model reports one entry (see app_state_t.zone_present).
-        zone_idx_t zi = zone_idx_from_id(id->valuestring);
-        d.present[zi] = true;
-        zone_state_t *zs = &d.zones[zi];
-        cJSON *t = cJSON_GetObjectItem(z, "temp");
-        if (cJSON_IsNumber(t)) zs->temp_c = (float)t->valuedouble;
-        zs->on = cJSON_IsTrue(cJSON_GetObjectItem(z, "on"));
-        parse_thermal_relief(z, zs);
+    device_snapshot_t d = { .poll_started_us = started_us, .online = true };
+    // Which side(s) are actually in play mirrors the pad's own zone-mode
+    // setting (see dial_somnus.h's single-zone note): in "One Bed" mode
+    // side1 mirrors side0's readings but can never be written to, so it must
+    // not be offered as an independent partner face (same reasoning as
+    // Orion's single-zone toppers before it — see app_state_t.zone_present).
+    bool single_zone = dial_somnus_get_zone_mode();
+    d.present[ZONE_A] = true;
+    d.present[ZONE_B] = !single_zone;
+    for (int z = 0; z < ZONE_COUNT; z++) {
+        const somnus_side_state_t *side = &s.side[z];
+        d.zones[z].on        = side->is_on;
+        d.zones[z].temp_c    = side->target_c;
+        d.zones[z].actual_c  = side->has_current ? side->current_c : -1.0f;
+        d.zones[z].water_low = side->water_low;
     }
-    // A response with no zones at all is not a single-zone device, it's a
-    // malformed/partial payload — don't let it collapse the UI to one face.
-    if (!d.present[ZONE_A] && !d.present[ZONE_B]) {
-        ESP_LOGW(TAG, "get_device_state returned no zones — ignoring this poll");
-        cJSON_Delete(root);
-        return false;
-    }
-
-    cJSON *status = cJSON_GetObjectItem(root, "status");
-    if (status) {
-        d.online = cJSON_IsTrue(cJSON_GetObjectItem(status, "online"));
-        cJSON_ArrayForEach(z, cJSON_GetObjectItem(status, "zones")) {
-            cJSON *id = cJSON_GetObjectItem(z, "id");
-            if (!id || !id->valuestring) continue;
-            zone_state_t *zs = &d.zones[zone_idx_from_id(id->valuestring)];
-            cJSON *t = cJSON_GetObjectItem(z, "temp");
-            if (cJSON_IsNumber(t)) zs->actual_c = (float)t->valuedouble;
-            cJSON *ts = cJSON_GetObjectItem(z, "thermal_state");
-            if (ts && ts->valuestring)
-                strlcpy(zs->thermal_state, ts->valuestring, sizeof(zs->thermal_state));
-        }
-        cJSON *safety = cJSON_GetObjectItem(status, "safety");
-        if (safety) {
-            d.safety_error = cJSON_IsTrue(cJSON_GetObjectItem(safety, "error"));
-            cJSON *descs = cJSON_GetObjectItem(safety, "error_descriptions");
-            cJSON *first = cJSON_IsArray(descs) ? cJSON_GetArrayItem(descs, 0) : NULL;
-            if (first && first->valuestring)
-                strlcpy(d.safety_desc, first->valuestring, sizeof(d.safety_desc));
-        }
-    }
-    cJSON *wf = cJSON_GetObjectItem(root, "water_fill");
-    if (wf && wf->valuestring) strlcpy(d.water_fill, wf->valuestring, sizeof(d.water_fill));
-    cJSON_Delete(root);
+    d.system_error = s.system_error;
 
     for (int z = 0; z < ZONE_COUNT; z++)
         if (d.present[z])
-            ESP_LOGI(TAG, "zone %s: on=%d thermal=%s set=%.1fC water=%.1fC",
-                     zone_id_str((zone_idx_t)z), d.zones[z].on,
-                     d.zones[z].thermal_state[0] ? d.zones[z].thermal_state : "(none)",
-                     d.zones[z].temp_c, d.zones[z].actual_c);
+            ESP_LOGI(TAG, "side %c: on=%d set=%.1fC water=%.1fC%s",
+                     'A' + z, d.zones[z].on, d.zones[z].temp_c, d.zones[z].actual_c,
+                     d.zones[z].water_low ? " LOW-WATER" : "");
 
     dial_state_commit(mut_device_state, &d);
-    return true;
-}
-
-static bool orion_set_zone(zone_idx_t zone, const char *field_json)
-{
-    char args[96];
-    snprintf(args, sizeof(args), "{\"serial\":\"%s\",\"zone_id\":\"%s\",%s}",
-             s_serial, zone_id_str(zone), field_json);
-    char *r = NULL;
-    bool ok = dial_mcp_call_tool("set_zone", args, &r);
-    if (!ok) ESP_LOGW(TAG, "set_zone %s failed: %s", field_json, dial_mcp_last_error());
-    free(r);
-    return ok;
-}
-
-// "Dial adjusts": which sleep-schedule phase (if any) a temp write for `zone`
-// should retarget right now. Every precondition must hold, or this returns
-// SLEEP_PHASE_NONE (the caller then falls back to a plain hold) — see the
-// worked list of preconditions in orion_set_temp's own comment below. Reads
-// s_zone_uuid (worker-side zone->uuid map, populated in orion_discover_device)
-// because override_sleep_schedule_tonight targets a specific Orion user_id —
-// with no captured uuid for this zone there is nothing safe to target.
-static sleep_phase_t temp_write_phase(const app_state_t *st, zone_idx_t zone)
-{
-    if (!st->sched_follow) return SLEEP_PHASE_NONE;
-    if (!s_zone_uuid[zone][0]) return SLEEP_PHASE_NONE;
-    struct tm lt;
-    if (!dial_time_now(&lt)) return SLEEP_PHASE_NONE;   // no real wall clock yet -- don't guess
-    return sleep_phase_now(&st->zones[zone], lt.tm_hour * 60 + lt.tm_min, NULL);
-}
-
-// UI mirror of temp_write_phase() (§3, scr_dial.c's status pill): the exact
-// same four preconditions (Follow schedule, a captured uuid for THIS zone, a
-// real clock, an active phase right now), so the pill reports the WRITE
-// PATH'S BEHAVIOUR rather than just echoing the Adjustment-mode preference —
-// Schedule mode with no active phase still falls back to a plain hold, and
-// this must say so too. -1 = "Holding"; otherwise the active phase's own end
-// boundary, in clock-minutes-from-midnight, for the pill's "Until H:MM".
-// `now_min` is passed in (not re-read via dial_time_now) so every zone this
-// tick agrees on exactly the same "now" the caller's night-window calc used.
-static int16_t compute_hold_until_min(const app_state_t *st, zone_idx_t zone, int now_min)
-{
-    if (!st->sched_follow) return -1;
-    if (!s_zone_uuid[zone][0]) return -1;
-    int boundary_min;
-    sleep_phase_t phase = sleep_phase_now(&st->zones[zone], now_min, &boundary_min);
-    return (phase == SLEEP_PHASE_NONE) ? -1 : (int16_t)boundary_min;
-}
-
-typedef struct {
-    zone_idx_t zone;
-    float      temp_c;
-    bool       used_override;   // OUT: true if this write went the schedule-override route
-} set_temp_args_t;
-
-// The temp write behind a knob turn / SCR_DIAL edit ("Dial adjusts", M8).
-// Follow schedule: if temp_write_phase() finds a phase actually active right
-// now, retarget ONLY that phase's own temp field via
-// override_sleep_schedule_tonight (never bedtime/wakeup times, never the
-// other phase's temp — sending more than the one field would silently move
-// the rest of the schedule too) — this leaves the schedule engine in control
-// of tonight's later phases, matching the Orion app. Hold tonight, no usable
-// schedule, smart-temp off, outside the window, or no captured uuid — any of
-// those makes temp_write_phase return NONE — falls straight to the plain
-// set_zone hold, unchanged from pre-M8 behavior. And if the override call
-// itself fails for any reason, this still falls back to set_zone rather than
-// silently dropping the write: a missed override is a minor annoyance, but a
-// dropped knob turn (or a wrong-field write at 3am) is not.
-static bool orion_set_temp(void *arg)
-{
-    set_temp_args_t *a = arg;
-    a->used_override = false;
-
-    app_state_t st;
-    dial_state_get(&st);
-    const char *field = sleep_phase_field(temp_write_phase(&st, a->zone));
-
-    if (field) {
-        char args[160];
-        snprintf(args, sizeof(args), "{\"user_id\":\"%s\",\"fields\":{\"%s\":%.1f}}",
-                 s_zone_uuid[a->zone], field, a->temp_c);
-        char *r = NULL;
-        bool ok = dial_mcp_call_tool("override_sleep_schedule_tonight", args, &r);
-        free(r);
-        if (ok) { a->used_override = true; return true; }
-        ESP_LOGW(TAG, "override_sleep_schedule_tonight (%s) failed, falling back to set_zone: %s",
-                 field, dial_mcp_last_error());
-        // fall through to the plain hold below
-    }
-
-    char f[32];
-    snprintf(f, sizeof(f), "\"temp\":%.1f", a->temp_c);
-    return orion_set_zone(a->zone, f);
-}
-
-// Commits the start/cancel_thermal_relief response via mut_relief_ack (an
-// ack-commit, not a poll — see that mutator's comment). Shared by both calls
-// below since the response shape is identical.
-static void commit_relief_response(const char *json)
-{
-    relief_ack_t ack = { 0 };
-    if (parse_relief_ack(json, &ack)) dial_state_commit(mut_relief_ack, &ack);
-}
-
-typedef struct { zone_idx_t zone; bool heat; int minutes; } boost_args_t;
-static bool orion_boost(void *arg)
-{
-    boost_args_t *b = arg;
-    char args[128];
-    snprintf(args, sizeof(args),
-             "{\"serial\":\"%s\",\"type\":\"%s\",\"zones\":[\"%s\"],\"duration_minutes\":%d}",
-             s_serial, b->heat ? "heat" : "cool", zone_id_str(b->zone), b->minutes);
-    char *r = NULL;
-    bool ok = dial_mcp_call_tool("start_thermal_relief", args, &r);
-    if (ok && r) commit_relief_response(r);
-    else         ESP_LOGW(TAG, "start_thermal_relief failed: %s", dial_mcp_last_error());
-    free(r);
-    return ok;
-}
-
-static bool orion_boost_cancel(void *arg)
-{
-    (void)arg;
-    char args[48];
-    snprintf(args, sizeof(args), "{\"serial\":\"%s\"}", s_serial);
-    char *r = NULL;
-    bool ok = dial_mcp_call_tool("cancel_thermal_relief", args, &r);
-    if (ok && r) commit_relief_response(r);
-    else         ESP_LOGW(TAG, "cancel_thermal_relief failed: %s", dial_mcp_last_error());
-    free(r);
-    return ok;
-}
-
-
-typedef struct { bool away; } away_args_t;
-static bool orion_set_away(void *arg)
-{
-    away_args_t *a = arg;
-    char args[32];
-    snprintf(args, sizeof(args), "{\"is_away\":%s}", a->away ? "true" : "false");
-    char *r = NULL;
-    bool ok = dial_mcp_call_tool("set_away", args, &r);
-    if (!ok) ESP_LOGW(TAG, "set_away failed: %s", dial_mcp_last_error());
-    free(r);
-    return ok;
-}
-
-static bool orion_discover_device(void)
-{
-    s_no_orion_devices = false;
-    char *devices = NULL;
-    if (!dial_mcp_call_tool("list_devices", "{}", &devices) || !devices) return false;
-
-    cJSON *root = cJSON_Parse(devices);
-    free(devices);
-    if (!root) return false;
-
-    bool ok = false;
-    cJSON *arr  = cJSON_GetObjectItem(root, "devices");
-    cJSON *dev0 = cJSON_IsArray(arr) ? cJSON_GetArrayItem(arr, 0) : NULL;
-    if (!dev0 && cJSON_IsArray(arr)) {
-        // list_devices is a well-formed, successful answer — the account
-        // just doesn't have a topper on it yet. Not a transport/auth error,
-        // so it shouldn't spin in the generic "unreachable" backoff forever.
-        s_no_orion_devices = true;
-    }
-    if (dev0) {
-        cJSON *serial = cJSON_GetObjectItem(dev0, "serial_number");
-        if (serial && serial->valuestring) {
-            strlcpy(s_serial, serial->valuestring, sizeof(s_serial));
-            ok = true;
-        }
-        cJSON *tz = cJSON_GetObjectItem(dev0, "timezone");
-        if (tz && tz->valuestring)
-            dial_time_set_iana_tz(tz->valuestring);
-
-        device_identity_t ident = { 0 };
-        ident.temp_min_f = ident.temp_max_f = -1;   // set below only if temperature_range parses
-        strlcpy(ident.serial, s_serial, sizeof(ident.serial));
-        cJSON *zn;
-        cJSON_ArrayForEach(zn, cJSON_GetObjectItem(dev0, "zones")) {
-            cJSON *id = cJSON_GetObjectItem(zn, "id");
-            cJSON *user = cJSON_GetObjectItem(zn, "user");
-            if (!id || !id->valuestring) continue;
-            zone_idx_t zi = zone_idx_from_id(id->valuestring);
-            cJSON *fn = user ? cJSON_GetObjectItem(user, "first_name") : NULL;
-            if (fn && fn->valuestring)
-                strlcpy(ident.names[zi], fn->valuestring, sizeof(ident.names[0]));
-            // Captured for orion_refresh_schedules (M5): get_sleep_schedules
-            // keys its per-user entries by this same uuid.
-            cJSON *uid = user ? cJSON_GetObjectItem(user, "id") : NULL;
-            if (uid && uid->valuestring)
-                strlcpy(s_zone_uuid[zi], uid->valuestring, sizeof(s_zone_uuid[0]));
-        }
-
-        // Relative-scale tripwire. Our −10…+10 tables (dial_state.h) are
-        // compiled constants: relative mode is a client-side view, and Orion's
-        // set_zone only takes °C, so there is nothing to adopt at runtime. But
-        // if Orion ever reshapes temperature_scale.relative or its range, the
-        // dial would silently show wrong levels. Re-validate the live payload
-        // against the compiled tables and log LOUDLY on any mismatch — a
-        // release-blocking signal to regenerate the tables, NOT a runtime
-        // adoption (which would mean the worker mutating tables the LVGL task
-        // reads). Log-only; touches no state, bumps no generation.
-        cJSON *scale = cJSON_GetObjectItem(dev0, "temperature_scale");
-        cJSON *rel   = scale ? cJSON_GetObjectItem(scale, "relative") : NULL;
-        if (cJSON_IsArray(rel)) {
-            int n = cJSON_GetArraySize(rel), mismatch = 0;
-            if (n != 21)
-                ESP_LOGE(TAG, "relative scale has %d entries, expected 21 — compiled table is stale", n);
-            cJSON *e;
-            cJSON_ArrayForEach(e, rel) {
-                cJSON *in  = cJSON_GetObjectItem(e, "in");
-                cJSON *out = cJSON_GetObjectItem(e, "out");
-                if (!cJSON_IsNumber(in) || !cJSON_IsNumber(out)) continue;
-                int lvl = in->valueint;
-                int got = dial_rel_from_f(dial_c_to_f((float)out->valuedouble));
-                if (got != lvl) {
-                    mismatch++;
-                    ESP_LOGE(TAG, "relative scale MISMATCH: level %d = %.1f C maps to our level %d "
-                                  "-- regenerate DIAL_REL_F/DIAL_REL_LO_F", lvl, out->valuedouble, got);
-                }
-            }
-            if (n == 21 && mismatch == 0)
-                ESP_LOGD(TAG, "relative scale table matches compiled DIAL_REL");
-        } else {
-            ESP_LOGW(TAG, "list_devices has no temperature_scale.relative -- "
-                          "relative mode uses the compiled fallback table");
-        }
-        // Device-reported ABSOLUTE range (owner: use Orion's own min/max, not
-        // a hardcoded guess) -- captured into ident.temp_min_f/max_f below,
-        // committed via mut_identity, and read everywhere absolute mode needs
-        // it through dial_state_temp_min_f()/_max_f() (dial_state.h). The
-        // lo/hi != DIAL_REL_MIN_F/MAX_F check right after is a SEPARATE
-        // concern (unchanged): it's the relative-scale tripwire validating
-        // the compiled DIAL_REL_F/DIAL_REL_LO_F level table, not this range.
-        cJSON *range = cJSON_GetObjectItem(dev0, "temperature_range");
-        if (range) {
-            cJSON *mn = cJSON_GetObjectItem(range, "min");
-            cJSON *mx = cJSON_GetObjectItem(range, "max");
-            if (cJSON_IsNumber(mn) && cJSON_IsNumber(mx)) {
-                int lo = dial_c_to_f((float)mn->valuedouble);
-                int hi = dial_c_to_f((float)mx->valuedouble);
-                ident.temp_min_f = lo;
-                ident.temp_max_f = hi;
-                if (lo != DIAL_REL_MIN_F || hi != DIAL_REL_MAX_F)
-                    ESP_LOGE(TAG, "temperature_range %.0f-%.0f C = %d-%d F != relative rails %d-%d F",
-                             mn->valuedouble, mx->valuedouble, lo, hi, DIAL_REL_MIN_F, DIAL_REL_MAX_F);
-            }
-        }
-
-        if (ok) dial_state_commit(mut_identity, &ident);
-    }
-    cJSON_Delete(root);
-    return ok;
-}
-
-// get_sleep_schedules {} returns {schedules: {"<uuid>": [ {day:0-6, bedtime,
-// bedtime_temp, wakeup, wakeup_temp, is_override_available,
-// is_override_applied, ...} x7 ]}} — one entry per user uuid. The override
-// flags are documented here because the response carries them, but nothing
-// reads them since the Tonight face was removed; they are deliberately not
-// parsed. Pulls out
-// TODAY's entry (day == dial_time_now's tm_wday) per zone, matched via
-// s_zone_uuid. Requires a valid clock (to know which weekday "today" is);
-// skips silently if the clock isn't set yet, same as the rest of the app
-// treats an unsynced SNTP as "wait, don't guess".
-static bool orion_refresh_schedules(void)
-{
-    struct tm lt;
-    if (!dial_time_now(&lt)) return false;
-    // "Tonight" belongs to the evening it started: before noon we're still in
-    // (or just out of) the sleep session that began YESTERDAY evening, so key
-    // by the previous weekday then. Otherwise, at 00:15 the half-hourly
-    // refresh would clobber the governing schedule with the next day's entry
-    // — e.g. an early-wake Tuesday would end night mode at 05:30 during
-    // Monday night's 07:00 session. Noon is the natural session boundary.
-    int today = lt.tm_wday;
-    if (lt.tm_hour < 12) today = (today + 6) % 7;
-
-    char *json = NULL;
-    if (!dial_mcp_call_tool("get_sleep_schedules", "{}", &json) || !json) return false;
-    cJSON *root = cJSON_Parse(json);
-    free(json);
-    if (!root) return false;
-
-    sched_snapshot_t sc = { 0 };
-    cJSON *schedules = cJSON_GetObjectItem(root, "schedules");
-    if (cJSON_IsObject(schedules)) {
-        for (int z = 0; z < ZONE_COUNT; z++) {
-            if (!s_zone_uuid[z][0]) continue;
-            cJSON *arr = cJSON_GetObjectItem(schedules, s_zone_uuid[z]);
-            if (!cJSON_IsArray(arr)) continue;
-            cJSON *entry;
-            cJSON_ArrayForEach(entry, arr) {
-                cJSON *day = cJSON_GetObjectItem(entry, "day");
-                if (!cJSON_IsNumber(day) || (int)day->valuedouble != today) continue;
-
-                sched_zone_t *zs = &sc.zones[z];
-                zs->valid = true;
-                cJSON *bt  = cJSON_GetObjectItem(entry, "bedtime");
-                cJSON *btt = cJSON_GetObjectItem(entry, "bedtime_temp");
-                cJSON *wk  = cJSON_GetObjectItem(entry, "wakeup");
-                cJSON *wkt = cJSON_GetObjectItem(entry, "wakeup_temp");
-                if (bt && bt->valuestring) strlcpy(zs->bedtime, bt->valuestring, sizeof(zs->bedtime));
-                if (cJSON_IsNumber(btt)) zs->bedtime_temp_c = (float)btt->valuedouble;
-                if (wk && wk->valuestring) strlcpy(zs->wakeup, wk->valuestring, sizeof(zs->wakeup));
-                if (cJSON_IsNumber(wkt)) zs->wakeup_temp_c = (float)wkt->valuedouble;
-
-                // "Dial adjusts" (M8) phase fields — see sleep_phase_now()'s
-                // comment above for what these mean.
-                zs->smart_temp_active = cJSON_IsTrue(cJSON_GetObjectItem(entry, "is_smart_temperature_active"));
-                cJSON *p1o = cJSON_GetObjectItem(entry, "phase_1_offset_minutes");
-                cJSON *p1t = cJSON_GetObjectItem(entry, "phase_1_temp");
-                cJSON *p2o = cJSON_GetObjectItem(entry, "phase_2_offset_minutes");
-                cJSON *p2t = cJSON_GetObjectItem(entry, "phase_2_temp");
-                if (cJSON_IsNumber(p1o)) zs->phase1_offset_min = (int)p1o->valuedouble;
-                if (cJSON_IsNumber(p1t)) zs->phase1_temp_c     = (float)p1t->valuedouble;
-                if (cJSON_IsNumber(p2o)) zs->phase2_offset_min = (int)p2o->valuedouble;
-                if (cJSON_IsNumber(p2t)) zs->phase2_temp_c     = (float)p2t->valuedouble;
-                break;   // one entry per day
-            }
-        }
-    }
-    cJSON_Delete(root);
-    dial_state_commit(mut_schedules, &sc);
     return true;
 }
 
@@ -1359,52 +588,6 @@ static void backoff_wait(int seconds)
     dial_state_commit(mut_retry_in, &zero);
 }
 
-// Consecutive refresh failures classified PERMANENT (dial_oauth_last_token_err_
-// permanent -- RFC 6749 §5.2 invalid_grant). Two in a row, not one, so a single
-// server-side fluke can't force a re-link; reset on any success or
-// transient-classified failure. Steady state only calls with_auth_retry every
-// ~10s (poll) or on a rare write, so two hits is at most ~20s to recover.
-static int s_perm_refresh_failures = 0;
-
-// 401-aware call wrapper: on failure, refresh the token, reopen the MCP
-// session, retry once. Used for polls AND writes so an expired token never
-// silently drops a command. If the refresh token itself is dead (not just
-// this call), that never clears on its own -- after two consecutive
-// permanent-classified refresh failures, forget the tokens and reboot into
-// the QR consent screen, exactly like the manual CMD_RELINK path, instead of
-// presenting the same dead token forever.
-static bool with_auth_retry(bool (*call)(void *), void *arg,
-                            const oauth_disc_t *disc, const char *client_id)
-{
-    if (call(arg)) { s_perm_refresh_failures = 0; return true; }
-    if (dial_oauth_refresh(disc, client_id)) {
-        s_perm_refresh_failures = 0;
-        dial_oauth_release_connection();   // one connection to the host at a time
-        dial_mcp_connect(NULL);
-        return call(arg);
-    }
-    if (dial_oauth_last_token_err_permanent()) {
-        if (++s_perm_refresh_failures >= 2) {
-            ESP_LOGE(TAG, "refresh token permanently rejected (x%d) — re-linking", s_perm_refresh_failures);
-            dial_oauth_forget();
-            esp_restart();
-        }
-    } else {
-        s_perm_refresh_failures = 0;   // transient -- e.g. network/5xx -- don't count it
-    }
-    return false;
-}
-
-static bool poll_call(void *arg) { (void)arg; return orion_refresh_state(); }
-static bool sched_call(void *arg) { (void)arg; return orion_refresh_schedules(); }
-
-typedef struct { zone_idx_t zone; const char *field_json; } set_zone_args_t;
-static bool set_zone_call(void *arg)
-{
-    set_zone_args_t *a = arg;
-    return orion_set_zone(a->zone, a->field_json);
-}
-
 // dial_ota_download_and_apply's progress callback: fires on every
 // esp_https_ota_perform() iteration (every ~4KB read), far too often to
 // commit unthrottled — a store commit bumps the generation and triggers a
@@ -1418,100 +601,16 @@ static void ota_progress_cb(int pct)
     commit_ota_snapshot();
 }
 
-// CMD_BOOST_START/CANCEL and CMD_AWAY are rare (a deliberate
-// tap on a boost icon/pill/settings row, not a knob spin) — no coalescing,
-// just run them in arrival order.
-static void handle_immediate_cmd(const app_cmd_t *cmd, const oauth_disc_t *disc,
-                                  const char *client_id)
+// The remaining non-SET_TEMP/TOGGLE_ON commands are rare (a deliberate tap on
+// a Settings row, not a knob spin) — no coalescing, just run them in arrival
+// order. No auth to retry here (dial_somnus is a plain unauthenticated local
+// client), unlike the Orion with_auth_retry() this replaces.
+static void handle_immediate_cmd(const app_cmd_t *cmd)
 {
     switch (cmd->kind) {
-    case CMD_BOOST_START: {
-        dial_power_inhibit(DPWR_INHIBIT_TASK, true);
-        boost_args_t b = { cmd->zone, cmd->a != 0, cmd->b };
-
-        // Optimistic (owner-reported: boost was the one control that didn't
-        // react until the whole MCP round trip landed, sometimes 10-20s) —
-        // commit the requested relief state BEFORE issuing the call, exactly
-        // like dial_state_set_zone_on does for the power disc, so the chip
-        // (and SCR_BOOST's hand-off back to the dial face) shows the
-        // countdown on this same tick. end_ms uses the wall clock (time(),
-        // matching how scr_dial.c's pill computes remain_ms), not
-        // esp_timer_get_time() — harmless even before clock_valid, since the
-        // pill only renders a countdown once the clock is valid anyway.
-        // mut_relief_ack (inside orion_boost, on success) is the normal
-        // settling point — see RELIEF_OPTIMISTIC_WINDOW_US's comment for how
-        // it and the next poll avoid fighting this guess in the meantime; on
-        // failure below, revert to exactly what was showing before the tap.
-        app_state_t pre;
-        dial_state_get(&pre);
-        relief_optimistic_t opt = {
-            .zone = cmd->zone, .active = true, .heat = b.heat,
-            .end_ms = (int64_t)time(NULL) * 1000 + (int64_t)b.minutes * 60000,
-            .prev_temp_c = pre.zones[cmd->zone].temp_c,
-            .optimistic = true,
-        };
-        dial_state_commit(mut_relief_optimistic, &opt);
-
-        if (!with_auth_retry(orion_boost, &b, disc, client_id)) {
-            relief_optimistic_t revert = {
-                .zone = cmd->zone,
-                .active = pre.zones[cmd->zone].relief_active,
-                .heat = pre.zones[cmd->zone].relief_heat,
-                .end_ms = pre.zones[cmd->zone].relief_end_ms,
-                .prev_temp_c = pre.zones[cmd->zone].relief_prev_temp_c,
-                .optimistic = false,
-            };
-            dial_state_commit(mut_relief_optimistic, &revert);
-        }
-        dial_power_inhibit(DPWR_INHIBIT_TASK, false);
-        break;
-    }
-    case CMD_BOOST_CANCEL:
-        dial_power_inhibit(DPWR_INHIBIT_TASK, true); {
-        // Optimistic, mirroring START above — and, like the underlying
-        // cancel_thermal_relief call itself (no zone arg — see cmd_kind_t's
-        // comment), applied to BOTH zones: whichever one actually had relief
-        // running clears now; the other is already inactive, so clearing it
-        // too is a no-op.
-        app_state_t pre;
-        dial_state_get(&pre);
-        for (int z = 0; z < ZONE_COUNT; z++) {
-            relief_optimistic_t opt = { .zone = (zone_idx_t)z, .optimistic = true };
-            dial_state_commit(mut_relief_optimistic, &opt);
-        }
-        if (!with_auth_retry(orion_boost_cancel, NULL, disc, client_id)) {
-            for (int z = 0; z < ZONE_COUNT; z++) {
-                relief_optimistic_t revert = {
-                    .zone = (zone_idx_t)z,
-                    .active = pre.zones[z].relief_active,
-                    .heat = pre.zones[z].relief_heat,
-                    .end_ms = pre.zones[z].relief_end_ms,
-                    .prev_temp_c = pre.zones[z].relief_prev_temp_c,
-                    .optimistic = false,
-                };
-                dial_state_commit(mut_relief_optimistic, &revert);
-            }
-        }
-        dial_power_inhibit(DPWR_INHIBIT_TASK, false);
-        break;
-    }
-    case CMD_AWAY: {
-        dial_power_inhibit(DPWR_INHIBIT_TASK, true);
-        bool away = cmd->a != 0;
-        away_args_t a = { away };
-        if (with_auth_retry(orion_set_away, &a, disc, client_id))
-            dial_state_commit(mut_away, &away);
-        dial_power_inhibit(DPWR_INHIBIT_TASK, false);
-        break;
-    }
     // Settings (M4) destructive actions: each erases some NVS state and
     // reboots — there's no follow-up state commit because esp_restart()
     // never returns.
-    case CMD_RELINK:
-        ESP_LOGW(TAG, "settings: re-link requested — clearing Orion tokens");
-        dial_oauth_forget();
-        esp_restart();
-        break;
     case CMD_WIFI_RESET:
         ESP_LOGW(TAG, "settings: change-network requested — rebooting into the setup portal");
         dial_net_request_setup();
@@ -1541,10 +640,10 @@ static void handle_immediate_cmd(const app_cmd_t *cmd, const oauth_disc_t *disc,
         // does NOT do this; only a deliberate tap.
         dial_state_set_ota_defer(0);
         dial_state_set_ota_shown(0);
-        // One TLS session at a time (see dial_mcp_release_connection): the
+        // One connection at a time (see dial_somnus_release_connection): the
         // OTA client is about to open its own connection to GitHub, and a
-        // second concurrent session fails its handshake on this build.
-        dial_mcp_release_connection();
+        // second concurrent TLS session fails its handshake on this build.
+        dial_somnus_release_connection();
         // Hold the screen for the duration: the user tapped this and is
         // waiting on the answer. Released in the same handler below, which
         // restarts the idle clock so the result is readable even on a 5s
@@ -1589,11 +688,10 @@ static void handle_immediate_cmd(const app_cmd_t *cmd, const oauth_disc_t *disc,
         s_ota_auto_fail_count = 0;
         s_ota_auto_fail_ver[0] = 0;
         s_ota_last_committed_pct = -100;   // guarantee the first progress commit fires
-        // Both clients hand their sockets back: the downloader opens its own
-        // TLS session with bigger buffers, and it should not have to compete
-        // with either of ours for memory (see dial_mcp_release_connection).
-        dial_mcp_release_connection();
-        dial_oauth_release_connection();
+        // Hands the socket back: the downloader opens its own TLS session
+        // with bigger buffers, and it should not have to compete with the
+        // pad client for memory (see dial_somnus_release_connection).
+        dial_somnus_release_connection();
         bool attended = false;
         dial_state_commit(mut_ota_unattended, &attended);
         bool ok = dial_ota_download_and_apply(ota_progress_cb);
@@ -1617,56 +715,16 @@ static void handle_immediate_cmd(const app_cmd_t *cmd, const oauth_disc_t *disc,
     }
 }
 
-/* ---- mDNS ---------------------------------------------------------------
- * A stable orion-dial-xxxxxx.local hostname stands in for the DHCP IP in the
- * OAuth redirect_uri below. An IP-based redirect_uri silently invalidates the
- * registered OAuth client the moment the router hands out a new lease — the
- * DCR client_id is registered per redirect_uri, so a changed IP meant a
- * changed URI, which meant dial_oauth_ensure_client's cache-compare (below)
- * quietly re-registered a NEW client and orphaned the one the user had
- * already consented to, forcing them back through the QR flow. This bit the
- * owner repeatedly. mDNS names don't change with the lease, so once
- * registered this class of forced re-link can't happen again.
- *
- * Phones resolve ".local" out of the box — Bonjour on iOS/macOS, NSD on
- * Android — with no app install, which is exactly what's on hand to scan the
- * on-screen QR, so it's the right redirect host for this flow.
- */
-static bool s_mdns_ok;
-
-// Registered once, right after Wi-Fi comes up and BEFORE the OAuth callback
-// server (dial_oauth_start_authorize, which the redirect_uri built below
-// points at) ever starts — see worker_task's call site. If registration
-// itself fails (some networks block/filter multicast), s_mdns_ok stays false
-// and every redirect_uri build below falls back to the old IP-based form, so
-// a network like that can still onboard, just without this fix.
-static void mdns_bringup(void)
-{
-    esp_err_t err = mdns_init();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mdns_init failed (%s) -- OAuth redirect_uri will fall back to the DHCP IP",
-                 esp_err_to_name(err));
-        return;
-    }
-    mdns_hostname_set(dial_net_hostname());
-    mdns_instance_name_set("Orion Dial");
-    s_mdns_ok = true;
-    ESP_LOGI(TAG, "mDNS up: %s.local", dial_net_hostname());
-}
 
 static void worker_task(void *arg)
 {
     (void)arg;
-    oauth_disc_t disc;
-    char client_id[96];
     int backoff_s = BACKOFF_MIN_S;
-    int prep_fast_retries = 0;   // see PREP_FAST_RETRIES: fast, quiet retries for
-                                 // the pre-QR discovery + registration steps
 
     /*
      * Input comes up FIRST, before the network.
      *
-     * These used to be initialised after Wi-Fi, OAuth, the MCP connect and the
+     * These used to be initialised after Wi-Fi, the pad connect and the
      * first poll had all succeeded — which meant that during Wi-Fi setup the
      * encoder callbacks did not exist yet and the knob was simply dead. That
      * was survivable when setup was "scan a QR with your phone", and fatal the
@@ -1691,142 +749,47 @@ static void worker_task(void *arg)
     // ---- Wi-Fi (blocking bringup; portal phase published via events) ----
     dial_state_set_phase(PH_WIFI_CONNECTING, NULL);
     dial_net_bringup();
-    // Bringup only returns once connected, so this is the home network's real
-    // name -- SCR_OAUTH_QR names it explicitly (the callback that finishes
-    // linking is a LAN redirect to the dial; a phone on cellular or a guest
-    // network can never deliver it, and that trap has already cost a real
-    // debugging session -- see the QR screen's own comment).
     dial_state_commit(mut_sta_ssid, (void *)dial_net_sta_ssid());
     dial_time_start();
-    mdns_bringup();   // BEFORE the OAuth callback server (below) ever starts
 
-    // ---- OAuth + MCP with retry/backoff on every step ----
+    // ---- Somnus pad connect, with retry/backoff -----------------------
+    // No discovery, no auth, no interactive consent (see dial_somnus.h): a
+    // single reachability probe against the compiled-default base URL. No
+    // on-device Settings row exists yet to change the base URL/zone mode
+    // from the dial itself; both are the pad's compiled defaults until one
+    // is added.
     for (;;) {
-        dial_state_set_phase(PH_OAUTH_DISCOVER, NULL);
-
-        char ip[16], redirect_uri[48];
-        if (!dial_net_ip(ip, sizeof(ip))) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
-        // An ALREADY-LINKED device keeps whatever redirect_uri its client was
-        // registered with, even the old DHCP-IP form. Registration is
-        // per-redirect_uri, so adopting the new hostname here would mint a
-        // fresh client_id and strand the stored refresh token ("Client ID
-        // mismatch"), forcing every updating user through the QR flow — a
-        // fleet-wide re-link as the price of a fix they didn't ask for.
-        // Only an unlinked device (fresh, factory-reset, or already
-        // re-linking) adopts the mDNS hostname. Everyone else migrates for
-        // free the next time they re-link for their own reasons.
-        if (!dial_oauth_cached_redirect(redirect_uri, sizeof(redirect_uri))) {
-            // Stable hostname when mDNS came up; the DHCP IP (documented
-            // fallback) only when it didn't — see mdns_bringup()'s comment.
-            if (s_mdns_ok)
-                snprintf(redirect_uri, sizeof(redirect_uri), "http://%s.local/callback", dial_net_hostname());
-            else
-                snprintf(redirect_uri, sizeof(redirect_uri), "http://%s/callback", ip);
-        }
-
-        if (!dial_oauth_discover(&disc) ||
-            !dial_oauth_ensure_client(&disc, redirect_uri, client_id, sizeof(client_id))) {
-            // Keep the reassuring "Linking to Orion..." (PH_OAUTH_DISCOVER, set at
-            // the top of the loop) and retry quickly for the first few misses —
-            // the warmup window after a fresh association — only then falling into
-            // the slow, user-visible "Orion unreachable" backoff. See PREP_FAST_RETRIES.
-            if (++prep_fast_retries <= PREP_FAST_RETRIES) {
-                vTaskDelay(pdMS_TO_TICKS(PREP_RETRY_MS));
-                continue;
-            }
-            // A stale trust anchor fails right here (discovery is the first
-            // HTTPS call after Wi-Fi) — a device rebooting years from now must
-            // say so honestly instead of "Orion unreachable" (see DIAL_CERT_ERR_MSG).
-            dial_state_set_phase(PH_DEGRADED,
-                dial_oauth_last_err_cert() ? DIAL_CERT_ERR_MSG : "Orion unreachable");
-            backoff_wait(backoff_s);
-            backoff_s = (backoff_s * 2 > BACKOFF_MAX_S) ? BACKOFF_MAX_S : backoff_s * 2;
-            continue;
-        }
-        prep_fast_retries = 0;   // prep steps went through; re-arm fast retry for any later pass
-
-        if (!dial_oauth_have_valid_access() && !dial_oauth_refresh(&disc, client_id)) {
-            // Interactive consent: QR on screen; on timeout, a fresh QR — no dead end.
-            char url[600];
-            if (!dial_oauth_start_authorize(&disc, client_id, redirect_uri, url, sizeof(url))) {
-                dial_state_set_phase(PH_DEGRADED,
-                    dial_oauth_last_err_cert() ? DIAL_CERT_ERR_MSG : dial_oauth_last_error());
-                backoff_wait(backoff_s);
-                continue;
-            }
-            dial_state_commit(mut_oauth_url, url);
-            dial_state_set_phase(PH_OAUTH_WAIT_CONSENT, NULL);
-            bool ok = dial_oauth_finish_authorize(&disc, client_id, redirect_uri, 300000);
-            dial_oauth_stop_authorize();
-            if (!ok) {
-                ESP_LOGW(TAG, "consent window elapsed (%s) — restarting authorize",
-                         dial_oauth_last_error());
-                continue;
-            }
-        }
-
-        dial_state_set_phase(PH_MCP_CONNECTING, NULL);
-        dial_oauth_release_connection();   // one connection to the host at a time
-        bool linked = dial_mcp_connect(NULL) && orion_discover_device();
-        // A bare, well-formed empty device list is an account problem, not a
-        // token problem — skip the refresh/re-link dance below and go
-        // straight to reporting it (still with the same retry/backoff, so a
-        // device added later is picked up on a subsequent pass).
-        if (!linked && !s_no_orion_devices) {
-            // The token can be dead server-side while still looking usable here:
-            // dial_oauth_have_valid_access() reports that an access token EXISTS,
-            // not that it's still good, and the whole design leans on refreshing
-            // when a call comes back 401. Reads and writes get that from
-            // with_auth_retry — this first connect never did, so an expired or
-            // revoked token produced "Orion unreachable", a backoff, and then a
-            // loop that skipped the refresh branch again on every pass, forever.
-            // Force one refresh and retry.
-            if (dial_oauth_refresh(&disc, client_id)) {
-                linked = dial_mcp_connect(NULL) && orion_discover_device();
-            } else if (dial_oauth_last_token_err_permanent()) {
-                // The refresh token is dead too (RFC 6749 §5.2 invalid_grant).
-                // Drop the stale access token so the next pass falls through to
-                // interactive consent (the QR) rather than spinning on
-                // credentials that can never work again.
-                ESP_LOGW(TAG, "refresh permanently rejected — re-linking");
-                dial_oauth_forget_access();
-            } else {
-                // Transient (network/5xx/etc): leave tokens alone and just fall
-                // into the same backoff/retry as any other connect failure below.
-                ESP_LOGW(TAG, "refresh failed (transient) — will retry");
-            }
-        }
-        if (!linked) {
-            dial_state_set_phase(PH_DEGRADED, s_no_orion_devices
-                ? "No Orion device on this account. Add your topper in the Orion app, then retry."
-                : (dial_mcp_last_err_cert() ? DIAL_CERT_ERR_MSG : dial_mcp_last_error()));
-            backoff_wait(backoff_s);
-            backoff_s = (backoff_s * 2 > BACKOFF_MAX_S) ? BACKOFF_MAX_S : backoff_s * 2;
-            continue;
-        }
-        backoff_s = BACKOFF_MIN_S;
-        break;
+        dial_state_set_phase(PH_SOMNUS_CONNECTING, NULL);
+        if (dial_somnus_connect(SOMNUS_DEFAULT_BASE_URL)) break;
+        dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
+        backoff_wait(backoff_s);
+        backoff_s = (backoff_s * 2 > BACKOFF_MAX_S) ? BACKOFF_MAX_S : backoff_s * 2;
     }
-    ESP_LOGI(TAG, "device linked; %d tools", dial_mcp_list_tools_count());
+    backoff_s = BACKOFF_MIN_S;
+    dial_somnus_set_zone_mode(SOMNUS_DEFAULT_SINGLE_ZONE_MODE);
+    ESP_LOGI(TAG, "pad connected at %s", SOMNUS_DEFAULT_BASE_URL);
 
-    bool first_poll_ok = with_auth_retry(poll_call, NULL, &disc, client_id);
-    with_auth_retry(sched_call, NULL, &disc, client_id);   // M5: today's schedule, once up front
+    // Fixed pad range (local_api spec, dial_somnus.h) — no discovery call to
+    // report it, unlike Orion's list_devices, so seed it once here instead
+    // of per-poll.
+    {
+        temp_range_t range = { dial_c_to_f(12.0f), dial_c_to_f(42.3f) };
+        dial_state_commit(mut_temp_range, &range);
+    }
+
+    bool first_poll_ok = somnus_refresh_state();
     dial_state_set_phase(PH_READY, NULL);
     // OTA rollback health check (M6): reaching here with a successful poll
-    // proves Wi-Fi + TLS + OAuth + MCP + real device state all work on this
-    // image -- cancel the bootloader's pending-verify rollback timer if this
-    // boot came from an OTA install. (Also re-tried on the first successful
-    // poll in the steady-state loop below, in case this exact poll hit a
+    // proves Wi-Fi + the pad + real device state all work on this image --
+    // cancel the bootloader's pending-verify rollback timer if this boot
+    // came from an OTA install. (Also re-tried on the first successful poll
+    // in the steady-state loop below, in case this exact poll hit a
     // transient failure -- ota_confirm_once() only ever does real work once.)
     if (first_poll_ok) ota_confirm_once();
 
     // ---- steady state: drain commands (coalescing per zone), gated poll ----
     int64_t last_poll_us      = esp_timer_get_time();
     int     poll_confirms     = 0;   // fast reads still owed after a write
-    int64_t last_sched_us     = esp_timer_get_time();
     int64_t last_ota_check_us = esp_timer_get_time();   // first auto-check ~24h after boot
     int poll_failures = 0;
     for (;;) {
@@ -1837,7 +800,7 @@ static void worker_task(void *arg)
             // the temp/toggle coalescing loop below (which only knows those
             // two kinds).
             if (cmd.kind != CMD_SET_TEMP && cmd.kind != CMD_TOGGLE_ON) {
-                handle_immediate_cmd(&cmd, &disc, client_id);
+                handle_immediate_cmd(&cmd);
                 last_poll_us = 0;                  // read it back now, not in 10s
                 poll_confirms = POLL_CONFIRM_N;    // ...and again while the bed acts on it
                 continue;
@@ -1846,9 +809,9 @@ static void worker_task(void *arg)
             // Coalesce a burst: per zone, at most one net toggle + final temp.
             // A burst mixing in a rare command (above) is vanishingly
             // unlikely — each one is either a tap on its own settings row or
-            // a trip through its own screen (SCR_BOOST, SCR_SETTINGS) — but
-            // if one lands mid-drain, stop coalescing and handle it right
-            // after rather than silently mis-treating it as a toggle.
+            // a trip through its own screen (SCR_SETTINGS) — but if one lands
+            // mid-drain, stop coalescing and handle it right after rather
+            // than silently mis-treating it as a toggle.
             int last_temp[ZONE_COUNT] = { -1, -1 };
             int want_on[ZONE_COUNT]   = { -1, -1 };   // -1 = untouched this burst
             bool have_pending = false;
@@ -1872,33 +835,16 @@ static void worker_task(void *arg)
             for (int z = 0; z < ZONE_COUNT; z++) {
                 if (want_on[z] >= 0) {
                     zone_on_t up = { z, want_on[z] != 0, issued_us };
-                    char f[24];
-                    snprintf(f, sizeof(f), "\"on\":%s", up.on ? "true" : "false");
-                    set_zone_args_t sa = { (zone_idx_t)z, f };
-                    if (with_auth_retry(set_zone_call, &sa, &disc, client_id))
+                    if (dial_somnus_set_power((somnus_side_t)z, up.on))
                         dial_state_commit(mut_zone_on, &up);
                 }
                 if (last_temp[z] >= 0) {
                     zone_temp_t up = { z, dial_f_to_c(last_temp[z]), issued_us };
-                    // "Dial adjusts" (M8): orion_set_temp decides Follow-
-                    // schedule-override vs. plain hold per zone/time; see its
-                    // own comment. mut_zone_temp applies either way (the
-                    // device now holds this target regardless of which write
-                    // path got it there), so the UI reflects the new setpoint
-                    // immediately exactly like it did pre-M8. On a successful
-                    // override, also refresh schedules right away so the
-                    // overridden phase's own temp field is correct on the
-                    // very next read, not just after the next ~30min
-                    // periodic refresh.
-                    set_temp_args_t sa = { (zone_idx_t)z, up.temp_c, false };
-                    if (with_auth_retry(orion_set_temp, &sa, &disc, client_id)) {
+                    if (dial_somnus_set_temp((somnus_side_t)z, up.temp_c))
                         dial_state_commit(mut_zone_temp, &up);
-                        if (sa.used_override)
-                            with_auth_retry(sched_call, NULL, &disc, client_id);
-                    }
                 }
             }
-            if (have_pending) handle_immediate_cmd(&pending, &disc, client_id);
+            if (have_pending) handle_immediate_cmd(&pending);
 
             // We just changed the bed, so read it back as soon as the user
             // stops touching it, then keep reading for a few rounds while it
@@ -1912,8 +858,7 @@ static void worker_task(void *arg)
             continue;
         }
 
-        // Publish clock validity so the dial's boost countdown (mm:ss, needs
-        // real wall time) can fall back to a bare "BOOST" before SNTP syncs.
+        // Publish clock validity for anything that renders a real clock time.
         bool clock_valid = dial_time_valid();
         if (clock_valid != s_ui_clock_valid) {
             s_ui_clock_valid = clock_valid;
@@ -1935,38 +880,16 @@ static void worker_task(void *arg)
         s_ota_prev_pwr_level = ota_pwr_level;
 
         // Night mode: warm-dim + quiet haptics while the household sleeps.
-        // Real window (M5): bedtime-30min -> wake+30min from ZONE_A's
-        // schedule (the dial's own side: override_sleep_schedule_tonight has
-        // no user_id in its confirmed schema, so it implicitly targets the
-        // token owner's account and only that side's schedule can be trusted
-        // to describe this dial); falls back to a fixed
-        // 21:00-07:00 window until that schedule is known.
+        // Somnus's local API has no sleep-schedule endpoint to derive a real
+        // window from (unlike Orion's get_sleep_schedules) -- fixed
+        // 21:00-07:00 window, unconditionally.
         struct tm lt;
         if (dial_time_now(&lt)) {
             int now_min = lt.tm_hour * 60 + lt.tm_min;
             app_state_t st;
             dial_state_get(&st);
-            const zone_state_t *za = &st.zones[ZONE_A];
-            // Hoisted out of the night-window `if` below (was local to it)
-            // so the update-prompt/auto-update blocks further down can reuse
-            // the same wakeup time instead of re-deriving it — see the spec's
-            // explicit instruction to reuse this exact night-flag machinery.
-            int bed_min, wake_min;
-            bool have_sched = za->sched_valid &&
-                dial_parse_hhmm(za->sched_bedtime, &bed_min) &&
-                dial_parse_hhmm(za->sched_wakeup, &wake_min);
 
-            bool night;
-            if (have_sched) {
-                int start = ((bed_min - 30) % 1440 + 1440) % 1440;
-                int end   = (wake_min + 30) % 1440;
-                // The window almost always crosses midnight (bedtime ~21:00,
-                // wake ~07:00 next day); handle the wrap explicitly.
-                night = (start <= end) ? (now_min >= start && now_min < end)
-                                       : (now_min >= start || now_min < end);
-            } else {
-                night = (lt.tm_hour >= 21 || lt.tm_hour < 7);
-            }
+            bool night = (lt.tm_hour >= 21 || lt.tm_hour < 7);
             dial_power_set_night(night);
             // Swap the UI palette too, and force a re-render — screens read
             // PAL() from on_state, so a bare palette swap without a commit
@@ -1975,23 +898,6 @@ static void worker_task(void *arg)
                 s_ui_night = night;
                 dial_palette_set_night(night);
                 dial_state_commit(mut_bump, NULL);
-            }
-
-            // ---- Status pill hold/until (§3, scr_dial.c) ---------------------
-            // Recomputed every idle tick, same cadence as the night-window calc
-            // above and off the same (st, now_min) this tick already has — a
-            // phase boundary crossing, a fresh schedule fetch (mut_schedules,
-            // ~30min cadence), or an Adjustment-mode flip (scr_adjust_mode.c)
-            // all show up within one tick this way, with no separate dirty flag
-            // to wire up. Committed per zone, only on an actual change, same
-            // edge-triggered shape as s_ui_night just above.
-            for (int z = 0; z < ZONE_COUNT; z++) {
-                int16_t hu = compute_hold_until_min(&st, (zone_idx_t)z, now_min);
-                if (hu != s_ui_hold_until[z]) {
-                    s_ui_hold_until[z] = hu;
-                    hold_until_t up = { (zone_idx_t)z, hu };
-                    dial_state_commit(mut_hold_until, &up);
-                }
             }
 
             // ---- Update prompt: entry (docs/SPEC-update-prompt.md rework) --
@@ -2059,48 +965,30 @@ static void worker_task(void *arg)
             // ---- Auto-update overnight install (docs/SPEC-update-prompt.md) -
             // Reuses dial_ota_download_and_apply() directly — the exact same
             // install path SCR_UPDATE's confirmed manual tap uses (CMD_OTA_APPLY
-            // in handle_immediate_cmd below), including the takeover screen if
+            // in handle_immediate_cmd above), including the takeover screen if
             // someone walks up mid-install (nav_policy's OTA check already
             // forces SCR_UPDATING off ota.status alone, regardless of who
             // started the download) and the v1.0.10 confirm-on-stable-boot
             // behavior (ota_confirm_once, unchanged by this).
             if (st.ota_auto == 1 && st.ota.status == OTA_AVAILABLE) {
-                int auto_start, auto_end;
-                if (have_sched) {
-                    auto_start = (wake_min + 60) % 1440;
-                    auto_end   = (wake_min + 180) % 1440;
-                } else {
-                    auto_start = 9 * 60;    // 09:00 fallback (spec)
-                    auto_end   = 11 * 60;   // 11:00 fallback (spec)
-                }
-                bool in_window = (auto_start <= auto_end)
-                    ? (now_min >= auto_start && now_min < auto_end)
-                    : (now_min >= auto_start || now_min < auto_end);
+                // Fixed 09:00-11:00 fallback (spec) -- Somnus has no sleep
+                // schedule to derive a real post-wake window from, unlike
+                // Orion's have_sched branch before it.
+                int auto_start = 9 * 60, auto_end = 11 * 60;
+                bool in_window = (now_min >= auto_start && now_min < auto_end);
 
                 // NOT gated on the zones being off. The dial is a remote
                 // control, not the bed's controller — heating/cooling is
-                // driven by Orion's own hardware and the cloud, and the
-                // dial's ~30s reboot to apply an install has zero effect on
-                // the bed's operation. A zones-off requirement protects
-                // against nothing and permanently starves auto-update for
-                // anyone who runs their topper through the day or whose
-                // schedule keeps it on — silently, forever. Do not
-                // reintroduce it on the assumption it was protecting
+                // driven by the pad's own hardware, and the dial's ~30s
+                // reboot to apply an install has zero effect on the bed's
+                // operation. A zones-off requirement protects against
+                // nothing and permanently starves auto-update for anyone
+                // who runs their bed through the day — silently, forever.
+                // Do not reintroduce it on the assumption it was protecting
                 // something.
-                //
-                // What DOES need protecting is thermal relief ("boost"): a
-                // timed session with a live countdown on screen, genuinely
-                // disruptive to interrupt with the install takeover screen —
-                // mirrors relief_any's own guard on the daily OTA
-                // auto-CHECK below. Relief is temporary by construction, so
-                // unlike zones_off this can never permanently disqualify
-                // anyone.
-                bool relief_any = st.zones[ZONE_A].relief_active ||
-                                   st.zones[ZONE_B].relief_active;
-
                 int64_t auto_idle_us = esp_timer_get_time() - dial_state_last_input_us();
                 bool eligible = in_window && !night && st.phase == PH_READY &&
-                                !relief_any && auto_idle_us >= 30LL * 60 * 1000000;
+                                auto_idle_us >= 30LL * 60 * 1000000;
 
                 if (!in_window) {
                     s_ota_auto_attempted = false;   // window closed; re-arm for tomorrow's occurrence
@@ -2116,10 +1004,9 @@ static void worker_task(void *arg)
                         ESP_LOGI(TAG, "auto-update: attempting v%s in the overnight window",
                                  st.ota.latest);
                         s_ota_last_committed_pct = -100;   // guarantee the first progress commit fires
-                        // Both clients hand their sockets back, same as the
-                        // manual CMD_OTA_APPLY path below.
-                        dial_mcp_release_connection();
-                        dial_oauth_release_connection();
+                        // Hands the socket back, same as the manual
+                        // CMD_OTA_APPLY path above.
+                        dial_somnus_release_connection();
                         bool unattended = true;
                         dial_state_commit(mut_ota_unattended, &unattended);
                         bool ok = dial_ota_download_and_apply(ota_progress_cb);
@@ -2159,22 +1046,14 @@ static void worker_task(void *arg)
             continue;
         }
 
-        if (with_auth_retry(poll_call, NULL, &disc, client_id)) {
+        if (somnus_refresh_state()) {
             poll_failures = 0;
             dial_state_set_phase(PH_READY, NULL);
             ota_confirm_once();
         } else if (++poll_failures >= 3) {
-            dial_state_set_phase(PH_DEGRADED,
-                dial_mcp_last_err_cert() ? DIAL_CERT_ERR_MSG : dial_mcp_last_error());
+            dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
         }
         last_poll_us = esp_timer_get_time();
-
-        // Sleep schedules change far less often than device state — piggyback
-        // on this same quiet-idle gate, just at a much longer interval.
-        if (esp_timer_get_time() - last_sched_us >= SCHED_INTERVAL_US) {
-            with_auth_retry(sched_call, NULL, &disc, client_id);   // commits inside on success
-            last_sched_us = esp_timer_get_time();
-        }
 
         // OTA_FAILED must not be terminal (field bug: it used to stay wedged
         // showing "Update failed" until a manual power cycle — see
@@ -2204,8 +1083,7 @@ static void worker_task(void *arg)
         // Auto-check for firmware updates (M6): at most once per uptime-day,
         // and only CHECKS (never applies) -- the settings row just gets a
         // badge; the user still has to tap-confirm to install. Gated to a
-        // window that can never coincide with sleep or an in-progress boost:
-        // clock known, local hour in a daytime band, no zone mid-relief, and
+        // window that can never coincide with sleep: clock known, and
         // steady state. Re-evaluated (cheaply) every idle tick once due, but
         // only actually calls dial_ota_check() -- and re-arms the 24h timer
         // -- once all of those hold.
@@ -2236,32 +1114,22 @@ static void worker_task(void *arg)
             // called dial_time_now() mid-condition, so anything computed from
             // ota_lt above it would have read stale/uninitialised fields.
             bool have_local = ota_st.clock_valid && dial_time_now(&ota_lt);
-            // Offset is now minutes past the top of the hour rather than
-            // past 10:00 — with a 6h interval the check can land in any
-            // waking hour, and the jitter's job is unchanged: stop a fleet
-            // that all rebooted together (an OTA does exactly that) from
-            // hitting GitHub in the same minute forever after.
-            int window_open_min = 10 * 60 + s_ota_check_offset_min;
             int now_min_local = have_local ? ota_lt.tm_hour * 60 + ota_lt.tm_min : -1;
             // "Not asleep" is the only real requirement: the daytime band
-            // existed to keep checks away from the sleep window, and `night`
-            // already answers that question directly (bedtime-30 to wake+30
-            // from the actual schedule, not a fixed guess). Keeping the
-            // per-device jitter as a minutes-into-the-hour stagger.
-            (void)window_open_min;
-            // No night gate at all (owner, 2026-08-04): the CHECK is silent
-            // — one HTTPS request, no screen, no sound — so there is nothing
-            // to protect a sleeping household from. What must never appear at
-            // night is the PROMPT, and that has its own !night entry gate, as
-            // does the ambient "Update available" line. Checking around the
-            // clock just means a release published in the evening is known by
-            // morning instead of waiting for the next daylight window.
+            // existed to keep checks away from the sleep window. No night
+            // gate at all (owner, 2026-08-04): the CHECK is silent -- one
+            // HTTPS request, no screen, no sound -- so there is nothing to
+            // protect a sleeping household from. What must never appear at
+            // night is the PROMPT, and that has its own !night entry gate,
+            // as does the ambient "Update available" line. Checking around
+            // the clock just means a release published in the evening is
+            // known by morning instead of waiting for the next daylight
+            // window. Keeping the per-device jitter as a
+            // minutes-into-the-hour stagger.
             bool in_window = have_local &&
                               (now_min_local % 60) >= (s_ota_check_offset_min % 60);
-            bool relief_any = ota_st.zones[ZONE_A].relief_active ||
-                               ota_st.zones[ZONE_B].relief_active;
-            if (in_window && !relief_any && ota_st.phase == PH_READY) {
-                dial_mcp_release_connection();   // one TLS session at a time
+            if (in_window && ota_st.phase == PH_READY) {
+                dial_somnus_release_connection();   // one connection at a time
                 dial_ota_check(ota_st.beta);
                 commit_ota_snapshot();
                 last_ota_check_us = esp_timer_get_time();
@@ -2379,7 +1247,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_timer_create(&ota_confirm_timer_args, &ota_confirm_timer));
     ESP_ERROR_CHECK(esp_timer_start_once(ota_confirm_timer, 30ULL * 1000000ULL));
 
-    // OAuth/TLS/MCP need a big stack; everything network runs on this task.
+    // The Somnus/OTA HTTP clients need a big stack; everything network runs on this task.
     // Priority 3 and pinned to core 0 — BELOW the LVGL task (5, core 1), which
     // the user is actually looking at. It used to be 4, outranking the UI, so a
     // TLS handshake froze the screen and swallowed taps. Core 0 is where Wi-Fi

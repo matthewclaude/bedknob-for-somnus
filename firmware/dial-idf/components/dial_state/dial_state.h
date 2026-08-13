@@ -22,13 +22,16 @@
 typedef enum {
     PH_BOOT = 0,
     PH_WIFI_CONNECTING,
-    PH_WIFI_PORTAL,        // SoftAP captive portal is up, waiting for creds
-    PH_WIFI_LOST,          // had Wi-Fi, lost it; supervisor is retrying
-    PH_OAUTH_DISCOVER,     // discovery + client registration
-    PH_OAUTH_WAIT_CONSENT, // QR on screen, waiting for phone approval
-    PH_MCP_CONNECTING,     // token ok; opening MCP + finding the device
-    PH_READY,              // steady state: command + poll loop
-    PH_DEGRADED,           // net up but Orion calls failing; retrying w/ backoff
+    PH_WIFI_PORTAL,          // SoftAP captive portal is up, waiting for creds
+    PH_WIFI_LOST,            // had Wi-Fi, lost it; supervisor is retrying
+    // Somnus's pad API is a plain local JSON REST endpoint (dial_somnus.h) --
+    // no discovery, no DCR, no interactive consent, so the three Orion
+    // OAuth/MCP phases this replaces (PH_OAUTH_DISCOVER/PH_OAUTH_WAIT_CONSENT/
+    // PH_MCP_CONNECTING) collapse into this one: worker_task is just probing
+    // dial_somnus_connect(base_url) with a real GET.
+    PH_SOMNUS_CONNECTING,
+    PH_READY,                // steady state: command + poll loop
+    PH_DEGRADED,             // net up but the pad's calls failing; retrying w/ backoff
 } conn_phase_t;
 
 typedef enum { ZONE_A = 0, ZONE_B = 1, ZONE_COUNT = 2 } zone_idx_t;
@@ -122,10 +125,8 @@ static inline int dial_rel_step(int f, int detents)
     return (nl == cur) ? f : dial_rel_to_f(nl);
 }
 
-// Parse a schedule "HH:MM" (24h) time string into minutes-from-midnight.
-// Returns false (leaving *out_min untouched) on any malformed input. Used by
-// the worker's real night-window calc (main.c's sleep_phase_now()), which
-// only ever looks at zone_state_t's sched_bedtime/sched_wakeup strings below.
+// Parse an "HH:MM" (24h) time string into minutes-from-midnight. Returns
+// false (leaving *out_min untouched) on any malformed input.
 static inline bool dial_parse_hhmm(const char *s, int *out_min)
 {
     int hh, mm;
@@ -198,93 +199,38 @@ static inline uint16_t dial_scr_timeout_next(uint16_t cur)
     return DIAL_SCR_TIMEOUT_CHOICES[idx];
 }
 
+/*
+ * Trimmed for the Somnus pad's local API (components/dial_somnus/dial_somnus.h)
+ * in place of the Orion zone_state_t above/before it — the pad's /api/state
+ * exposes exactly on/off, one setpoint, one measured reading, and a low-water
+ * flag per side (somnus_side_state_t), with no name, no thermal-relief
+ * concept, and no server-side sleep schedule to mirror. Field names/shapes
+ * below intentionally still match dial_somnus.h's own somnus_side_state_t
+ * 1:1 so main.c's worker can copy one straight into the other.
+ */
 typedef struct {
-    float temp_c;            // setpoint (top-level zones[].temp)
-    float actual_c;          // measured water temp (status.zones[].temp); <0 = unknown
     bool  on;
-    char  thermal_state[12]; // "standby" | "holding" | (heating/cooling presumed)
-    char  user_name[24];     // first name from list_devices zones[].user ("" = unknown)
-
-    // Thermal relief ("boost"), parsed from top-level zones[].thermal_relief
-    // (get_device_state) or the start/cancel_thermal_relief response's zones[]
-    // — same shape in all three. Null/absent thermal_relief = relief_active
-    // false and the rest of these are stale/don't-care.
-    bool    relief_active;
-    bool    relief_heat;      // true = heat, false = cool
-    int64_t relief_end_ms;    // epoch MILLISECONDS (API's units, not seconds)
-    float   relief_prev_temp_c;
-    bool    relief_prev_on;   // the zone's on/off BEFORE the relief started —
-                              // cancelling restores it, so the UI can predict
-                              // the post-cancel state instead of flashing an
-                              // intermediate one (owner: cancel briefly showed
-                              // "Holding" before settling to off).
-    // Dial-local, never carried on the wire: esp_timer_get_time() when the
-    // four relief_* fields above were last set OPTIMISTICALLY (main.c's
-    // handle_immediate_cmd, CMD_BOOST_START/CANCEL, BEFORE the MCP round
-    // trip) rather than from a get_device_state poll or a relief ack that
-    // already agreed with us. 0 = no optimistic guess in flight. main.c's
-    // mut_device_state and mut_relief_ack both consult this (via
-    // relief_should_preserve_optimistic) to keep the guess alive for a short
-    // window while a poll or a lagging ack that hasn't caught up yet would
-    // otherwise flicker the boost chip back — see RELIEF_OPTIMISTIC_WINDOW_US.
-    int64_t relief_opt_us;
-
-    // Tonight's sleep schedule (M5), from get_sleep_schedules — TODAY's entry
-    // only (day == dial_time_now's tm_wday), matched to this zone via the
-    // worker's zone->uuid map (list_devices zones[].user.id). sched_valid
-    // false means either the clock isn't set yet or the worker hasn't
-    // resolved this zone's schedule (no user uuid, or no entry for today).
-    bool  sched_valid;
-    char  sched_bedtime[6];        // "HH:MM", 24h
-    float sched_bedtime_temp_c;
-    char  sched_wakeup[6];         // "HH:MM", 24h
-    float sched_wakeup_temp_c;
-
-    // Smart-temperature phase schedule ("Dial adjusts" / M8), same
-    // get_sleep_schedules entry as the fields above. is_smart_temperature_active
-    // says whether this schedule's phase engine is even on for tonight (if
-    // false, only sched_bedtime_temp_c/sched_wakeup_temp_c above are
-    // meaningful — there's no phase_1/phase_2 step to speak of). The offsets
-    // are MINUTES AFTER BEDTIME (not clock times), so together these mark
-    // tonight's phase boundaries: bedtime -> bedtime+phase_1_offset ->
-    // bedtime+phase_2_offset -> wakeup, with temps bedtime_temp / phase_1_temp
-    // / phase_2_temp / wakeup_temp. See main.c's sleep_phase_now() for how
-    // "which phase is active right now" is resolved from these.
-    bool  sched_smart_temp_active;
-    int   sched_phase1_offset_min;
-    float sched_phase1_temp_c;
-    int   sched_phase2_offset_min;
-    float sched_phase2_temp_c;
-
-    // Ecobee-style "will this hold, or expire?" for scr_dial.c's status pill.
-    // Computed by the WORKER (main.c's compute_hold_until_min(), which wraps
-    // sleep_phase_now()) mirroring temp_write_phase()'s exact preconditions
-    // (Adjustment mode = Follow schedule, a captured Orion user uuid for this
-    // zone, a valid wall clock, and an active sleep-schedule phase right now)
-    // so the pill states the WRITE PATH'S BEHAVIOUR, not the raw preference —
-    // Schedule mode with no active phase (outside the window, smart temp off,
-    // or no usable schedule) still writes a plain hold, and must say so.
-    // -1 = the setpoint holds until the user changes it ("Holding");
-    // otherwise minutes-from-midnight of the CURRENT phase's own end
-    // boundary ("Until H:MM"). Recomputed every idle tick alongside the
-    // night-window calc (same block, same fresh clock+state read) so a phase
-    // boundary crossing, a fresh schedule fetch, or an Adjustment-mode flip
-    // all land within one tick; committed to the store only on an actual
-    // per-zone change. dial_state_init() seeds this -1 so a fresh boot (or a
-    // screen render before the worker's first idle tick) never shows a bogus
-    // "Until 0:00".
-    int16_t hold_until_min;
+    float temp_c;      // setpoint (somnus_side_state_t.target_c, spec: 12-42.3 C)
+    float actual_c;     // measured water temp (current_c); <0 = unknown (mirrors
+                        // somnus_side_state_t.has_current — the pad reports no
+                        // reading at all before its first sensor sample)
+    bool  water_low;    // somnus_side_state_t.water_low (spec field is_wl_low)
 } zone_state_t;
 
 /*
  * Honest, actionable phase_err text for a TLS certificate-verification
  * failure (the device's embedded trust anchors are too old for whatever the
  * server presents now) — this hardware can outlive its maintainer, so a
- * stale anchor must not read as the same routine "Orion unreachable" outage
- * as a Wi-Fi blip. dial_oauth/dial_mcp set this verbatim as the phase_err
- * whenever their last_err_cert() getter is true; scr_connecting.c recognizes
- * DIAL_CERT_ERR_TITLE as the first line and promotes it to the screen's
- * headline instead of folding it into the usual retry subtitle.
+ * stale anchor must not read as the same routine connectivity outage as a
+ * Wi-Fi blip. Currently dormant: dial_oauth/dial_mcp (the only clients that
+ * ever set this verbatim as the phase_err, via their last_err_cert()
+ * getters) are gone along with the rest of the Orion pipeline, and
+ * dial_somnus talks plain local HTTP with no TLS to fail. Kept, not pulled,
+ * because scr_connecting.c's cert-vs-generic split (it recognizes
+ * DIAL_CERT_ERR_TITLE as the first line of phase_err and promotes it to the
+ * screen's headline) is generic connection-error handling that any future
+ * TLS-verifying client (e.g. a cloud fallback) could reuse by setting this
+ * same string, unchanged.
  *
  * The repo line omits the "github.com/" host: at the error screen's sub
  * label (300px @ lv_font_montserrat_16) the full URL measures ~400px and
@@ -301,13 +247,13 @@ typedef struct {
     conn_phase_t phase;
     char    phase_err[128];   // last human-readable error (offline/error screens)
     int     retry_in_s;       // seconds until the supervisor's next retry (0 = n/a)
-    char    oauth_url[600];   // authorize URL while PH_OAUTH_WAIT_CONSENT
+    // No oauth_url field here anymore: the Somnus pad's local API
+    // (components/dial_somnus) needs no interactive consent/QR step, so
+    // there is no authorize URL to ever hold.
     char    ap_ssid[33];      // SoftAP name while PH_WIFI_PORTAL
     // The dial's own HOME network SSID (dial_net_sta_ssid() mirror, committed
-    // once worker_task's dial_net_bringup() returns). NOT ap_ssid above --
-    // this is the network SCR_OAUTH_QR tells the user their PHONE must also be
-    // on, since the OAuth callback is a LAN redirect to the dial and cannot
-    // reach it over cellular or a different network. "" if unknown.
+    // once worker_task's dial_net_bringup() returns). NOT ap_ssid above.
+    // "" if unknown.
     char    sta_ssid[33];
 
     /*
@@ -323,31 +269,42 @@ typedef struct {
 
     // Device truth (valid once have_state)
     bool    have_state;
-    char    serial[16];
+    char    serial[16];       // unused by dial_somnus (the pad has no serial
+                              // number, only its base_url) -- left in place
+                              // rather than pulled, since About-style screens
+                              // may still want a "what am I talking to" line.
     bool    device_online;
     zone_state_t zones[ZONE_COUNT];
-    // Which zones the device actually reports (get_device_state's zones[]).
-    // Orion also sells SINGLE-ZONE toppers, so a zone entry existing is not a
-    // given: everything that assumes a partner side (the side-swap chain, the
-    // page dots, the side picker) must gate on this rather than on
-    // ZONE_COUNT. Valid once have_state; see dial_state_is_dual().
+    // Which zones the device actually reports. Mirrors dial_somnus's
+    // single-zone/dual-zone ("One Bed"/"Dual Sides") setting: everything
+    // that assumes a partner side (the side-swap chain, the page dots, the
+    // side picker) must gate on this rather than on ZONE_COUNT, same
+    // reasoning as Orion's single-zone toppers before it. Valid once
+    // have_state; see dial_state_is_dual().
     bool    zone_present[ZONE_COUNT];
-    struct { bool error; char desc[96]; } safety;
-    char    water_fill[12];
-    bool    away;             // session-optimistic (set_away has no readback)
-    // Device-reported absolute temperature range (list_devices'
-    // temperature_range, °C on the wire), converted once via dial_c_to_f()
-    // and mirrored here as whole °F by main.c's orion_discover_device() —
-    // this, not the DIAL_TEMP_MIN_F/MAX_F constants, is what the arc range /
-    // knob clamp / drag clamp use in ABSOLUTE mode (owner: "use the Orion
-    // reported min/max for limits, not our own"). Relative mode's own
-    // 21-level table (DIAL_REL_MIN_F/MAX_F above) is untouched by this —
-    // that table is tied to Orion's temperature_scale.relative, a different
-    // field, validated by its own discover-time tripwire. -1 = not yet known
-    // (fresh boot, before the first successful list_devices, or a device
-    // that omits the field) — dial_state_temp_min_f()/_max_f() below fall
-    // back to the DIAL_TEMP_MIN_F/MAX_F constants then, which now equal the
-    // device's real rails, so the fallback no longer narrows anything.
+    // somnus_state_t.system_error ("True when a fatal error is active on the
+    // device") -- top-level, not per-side, replacing Orion's safety{error,desc}
+    // struct and water_fill string (per-side low-water is now zone_state_t.
+    // water_low instead; the pad's API carries no free-text description to
+    // put in a desc field).
+    bool    system_error;
+    // Away mode. Kept as a dormant placeholder rather than pulled outright:
+    // Orion's set_away had no Somnus equivalent, so nothing anywhere ever
+    // sets this true (there's no CMD_AWAY, no setter, no worker mutator) --
+    // it's permanently false until the pad grows an away concept of its own,
+    // at which point this field and scr_dial.c's badge just start working
+    // again with no further plumbing. Not session-optimistic like Orion's
+    // version was; there's no write path to be optimistic about.
+    bool    away;
+    // Absolute temperature range, whole °F, mirrored here once worker_task
+    // connects successfully. Somnus's pad has no discovery
+    // call to report its own rails (unlike Orion's list_devices), but the
+    // local_api spec fixes them at 12.0-42.3°C regardless of pad -- see
+    // dial_somnus.h. This, not the DIAL_TEMP_MIN_F/MAX_F constants, is what
+    // the arc range / knob clamp / drag clamp use in ABSOLUTE mode.
+    // -1 = not yet known (fresh boot, before the first successful connect)
+    // -- dial_state_temp_min_f()/_max_f() below fall back to the
+    // DIAL_TEMP_MIN_F/MAX_F constants then.
     int     temp_min_f;
     int     temp_max_f;
 
@@ -599,16 +556,9 @@ void dial_state_set_phase(conn_phase_t phase, const char *err);
 void dial_state_set_ui_temp(zone_idx_t zone, int temp_f);
 
 // Optimistic power flip — call from the UI on tap, so the face answers the
-// press instead of waiting for the write to Orion to come back. The next poll
-// reconciles (and reverts it, if the write failed).
+// press instead of waiting for the write to the pad to come back. The next
+// poll reconciles (and reverts it, if the write failed).
 void dial_state_set_zone_on(zone_idx_t zone, bool on);
-
-// Derive a zone's thermal_state from its target vs. its measured water temp.
-// Used by the optimistic setters above and by the worker's own commits, so the
-// UI and the worker never disagree about what a pending change means. Caller
-// must hold the store lock (i.e. call it from inside a dial_state_commit
-// mutator, or from dial_state.c itself).
-void dial_state_predict_thermal(app_state_t *st, zone_idx_t zone);
 
 // Record which side the UI is showing. The nav policy follows this, so any
 // screen that switches sides MUST commit it here (or the next state commit
@@ -633,17 +583,6 @@ void dial_state_set_rel_mode(bool rel_mode);
 // haptic_level_t: dial_state can't #include dial_haptics.h (leaf component),
 // same reasoning as ota.status's int mirror.
 void dial_state_set_haptics_level(uint8_t level);
-
-// Optimistic thermal-relief write, callable from the LVGL task the instant a
-// user taps. The worker ALSO commits this before issuing the call, but that
-// is not enough on its own: the worker is single-threaded, so a tap landing
-// while it sits in a slow MCP round-trip (observed at 10-20s) waits in the
-// command queue before anything reaches the screen -- which is exactly the
-// lag the owner reported on cancel. Committing here makes the chip react on
-// the next render regardless of what the worker is busy with; the worker's
-// own commit then reconciles, and reverts if the call fails.
-// zone < 0 applies to every zone (cancel_thermal_relief is device-wide).
-void dial_state_set_relief_optimistic(int zone, bool active, bool heat, int64_t end_ms);
 
 // Day/night backlight brightness preference, 10..100 (percent, 10% steps).
 // Getters always return a value in that range (clamped on read; 100 when no
@@ -728,19 +667,23 @@ int64_t dial_state_last_input_us(void);
  * UI -> worker command queue. Screens post; the (single) network worker
  * drains, coalescing bursts (a knob spin collapses to one set_zone).
  */
+// Trimmed for the Somnus pad's local API in place of the Orion command set
+// above/before it: the pad's whole write surface is POST /api/power and
+// POST /api/target_t (dial_somnus_set_power/dial_somnus_set_temp), so
+// CMD_BOOST_START/CANCEL (no thermal-relief concept on the pad) and CMD_AWAY
+// (no away-mode endpoint) are gone, and CMD_RELINK goes with them — there is
+// no auth token to forget, dial_somnus is a plain unauthenticated local
+// client (see dial_somnus.h). The Settings-destructive and OTA commands are
+// device-agnostic (dial_net/dial_ota, not Orion/Somnus) and are unchanged.
 typedef enum {
     CMD_SET_TEMP,      // zone + temp_f
     CMD_TOGGLE_ON,     // zone + a = the DESIRED on state (1/0), not "flip it".
                        // The UI flips the store optimistically before posting,
                        // so a worker that re-derived !current would undo it.
-    CMD_BOOST_START,   // zone + a=heat?1:0 + b=minutes
-    CMD_BOOST_CANCEL,  // zone ignored — cancels relief on every zone
-    CMD_AWAY,          // a=1 away / 0 home
 
     // Settings (M4) destructive actions — each erases some NVS state and
     // reboots. Handled in main.c's handle_immediate_cmd like the others
     // above; none of them return (esp_restart()).
-    CMD_RELINK,          // clear Orion tokens, keep Wi-Fi + client_id
     CMD_WIFI_RESET,      // clear Wi-Fi credentials
     CMD_FACTORY_RESET,   // erase all of NVS
 
@@ -764,8 +707,9 @@ typedef struct {
     cmd_kind_t kind;
     zone_idx_t zone;
     int        temp_f;  // CMD_SET_TEMP
-    int        a, b;    // generic args: CMD_BOOST_START (a=heat, b=minutes),
-                         // CMD_AWAY (a=away)
+    int        a, b;    // generic args: only CMD_TOGGLE_ON's `a` is used today;
+                         // `b` is kept for shape/alignment with dial_cmd_post's
+                         // callers and any future command that needs a second.
 } app_cmd_t;
 
 void dial_cmd_post(const app_cmd_t *cmd);

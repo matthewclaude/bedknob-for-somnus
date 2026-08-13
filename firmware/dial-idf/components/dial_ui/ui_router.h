@@ -20,11 +20,9 @@ typedef enum {
     SCR_WIFI_PORTAL,      // how to hand the dial your Wi-Fi (SoftAP name + the on-device way in)
     SCR_NETPICK,          // pick the home network on the dial itself (arg: unused)
     SCR_PASSKEY,          // type its password with the knob (arg: network index)
-    SCR_OAUTH_QR,         // Orion link QR
     SCR_DIAL,             // the temperature dial (arg: zone_idx_t)
     SCR_MENU,             // vertical menu, third face of the swipe chain (arg: unused/NULL)
     SCR_STANDBY,          // always-on clock face (arg: zone_idx_t to wake to)
-    SCR_BOOST,            // boost duration picker (arg: (zone_idx_t<<1)|heat)
     SCR_ERROR,            // offline / degraded, with retry countdown
     SCR_WELCOME,          // fresh-device onboarding splash (M4)
     SCR_SIDEPICK,         // "which side of the bed?" (M4, reused from Settings)
