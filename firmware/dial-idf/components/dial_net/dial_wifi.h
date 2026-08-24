@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 /*
- * Wi-Fi for the Orion dial: NVS-backed credentials + STA connect + a SoftAP
+ * Wi-Fi for the Somnus dial: NVS-backed credentials + STA connect + a SoftAP
  * captive-portal provisioning flow (no phone app required).
  *
  * Typical use from app_main:
@@ -54,7 +54,7 @@ bool dial_net_setup_requested(void);
 // portal until the user submits working credentials. Blocks until connected.
 void dial_net_bringup(void);
 
-// The SoftAP SSID used during setup (e.g. "OrionDial-A1B2"). Valid after init.
+// The SoftAP SSID used during setup (e.g. "SomnusDial-A1B2"). Valid after init.
 const char *dial_net_ap_ssid(void);
 
 // The dial's own HOME network SSID (e.g. "Kestrel-5G") -- the network it is
@@ -66,7 +66,7 @@ const char *dial_net_ap_ssid(void);
 // connect attempt.
 const char *dial_net_sta_ssid(void);
 
-// Stable per-device mDNS hostname suffix (e.g. "orion-dial-a1b2c3"), derived
+// Stable per-device mDNS hostname suffix (e.g. "somnus-dial-a1b2c3"), derived
 // from the same MAC read as dial_net_ap_ssid's suffix above (see
 // dial_net_init) — just 3 bytes instead of 2, lowercase since this one is
 // only ever used inside a URL, never shown to a person picking a Wi-Fi

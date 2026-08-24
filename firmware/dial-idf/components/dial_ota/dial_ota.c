@@ -28,7 +28,7 @@ extern const char trust_roots_pem_start[] asm("_binary_trust_roots_pem_start");
 static const char *TAG = "ota";
 
 #define GITHUB_API_URL \
-    "https://api.github.com/repos/chris023/orion-waveshare-rotary-dial/releases/latest"
+    "https://api.github.com/repos/matthewclaude/somnus-waveshare-rotary-dial/releases/latest"
 // The LIST endpoint (beta channel only) -- unlike /releases/latest, this
 // includes prereleases. Same host/owner/repo, no trailing "/latest".
 // per_page is load-bearing: the unbounded list is ~70KB once a project has a
@@ -37,7 +37,7 @@ static const char *TAG = "ota";
 // newest-first, so the newest few are the only ones that can ever win the
 // is_newer comparison; 5 of them is ~27KB, comfortably inside the cap.
 #define GITHUB_API_URL_LIST \
-    "https://api.github.com/repos/chris023/orion-waveshare-rotary-dial/releases?per_page=5"
+    "https://api.github.com/repos/matthewclaude/somnus-waveshare-rotary-dial/releases?per_page=5"
 #define ASSET_NAME     "orion-dial.bin"
 #define TAG_PREFIX     "dial-v"
 #define CHECK_BUF_CAP  (64 * 1024)   // release JSON is normally ~10-30KB
@@ -196,7 +196,7 @@ bool dial_ota_check(bool beta)
 
     const esp_app_desc_t *desc = esp_app_get_description();
     char user_agent[40];
-    snprintf(user_agent, sizeof(user_agent), "orion-dial/%s", desc->version);
+    snprintf(user_agent, sizeof(user_agent), "somnus-dial/%s", desc->version);
 
     check_resp_t r = { 0 };
     esp_http_client_config_t cfg = {
@@ -212,6 +212,18 @@ bool dial_ota_check(bool beta)
     esp_err_t err = esp_http_client_perform(c);
     int status = (err == ESP_OK) ? esp_http_client_get_status_code(c) : -1;
     esp_http_client_cleanup(c);
+
+    // GitHub 404s /releases/latest (never the list endpoint) when the repo
+    // has zero published releases -- expected right now for the freshly
+    // renamed matthewclaude/somnus-waveshare-rotary-dial repo, not a check
+    // failure. Report it exactly like "checked, nothing newer" rather than
+    // an error state, and don't fall back to any other repo.
+    if (err == ESP_OK && status == 404) {
+        ESP_LOGI(TAG, "no releases published yet (HTTP 404)");
+        set_status(OTA_IDLE, NULL, NULL);
+        free(r.buf);
+        return true;
+    }
 
     if (err != ESP_OK || status != 200 || !r.buf) {
         ESP_LOGW(TAG, "release check failed: %s (HTTP %d)", esp_err_to_name(err), status);
@@ -258,6 +270,15 @@ bool dial_ota_check(bool beta)
         }
         char chosen_ver[16] = { 0 };
         int n = cJSON_GetArraySize(root);
+        // Unlike /releases/latest, the list endpoint returns 200 with an
+        // empty array for a repo with zero releases (expected right now for
+        // matthewclaude/somnus-waveshare-rotary-dial) -- report that as
+        // "nothing to offer", not a failure.
+        if (n == 0) {
+            set_status(OTA_IDLE, NULL, NULL);
+            ok = true;
+            goto done;
+        }
         if (n > RELEASES_LIST_SCAN_CAP) n = RELEASES_LIST_SCAN_CAP;
         for (int i = 0; i < n; i++) {
             cJSON *rel = cJSON_GetArrayItem(root, i);

@@ -240,7 +240,7 @@ typedef struct {
 #define DIAL_CERT_ERR_MSG \
     DIAL_CERT_ERR_TITLE "\n" \
     "This firmware may be too old\n" \
-    "chris023/orion-waveshare-rotary-dial"
+    "matthewclaude/somnus-waveshare-rotary-dial"
 
 // Fallback pad address / zone-mode, used only until Settings has ever
 // persisted a real value (fresh device, or one that predates this

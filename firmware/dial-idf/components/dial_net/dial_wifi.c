@@ -1,10 +1,10 @@
 /*
- * Wi-Fi for the Orion dial.
+ * Wi-Fi for the Somnus dial.
  *
  *  - Credentials persist in NVS (namespace "wifi", keys "ssid"/"pass").
  *  - dial_net_bringup() connects with stored creds; if none (or connecting
  *    fails), it runs a SoftAP captive portal: the dial hosts an open AP
- *    "OrionDial-XXXX" + a DNS hijack (so phones auto-pop the portal) + an HTTP
+ *    "SomnusDial-XXXX" + a DNS hijack (so phones auto-pop the portal) + an HTTP
  *    form listing nearby networks. On submit it saves creds and connects.
  *  - An optional dev seed (from secrets.h via dial_net_init) pre-fills NVS so
  *    development can skip the portal.
@@ -40,7 +40,7 @@ static volatile bool s_connected;
 static int s_retries;
 static char s_ap_ssid[16];
 static char s_sta_ssid[33];   // home network name; see dial_net_sta_ssid()
-static char s_hostname[24];   // "orion-dial-xxxxxx" — see dial_net_hostname()
+static char s_hostname[24];   // "somnus-dial-xxxxxx" — see dial_net_hostname()
 static esp_netif_t *s_sta_netif, *s_ap_netif;
 static httpd_handle_t s_httpd;
 static TaskHandle_t   s_dns_task;
@@ -220,11 +220,11 @@ void dial_net_init(void)
 
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
-    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "OrionDial-%02X%02X", mac[4], mac[5]);
+    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "SomnusDial-%02X%02X", mac[4], mac[5]);
     // Same MAC, one more byte (3 instead of 2 — a plain human isn't reading
     // this one off a Wi-Fi picker, so the extra collision margin is free) and
     // lowercase (DNS labels are conventionally lowercase). See dial_net_hostname.
-    snprintf(s_hostname, sizeof(s_hostname), "orion-dial-%02x%02x%02x", mac[3], mac[4], mac[5]);
+    snprintf(s_hostname, sizeof(s_hostname), "somnus-dial-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
     const esp_timer_create_args_t rt = { .callback = retry_timer_cb, .name = "wifi_retry" };
     ESP_ERROR_CHECK(esp_timer_create(&rt, &s_retry_timer));
@@ -449,7 +449,7 @@ static esp_err_t root_get(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html; charset=UTF-8");
     httpd_resp_sendstr_chunk(req,
         "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>Orion Dial setup</title><style>"
+        "<title>Somnus Dial setup</title><style>"
         "body{font-family:-apple-system,system-ui,sans-serif;max-width:420px;margin:24px auto;padding:0 16px;color:#1a1a1a}"
         "h2{color:#0b6}label{display:block;margin-top:14px;font-size:14px;font-weight:600}"
         "input,select,button{width:100%;padding:12px;margin:6px 0;font-size:16px;box-sizing:border-box;"
@@ -463,7 +463,7 @@ static esp_err_t root_get(httpd_req_t *req)
         ".hint{color:#888;font-size:13px}"
         "#otherwrap{display:none}"
         "</style></head><body>"
-        "<h2>Orion Dial Wi-Fi setup</h2><form method=POST action=/save>"
+        "<h2>Somnus Dial Wi-Fi setup</h2><form method=POST action=/save>"
         "<label for=ssid>Network</label>"
         // Without a placeholder the browser silently pre-selects the first
         // network, so someone who goes straight to the password field submits

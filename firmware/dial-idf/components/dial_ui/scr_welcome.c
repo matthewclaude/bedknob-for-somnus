@@ -8,8 +8,7 @@
  * underneath (Wi-Fi bring-up, OAuth, ...), so "dismiss" just means flipping
  * `welcomed` — nav_policy stops pinning this screen on the next dispatch
  * tick and falls through to whatever the connection phase naturally shows
- * next (Wi-Fi portal QR, Orion link QR, ...). This screen never navigates
- * anywhere itself.
+ * next (Wi-Fi portal QR, ...). This screen never navigates anywhere itself.
  *
  * Note: the knob decoder isn't initialized until deep in the worker's
  * steady-state handoff (main.c's knob_init(), after PH_READY — see that
@@ -33,7 +32,7 @@ static void create(lv_obj_t *scr, void *arg)
     s_title = lv_label_create(scr);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_title, pal->ink_primary, 0);
-    lv_label_set_text(s_title, "ORION DIAL");
+    lv_label_set_text(s_title, "SOMNUS DIAL");
     lv_obj_align(s_title, LV_ALIGN_CENTER, 0, -16);
 
     s_sub = lv_label_create(scr);
