@@ -33,14 +33,6 @@ void sim_state_reset(void)
     memset(&s_state, 0, sizeof(s_state));
     s_state.ui_temp_f[ZONE_A] = -1;
     s_state.ui_temp_f[ZONE_B] = -1;
-    // Matches dial_state_init()'s real-firmware default: -1 = "Holding" on
-    // scr_dial.c's status pill (§3). There is no worker task here to derive
-    // this from a schedule (compute_hold_until_min lives in main.c, which
-    // the simulator never links) — scenarios that want "Until H:MM" poke it
-    // directly, same as every other worker-computed field this file seeds
-    // by hand (see this file's own header comment).
-    s_state.zones[ZONE_A].hold_until_min = -1;
-    s_state.zones[ZONE_B].hold_until_min = -1;
     // Matches dial_state_init(): -1 = "not yet discovered", so
     // dial_state_temp_min_f()/_max_f() fall back to DIAL_TEMP_MIN_F/MAX_F
     // (now the real 50-113F rails themselves) — 0 would be misread as a
@@ -105,23 +97,6 @@ void dial_state_set_units_c(bool units_c)
 void dial_state_set_rel_mode(bool rel_mode)
 {
     s_state.rel_mode = rel_mode;
-    s_state.generation++;
-}
-
-// Optimistic relief write: the simulator has no worker to reconcile against,
-// so this just mutates the store the same way the firmware's does.
-void dial_state_set_relief_optimistic(int zone, bool active, bool heat, int64_t end_ms)
-{
-    for (int z = 0; z < ZONE_COUNT; z++) {
-        if (zone >= 0 && z != zone) continue;
-        if (!active && s_state.zones[z].relief_active) {
-            s_state.zones[z].on     = s_state.zones[z].relief_prev_on;
-            s_state.zones[z].temp_c = s_state.zones[z].relief_prev_temp_c;
-        }
-        s_state.zones[z].relief_active = active;
-        s_state.zones[z].relief_heat   = heat;
-        s_state.zones[z].relief_end_ms = active ? end_ms : 0;
-    }
     s_state.generation++;
 }
 
@@ -246,9 +221,8 @@ void dial_cmd_post(const app_cmd_t *cmd)
     // here), but a stale table silently prints the wrong name forever, which
     // is how this one drifted after CMD_MATCH_PARTNER's removal (§4).
     static const char *KIND[] = {
-        "SET_TEMP", "TOGGLE_ON", "BOOST_START", "BOOST_CANCEL", "BED_OFF",
-        "AWAY", "RELINK", "WIFI_RESET", "FACTORY_RESET", "OTA_CHECK",
-        "OTA_APPLY", "OTA_CLEAR_FAILED",
+        "SET_TEMP", "TOGGLE_ON", "WIFI_RESET", "FACTORY_RESET",
+        "OTA_CHECK", "OTA_APPLY", "OTA_CLEAR_FAILED",
     };
     const char *k = (cmd->kind >= 0 && (size_t)cmd->kind < sizeof(KIND) / sizeof(KIND[0]))
                         ? KIND[cmd->kind] : "?";

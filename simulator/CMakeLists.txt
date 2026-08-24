@@ -51,7 +51,6 @@ set(DIAL_UI_SRCS
   ${DIAL_UI_DIR}/scr_updating.c
   ${DIAL_UI_DIR}/scr_update_prompt.c
   ${DIAL_UI_DIR}/scr_standby.c
-  ${DIAL_UI_DIR}/scr_boost.c
   ${DIAL_UI_DIR}/scr_welcome.c
   ${DIAL_UI_DIR}/scr_sidepick.c
   ${DIAL_UI_DIR}/scr_settings.c

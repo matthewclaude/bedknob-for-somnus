@@ -19,7 +19,6 @@
 #include <string.h>
 #include <math.h>
 #include <sys/stat.h>
-#include <time.h>   // scenario_dial_off_bedtime needs the real wall clock
 
 #include "lvgl.h"
 #include "ui_router.h"
@@ -216,18 +215,14 @@ static void apply_baseline(void)
     st->away = false;
 
     zone_state_t *a = &st->zones[ZONE_A];
-    snprintf(a->user_name, sizeof(a->user_name), "Alex");
     a->on = true;
-    snprintf(a->thermal_state, sizeof(a->thermal_state), "holding");
     a->temp_c = 21.1f;    // -> 70F
-    a->actual_c = 21.1f;  // at target
+    a->actual_c = 21.1f;  // at target: HOLDING
 
     zone_state_t *b = &st->zones[ZONE_B];
-    snprintf(b->user_name, sizeof(b->user_name), "Sam");
     b->on = true;
-    snprintf(b->thermal_state, sizeof(b->thermal_state), "heating");
     b->temp_c = 22.2f;    // -> 72F target
-    b->actual_c = 20.0f;  // -> 68F current, still warming
+    b->actual_c = 20.0f;  // -> 68F current, still warming: HEATING
 
     st->ota.status = 0;   // OTA_IDLE
 }
@@ -280,40 +275,6 @@ static void scenario_passkey(void)
     }
     pump_ms(200);
     snapshot("passkey");
-}
-
-static void scenario_oauth_qr(void)
-{
-    apply_baseline();
-    app_state_t *st = sim_state_ptr();
-    st->phase = PH_OAUTH_WAIT_CONSENT;
-    snprintf(st->oauth_url, sizeof(st->oauth_url),
-             "https://github.com/chris023/orion-waveshare-rotary-dial");
-    // Plausible home-network name: exercises scr_setup.c's "Scan with a
-    // phone on ..." hint (Part 1 of the onboarding UX fix) instead of its
-    // generic no-SSID fallback.
-    snprintf(st->sta_ssid, sizeof(st->sta_ssid), "Kestrel-5G");
-    ui_router_go(SCR_OAUTH_QR, NULL, LV_SCR_LOAD_ANIM_NONE);
-    pump_ms(300);
-    snapshot("oauth-qr");
-}
-
-// Same setup as scenario_oauth_qr, but pumps past the 45s-quiet threshold so
-// scr_setup.c's dismissible "still waiting" explainer (Part 2) is on screen
-// -- the field-incident case where the phone can't reach the dial's LAN
-// callback and nobody scanned a fresh code in the meantime.
-static void scenario_oauth_waiting(void)
-{
-    apply_baseline();
-    app_state_t *st = sim_state_ptr();
-    st->phase = PH_OAUTH_WAIT_CONSENT;
-    snprintf(st->oauth_url, sizeof(st->oauth_url),
-             "https://github.com/chris023/orion-waveshare-rotary-dial");
-    snprintf(st->sta_ssid, sizeof(st->sta_ssid), "Kestrel-5G");
-    ui_router_go(SCR_OAUTH_QR, NULL, LV_SCR_LOAD_ANIM_NONE);
-    pump_ms(300);
-    pump_ms(45500);   // clears scr_setup.c's OAUTH_WAIT_FIRST_MS (45000ms)
-    snapshot("oauth-waiting");
 }
 
 static void scenario_sidepick(void)
@@ -378,98 +339,12 @@ static void scenario_dial_relative(void)
     st->ui_zone = ZONE_A;
     zone_state_t *a = &st->zones[ZONE_A];
     a->on = true;
-    snprintf(a->thermal_state, sizeof(a->thermal_state), "heating");
     a->temp_c = 30.0f;    // off-grid -> 86F -> level +2
     a->actual_c = 26.0f;  // -> 79F, below setpoint: still warming
     st->generation++;     // direct field-sets don't bump it; make on_state re-run
     ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(600);
     snapshot("dial-relative");
-}
-
-// The status pill's "Until H:MM" state (§3 rework) — the ecobee-style
-// counterpart to the default baseline's "Holding" (apply_baseline() leaves
-// hold_until_min at sim_state_reset()'s -1 default, which every other dial
-// scenario above renders as-is). Seeds a real sleep schedule on ZONE_A —
-// bedtime 22:00, phase 1 starting an hour later (23:00), phase 2 two hours
-// after THAT (01:00), wakeup 07:00 — so the state this screenshot bakes in
-// is a coherent one: "currently in phase 1" hands off to phase 2 at 01:00,
-// which is exactly the clock-minutes value poked into hold_until_min below.
-// There is no worker task in this simulator to derive that value FROM the
-// schedule fields (compute_hold_until_min lives in main.c, never linked
-// here — see sim_state.c's own header comment), so both are set by hand:
-// the schedule fields document why, hold_until_min is what actually renders.
-static void scenario_dial_until(void)
-{
-    apply_baseline();
-    app_state_t *st = sim_state_ptr();
-    st->sched_follow = true;
-    zone_state_t *a = &st->zones[ZONE_A];
-    a->sched_valid = true;
-    a->sched_smart_temp_active = true;
-    snprintf(a->sched_bedtime, sizeof(a->sched_bedtime), "22:00");
-    a->sched_bedtime_temp_c = 19.4f;
-    snprintf(a->sched_wakeup, sizeof(a->sched_wakeup), "07:00");
-    a->sched_wakeup_temp_c = 21.1f;
-    a->sched_phase1_offset_min = 60;    // 22:00 + 60min -> phase 1 starts 23:00
-    a->sched_phase1_temp_c = 18.3f;
-    a->sched_phase2_offset_min = 180;   // 22:00 + 180min -> phase 2 starts 01:00
-    a->sched_phase2_temp_c = 20.0f;
-    a->hold_until_min = 60;             // 01:00 -> "Until 1:00"
-    st->generation++;                   // direct field-sets don't bump it; make on_state re-run
-    ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
-    pump_ms(600);
-    snapshot("dial-until");
-}
-
-// The status pill's newest state (owner refinement): a zone that's OFF but
-// still has a bedtime ahead TODAY isn't "holding" — nothing is being held,
-// the schedule is going to switch it on — so the pill shows the pause icon
-// (not the loop icon scenario_dial_until's phase-boundary case uses) with
-// "Until <bedtime>". Unlike scenario_dial_until, scr_dial.c computes this
-// state itself from the REAL wall clock (time(NULL), gated on clock_valid —
-// see that file's own comment for why it doesn't need a worker-computed
-// field the way hold_until_min does), so this scenario seeds a bedtime
-// relative to whenever the simulator actually runs (+4h from now, wrapped
-// past midnight if needed) rather than a fixed clock string — a hardcoded
-// "22:00" would already be in the past for a chunk of the day and silently
-// fall through to a different pill state instead of exercising this one.
-static void scenario_dial_off_bedtime(void)
-{
-    apply_baseline();
-    app_state_t *st = sim_state_ptr();
-    st->clock_valid = true;
-    time_t now = time(NULL);
-    struct tm lt;
-    localtime_r(&now, &lt);
-    int bed_min = ((lt.tm_hour * 60 + lt.tm_min) + 4 * 60) % 1440;   // "bedtime" +4h from now
-    zone_state_t *a = &st->zones[ZONE_A];
-    a->on = false;
-    a->sched_valid = true;
-    snprintf(a->sched_bedtime, sizeof(a->sched_bedtime), "%02d:%02d", bed_min / 60, bed_min % 60);
-    a->sched_bedtime_temp_c = 19.4f;
-    st->generation++;   // direct field-sets don't bump it; make on_state re-run
-    ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
-    pump_ms(600);
-    snapshot("dial-off-bedtime");
-}
-
-// TEMP verification scenario (owner task: "off + night is the dimmest
-// combination on the device ... say what it looks like"). Off zone under the
-// night palette — reuses scenario_dial_off_bedtime's off-zone setup. Not
-// part of the permanent doc set — removed again once inspected.
-
-// Boost-heat duration picker, knob-adjusted off the 30min default to 45 so
-// the render shows a deliberately chosen duration, not just the opening value.
-static void scenario_boost(void)
-{
-    apply_baseline();
-    uintptr_t packed = ((uintptr_t)ZONE_A << 1) | 1u;   // heat
-    ui_router_go(SCR_BOOST, (void *)packed, LV_SCR_LOAD_ANIM_NONE);
-    pump_ms(200);
-    sim_knob(3);   // +5min * 3 = 30 -> 45
-    pump_ms(200);
-    snapshot("boost");
 }
 
 // Also documents the M7 permanent "Update" row (replaces the M6 conditional
@@ -728,16 +603,11 @@ int main(void)
     scenario_wifi_portal();
     scenario_netpick();
     scenario_passkey();
-    scenario_oauth_qr();
-    scenario_oauth_waiting();
     scenario_sidepick();
     scenario_connecting();
     scenario_dial();
     scenario_dial_update();
     scenario_dial_relative();
-    scenario_dial_until();
-    scenario_dial_off_bedtime();
-    scenario_boost();
     scenario_menu();
     scenario_update();
     scenario_update_prompt();

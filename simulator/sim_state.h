@@ -9,7 +9,7 @@
  *
  * This header adds ONE thing the real dial_state.h doesn't: direct access to
  * the live struct, so main.c's scenarios can set fields no setter in the
- * dial_ui-facing API covers (zones[], have_state, serial, ap_ssid, oauth_url,
+ * dial_ui-facing API covers (zones[], have_state, serial, ap_ssid,
  * ota, ...) before calling ui_router_go. Screens never see this header —
  * only main.c does.
  */
