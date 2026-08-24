@@ -278,7 +278,8 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             // deliberate tap, and a routine poll landing mid-choice must not
             // yank the user off either one.
             if (passive || cur == SCR_SETTINGS ||
-                cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE) return cur;
+                cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE ||
+                cur == SCR_PAD_ADDRESS) return cur;
             // First link on a fresh device: pick a default side before showing
             // the dial (SCR_SIDEPICK). Nothing to pick on a single-zone topper,
             // so that device goes straight to its one face. The `cur` half of
@@ -300,7 +301,8 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             screen_id_t cur = ui_router_current();
             if (cur == SCR_MENU || cur == SCR_SETTINGS || cur == SCR_ABOUT ||
                 cur == SCR_WIFI || cur == SCR_BRIGHTNESS ||
-                cur == SCR_BRIGHTNESS_MENU || cur == SCR_UPDATE)
+                cur == SCR_BRIGHTNESS_MENU || cur == SCR_UPDATE ||
+                cur == SCR_PAD_ADDRESS)
                 return cur;
         }
         return st->phase == PH_READY ? SCR_CONNECTING : SCR_ERROR;
@@ -710,6 +712,25 @@ static void handle_immediate_cmd(const app_cmd_t *cmd)
     case CMD_OTA_CLEAR_FAILED:
         if (dial_ota_clear_stale_failure(0)) commit_ota_snapshot();
         break;
+    // Settings' "Pad Address"/"Bed Mode" rows just persisted a new value
+    // (dial_state_set_pad_url/set_zone_mode already wrote it to the store
+    // and NVS) — apply it to dial_somnus live rather than waiting for a
+    // reboot. dial_somnus_set_zone_mode() is cheap and always safe to
+    // re-run; dial_somnus_connect() re-probes the (possibly new) address
+    // with a real GET. A failed probe just sets PH_DEGRADED here and falls
+    // through to the existing poll/backoff handling below — no separate
+    // retry path needed: the drain loop's post-command
+    // last_poll_us=0/poll_confirms=POLL_CONFIRM_N (below) forces a fast
+    // recheck, and steady-state poll failures already march the phase
+    // through PH_DEGRADED on their own if it's still unreachable after that.
+    case CMD_PAD_SETTINGS_CHANGED: {
+        app_state_t st;
+        dial_state_get(&st);
+        dial_somnus_set_zone_mode(st.pad_single_zone);
+        if (!dial_somnus_connect(st.pad_base_url))
+            dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
+        break;
+    }
     default:
         break;   // CMD_SET_TEMP/CMD_TOGGLE_ON never reach here (see the drain loop)
     }
@@ -754,20 +775,26 @@ static void worker_task(void *arg)
 
     // ---- Somnus pad connect, with retry/backoff -----------------------
     // No discovery, no auth, no interactive consent (see dial_somnus.h): a
-    // single reachability probe against the compiled-default base URL. No
-    // on-device Settings row exists yet to change the base URL/zone mode
-    // from the dial itself; both are the pad's compiled defaults until one
-    // is added.
+    // single reachability probe against the PERSISTED base URL (Settings'
+    // "Pad Address" row; dial_state_restore_prefs() already ran in app_main,
+    // so this reads whatever the user last saved, or the compiled
+    // DIAL_PAD_DEFAULT_* fallback on a fresh device). Read once here, not
+    // re-read on every retry: a settings change mid-retry-loop reaches
+    // dial_somnus through CMD_PAD_SETTINGS_CHANGED instead (handle_immediate_
+    // cmd below), not by this loop noticing a moving target.
+    char pad_url[DIAL_PAD_URL_MAX_LEN + 1];
+    dial_state_get_pad_url(pad_url, sizeof(pad_url));
+    bool pad_single_zone = dial_state_get_zone_mode();
     for (;;) {
         dial_state_set_phase(PH_SOMNUS_CONNECTING, NULL);
-        if (dial_somnus_connect(SOMNUS_DEFAULT_BASE_URL)) break;
+        if (dial_somnus_connect(pad_url)) break;
         dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
         backoff_wait(backoff_s);
         backoff_s = (backoff_s * 2 > BACKOFF_MAX_S) ? BACKOFF_MAX_S : backoff_s * 2;
     }
     backoff_s = BACKOFF_MIN_S;
-    dial_somnus_set_zone_mode(SOMNUS_DEFAULT_SINGLE_ZONE_MODE);
-    ESP_LOGI(TAG, "pad connected at %s", SOMNUS_DEFAULT_BASE_URL);
+    dial_somnus_set_zone_mode(pad_single_zone);
+    ESP_LOGI(TAG, "pad connected at %s", pad_url);
 
     // Fixed pad range (local_api spec, dial_somnus.h) — no discovery call to
     // report it, unlike Orion's list_devices, so seed it once here instead

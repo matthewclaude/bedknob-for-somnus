@@ -426,6 +426,57 @@ static void scenario_settings(void)
     snapshot("settings");
 }
 
+// Knob-walked down to the new "Pad Address"/"Bed Mode" pair (Back(0)/
+// Adjustment mode(1)/Brightness(2)/Screen timeout(3)/Scale(4)/Units(5)/
+// Haptics(6)/Rotation(7)/Pad Address(8)/Bed Mode(9)/Factory reset(10)) —
+// the rotor opens on Adjustment mode (index 1, dial_list_settle in
+// scr_settings.c's create()), so +7 detents lands focus on Pad Address with
+// Rotation/Bed Mode as its zoomed/faded neighbors, putting both new rows in
+// frame at once.
+static void scenario_settings_pad(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(7);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("settings-pad");
+}
+
+// The Pad Address text-entry screen (scr_pad_address.c), opened straight
+// from Settings' row — pre-filled with sim_state_reset()'s
+// DIAL_PAD_DEFAULT_BASE_URL, same as a real fresh device, so this documents
+// what editing an EXISTING value looks like (the common case), not a blank
+// field.
+static void scenario_pad_address(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_PAD_ADDRESS, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    snapshot("pad-address");
+}
+
+// The PH_DEGRADED fallback after a pad-address change that doesn't resolve —
+// exercises the exact path a real IP typo or a moved pad would take
+// (CMD_PAD_SETTINGS_CHANGED's dial_somnus_connect() failing, main.c setting
+// PH_DEGRADED with the real error string), except there is no real
+// dial_somnus/network in this simulator to actually fail against, so
+// sim_state.c's dial_state_set_pad_url() fakes the same outcome for any URL
+// containing "unreachable" (see that function's own comment). The simulator
+// has no nav policy (every scenario navigates directly, same as every other
+// one here), so this goes straight to SCR_CONNECTING/SCR_ERROR's shared
+// rendering, which is what a real dial would land on too once nav_policy
+// saw PH_DEGRADED with no menu/settings screen deliberately open.
+static void scenario_pad_unreachable(void)
+{
+    apply_baseline();
+    dial_state_set_pad_url("http://unreachable.invalid:8080");
+    ui_router_go(SCR_CONNECTING, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    snapshot("pad-unreachable");
+}
+
 // The Adjustment mode choice screen, reached from Settings' "Adjustment
 // mode" row: apply_baseline() doesn't touch sched_follow, and
 // sim_state_reset() left it at its fresh-device default (true = Schedule),
@@ -612,6 +663,9 @@ int main(void)
     scenario_update();
     scenario_update_prompt();
     scenario_settings();
+    scenario_settings_pad();
+    scenario_pad_address();
+    scenario_pad_unreachable();
     scenario_adjust_mode();
     scenario_brightness_menu();
     scenario_settings_brightness();

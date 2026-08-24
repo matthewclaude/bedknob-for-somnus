@@ -10,7 +10,7 @@
  * clear_wifi_join_failed, set_phase, stamp_input, get/set_bri_day_pct,
  * get/set_bri_night_pct, get/set_bri_night_clock_pct,
  * get/set_screen_timeout_s, set_beta,
- * set_sched_follow, set_ota_auto,
+ * set_sched_follow, get/set_pad_url, get/set_zone_mode, set_ota_auto,
  * set_ota_defer, set_ota_skip, clear_ota_prompt_due, and dial_cmd_post (a
  * logging no-op — there is no worker task here to drain the queue).
  * set_ota_shown is deliberately NOT here: only main.c's worker calls it
@@ -53,6 +53,8 @@ void sim_state_reset(void)
     s_state.ota_auto = 0;         // Off — matches dial_state_init's fresh-device default
     // ota_defer/ota_shown/ota_skip/ota_prompt_due all default to 0/""/false
     // via the memset above, same as dial_state_init.
+    strncpy(s_state.pad_base_url, DIAL_PAD_DEFAULT_BASE_URL, sizeof(s_state.pad_base_url) - 1);
+    s_state.pad_single_zone = DIAL_PAD_DEFAULT_SINGLE_ZONE;   // matches dial_state_init's default
     s_state.generation = 1;
 }
 
@@ -155,6 +157,43 @@ void dial_state_set_sched_follow(bool follow)
     s_state.generation++;
 }
 
+void dial_state_get_pad_url(char *out, size_t out_sz)
+{
+    if (!out || out_sz == 0) return;
+    strncpy(out, s_state.pad_base_url, out_sz - 1);
+    out[out_sz - 1] = '\0';
+}
+
+// Fakes the reachability probe the real dial_somnus_connect() would do —
+// there is no real dial_somnus/network here (the simulator never links
+// main.c or components/dial_somnus). A URL containing "unreachable" fails
+// it, same as main.c's CMD_PAD_SETTINGS_CHANGED handler would set on a real
+// failed GET; anything else "succeeds". This is what lets
+// scenario_pad_unreachable (main.c) put the real Settings/Pad Address
+// screens AND the PH_DEGRADED fallback in front of a real screenshot before
+// any hardware exists to actually fail against.
+void dial_state_set_pad_url(const char *url)
+{
+    strncpy(s_state.pad_base_url, url ? url : "", sizeof(s_state.pad_base_url) - 1);
+    s_state.pad_base_url[sizeof(s_state.pad_base_url) - 1] = '\0';
+    if (strstr(s_state.pad_base_url, "unreachable")) {
+        s_state.phase = PH_DEGRADED;
+        strncpy(s_state.phase_err, "pad unreachable (simulated)", sizeof(s_state.phase_err) - 1);
+        s_state.phase_err[sizeof(s_state.phase_err) - 1] = '\0';
+    } else {
+        s_state.phase = PH_READY;
+    }
+    s_state.generation++;
+}
+
+bool dial_state_get_zone_mode(void) { return s_state.pad_single_zone; }
+
+void dial_state_set_zone_mode(bool single_zone)
+{
+    s_state.pad_single_zone = single_zone;
+    s_state.generation++;
+}
+
 void dial_state_set_ota_auto(uint8_t mode)
 {
     s_state.ota_auto = (mode <= 1) ? mode : 0;
@@ -222,7 +261,7 @@ void dial_cmd_post(const app_cmd_t *cmd)
     // is how this one drifted after CMD_MATCH_PARTNER's removal (§4).
     static const char *KIND[] = {
         "SET_TEMP", "TOGGLE_ON", "WIFI_RESET", "FACTORY_RESET",
-        "OTA_CHECK", "OTA_APPLY", "OTA_CLEAR_FAILED",
+        "OTA_CHECK", "OTA_APPLY", "OTA_CLEAR_FAILED", "PAD_SETTINGS_CHANGED",
     };
     const char *k = (cmd->kind >= 0 && (size_t)cmd->kind < sizeof(KIND) / sizeof(KIND[0]))
                         ? KIND[cmd->kind] : "?";

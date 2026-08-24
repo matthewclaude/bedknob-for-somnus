@@ -17,6 +17,7 @@ extern const ui_screen_t scr_standby;
 extern const ui_screen_t scr_welcome;
 extern const ui_screen_t scr_sidepick;
 extern const ui_screen_t scr_settings;
+extern const ui_screen_t scr_pad_address;
 extern const ui_screen_t scr_adjust_mode;
 extern const ui_screen_t scr_brightness_menu;
 extern const ui_screen_t scr_brightness;

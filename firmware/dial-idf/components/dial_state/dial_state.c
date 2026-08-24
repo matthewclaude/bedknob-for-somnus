@@ -93,6 +93,8 @@ void dial_state_init(void)
     s_state.beta          = false;    // fresh-device default: stable channel only
     s_state.sched_follow  = true;     // fresh-device default: Follow schedule (owner decision)
     s_state.ota_auto      = 0;        // fresh-device default: Off (explicit consent required)
+    strlcpy(s_state.pad_base_url, DIAL_PAD_DEFAULT_BASE_URL, sizeof(s_state.pad_base_url));
+    s_state.pad_single_zone = DIAL_PAD_DEFAULT_SINGLE_ZONE;
     // ota_defer/ota_shown/ota_skip/ota_prompt_due all default to 0/""/false
     // via the memset above -- 0 is exactly "no defer pending" and "never
     // shown" for the two epoch fields, so no explicit seed needed here.
@@ -159,11 +161,17 @@ void dial_state_restore_prefs(void)
     bool have_ota_shown = nvs_get_u32(h, "ota_shown", &ota_shown) == ESP_OK;
     size_t ota_skip_sz  = sizeof(ota_skip);
     bool have_ota_skip  = nvs_get_str(h, "ota_skip", ota_skip, &ota_skip_sz) == ESP_OK;
+    char     pad_url[DIAL_PAD_URL_MAX_LEN + 1];
+    size_t   pad_url_sz = sizeof(pad_url);
+    bool have_pad_url   = nvs_get_str(h, "pad_url", pad_url, &pad_url_sz) == ESP_OK;
+    uint8_t  pad_1zone  = 1;
+    bool have_pad_1zone = nvs_get_u8(h, "pad_1zone", &pad_1zone) == ESP_OK;
     nvs_close(h);
     if (!have_zone && !have_units && !have_haptics && !have_rot && !have_rel
         && !have_bri_day && !have_bri_night && !have_bri_nclk && !have_scr_to && !have_beta
         && !have_sched_follow
-        && !have_ota_auto && !have_ota_defer && !have_ota_shown && !have_ota_skip) return;
+        && !have_ota_auto && !have_ota_defer && !have_ota_shown && !have_ota_skip
+        && !have_pad_url && !have_pad_1zone) return;
 
     xSemaphoreTake(s_mux, portMAX_DELAY);
     if (have_zone) {
@@ -235,6 +243,8 @@ void dial_state_restore_prefs(void)
     if (have_ota_defer)  s_state.ota_defer = ota_defer;
     if (have_ota_shown)  s_state.ota_shown = ota_shown;
     if (have_ota_skip)   strlcpy(s_state.ota_skip, ota_skip, sizeof(s_state.ota_skip));
+    if (have_pad_url)    strlcpy(s_state.pad_base_url, pad_url, sizeof(s_state.pad_base_url));
+    if (have_pad_1zone)  s_state.pad_single_zone = (pad_1zone != 0);
     s_state.generation++;
     xSemaphoreGive(s_mux);
 }
@@ -551,6 +561,59 @@ void dial_state_set_sched_follow(bool follow)
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
         nvs_set_u8(h, "sched_follow", follow ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+void dial_state_get_pad_url(char *out, size_t out_sz)
+{
+    if (!out || out_sz == 0) return;
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    strlcpy(out, s_state.pad_base_url, out_sz);
+    xSemaphoreGive(s_mux);
+}
+
+void dial_state_set_pad_url(const char *url)
+{
+    // Truncate into a local buffer FIRST, same shape as every other setter
+    // here: the value committed to the store and the value written to NVS
+    // must be the exact same bytes, not two independent reads of a field
+    // that could in principle change between them.
+    char buf[DIAL_PAD_URL_MAX_LEN + 1];
+    strlcpy(buf, url ? url : "", sizeof(buf));
+
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    strlcpy(s_state.pad_base_url, buf, sizeof(s_state.pad_base_url));
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, "pad_url", buf);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+bool dial_state_get_zone_mode(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    bool v = s_state.pad_single_zone;
+    xSemaphoreGive(s_mux);
+    return v;
+}
+
+void dial_state_set_zone_mode(bool single_zone)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.pad_single_zone = single_zone;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "pad_1zone", single_zone ? 1 : 0);
         nvs_commit(h);
         nvs_close(h);
     }

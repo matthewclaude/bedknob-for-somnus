@@ -35,6 +35,17 @@
  * five values dial_state.h's DIAL_SCR_TIMEOUT_CHOICES offers (30s/1m/2m/5m/
  * 10m — same idiom as Rotation below, not a submenu; five values don't need
  * one).
+ *
+ * "Pad Address" and "Bed Mode" (replacing the compile-time SOMNUS_DEFAULT_*
+ * macros dial_somnus.h's own header note asks for a real Settings row to
+ * replace) sit right after Rotation: like Scale/Units/Haptics/Rotation
+ * they're install-once — set when the dial first meets its pad, rarely
+ * touched again — but they're pad-connection settings, not display prefs, so
+ * they get their own pair at the end of that group rather than being mixed
+ * into it. Pad Address opens the text-entry sub-screen (scr_pad_address.c);
+ * Bed Mode is a plain in-place toggle, same idiom as Scale/Units. Both apply
+ * live via CMD_PAD_SETTINGS_CHANGED — see main.c's handle_immediate_cmd —
+ * with no reboot required.
  */
 #include "ui_screens_internal.h"
 #include "dial_haptics.h"
@@ -49,6 +60,7 @@ static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_scale, *s_val_units, *s_val_adjust_mode, *s_val_haptics, *s_val_rotation;
 static lv_obj_t *s_val_screen_timeout;
+static lv_obj_t *s_val_pad_address, *s_val_bed_mode;
 
 typedef enum { CONFIRM_FACTORY = 0, CONFIRM_COUNT } confirm_id_t;
 static lv_obj_t   *s_val_confirm[CONFIRM_COUNT];
@@ -250,6 +262,35 @@ static void row_screen_timeout_cb(lv_event_t *e)
     dial_state_set_screen_timeout_s(next);
 }
 
+// Opens the Pad Address text-entry screen (scr_pad_address.c) — plain
+// navigation, same as Adjustment mode/Brightness above. Value cell shows the
+// currently persisted address (see on_state), scheme stripped for brevity.
+static void row_pad_address_cb(lv_event_t *e)
+{
+    (void)e;
+    dial_haptics_play(HAPTIC_TICK);
+    ui_router_go(SCR_PAD_ADDRESS, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+// "Bed Mode": Somnus app terminology exactly ("One Bed"/"Dual Sides"), not
+// the internal single_zone naming dial_somnus.h/app_state_t use — this is
+// the one row a user actually reads, so it gets their words, not ours. A
+// plain in-place toggle, same idiom as Scale/Units above, not a sub-screen:
+// it's one binary choice with no further explanation needed the way
+// Adjustment mode's two options do.
+static void row_bed_mode_cb(lv_event_t *e)
+{
+    (void)e;
+    bool next_single = !dial_state_get_zone_mode();
+    dial_haptics_play(HAPTIC_TICK);
+    dial_state_set_zone_mode(next_single);
+    // Applied live, not on next boot: dial_somnus_set_zone_mode() must run on
+    // the worker task, never here (dial_somnus.h's threading contract), so
+    // post through the command queue rather than calling it directly.
+    app_cmd_t cmd = { .kind = CMD_PAD_SETTINGS_CHANGED };
+    dial_cmd_post(&cmd);
+}
+
 static void row_factory_reset_cb(lv_event_t *e)
 {
     (void)e;
@@ -312,6 +353,18 @@ static void create(lv_obj_t *scr, void *arg)
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
     make_row(s_list, "Haptics",       row_haptics_cb,       &s_val_haptics);
     make_row(s_list, "Rotation",      row_rotation_cb,      &s_val_rotation);
+
+    // Pad Address's value is a full URL — too long to share Adjustment
+    // mode's label with a right-aligned value, so it gets the same
+    // stacked-second-line treatment (label nudged up, value dropped below,
+    // full row width, dot-truncated if it still overruns).
+    lv_obj_t *pad_row = make_row(s_list, "Pad Address", row_pad_address_cb, &s_val_pad_address);
+    lv_obj_align(lv_obj_get_child(pad_row, 0), LV_ALIGN_LEFT_MID, 0, -16);
+    lv_obj_set_width(s_val_pad_address, LV_PCT(100));
+    lv_label_set_long_mode(s_val_pad_address, LV_LABEL_LONG_DOT);
+    lv_obj_align(s_val_pad_address, LV_ALIGN_LEFT_MID, 0, 16);
+
+    make_row(s_list, "Bed Mode",      row_bed_mode_cb,      &s_val_bed_mode);
     make_row(s_list, "Factory reset", row_factory_reset_cb, &s_val_confirm[CONFIRM_FACTORY]);
 
     // "Tap again to confirm" is too long to share one line with "Factory
@@ -346,6 +399,7 @@ static void destroy(void)
     s_title_lbl = NULL;
     s_val_scale = s_val_units = s_val_adjust_mode = s_val_haptics = s_val_rotation = NULL;
     s_val_screen_timeout = NULL;
+    s_val_pad_address = s_val_bed_mode = NULL;
     for (int i = 0; i < CONFIRM_COUNT; i++) s_val_confirm[i] = NULL;
     s_armed = CONFIRM_COUNT;
 }
@@ -372,6 +426,15 @@ static void on_state(const app_state_t *st)
     static const char *HAPTICS_TXT[] = { "Off", "Low", "Auto", "High" };   // index == haptic_level_t
     lv_label_set_text(s_val_haptics,
         HAPTICS_TXT[st->haptics_level <= HAPTIC_LEVEL_HIGH ? st->haptics_level : HAPTIC_LEVEL_AUTO]);
+
+    // Scheme stripped for the subtitle: the row is already labeled "Pad
+    // Address", so "http://" is implied, not informative, and every
+    // character saved here is one more of the actual address visible before
+    // LONG_DOT has to start eating the tail.
+    const char *url = st->pad_base_url;
+    if (strncmp(url, "http://", 7) == 0) url += 7;
+    lv_label_set_text(s_val_pad_address, url);
+    lv_label_set_text(s_val_bed_mode, st->pad_single_zone ? "One Bed" : "Dual Sides");
 }
 
 // The knob walks the focused row (one per detent, dial_list's rotor snap) —

@@ -54,6 +54,7 @@ set(DIAL_UI_SRCS
   ${DIAL_UI_DIR}/scr_welcome.c
   ${DIAL_UI_DIR}/scr_sidepick.c
   ${DIAL_UI_DIR}/scr_settings.c
+  ${DIAL_UI_DIR}/scr_pad_address.c
   ${DIAL_UI_DIR}/scr_adjust_mode.c
   ${DIAL_UI_DIR}/scr_brightness_menu.c
   ${DIAL_UI_DIR}/scr_brightness.c

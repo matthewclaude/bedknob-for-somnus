@@ -14,6 +14,7 @@ void ui_screens_register_all(void)
     ui_router_register(SCR_WELCOME, &scr_welcome);
     ui_router_register(SCR_SIDEPICK, &scr_sidepick);
     ui_router_register(SCR_SETTINGS, &scr_settings);
+    ui_router_register(SCR_PAD_ADDRESS, &scr_pad_address);
     ui_router_register(SCR_ADJUST_MODE, &scr_adjust_mode);
     ui_router_register(SCR_BRIGHTNESS_MENU, &scr_brightness_menu);
     ui_router_register(SCR_BRIGHTNESS, &scr_brightness);

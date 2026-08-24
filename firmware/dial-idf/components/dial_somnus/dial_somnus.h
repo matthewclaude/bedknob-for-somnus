@@ -27,13 +27,16 @@
  * sides... values set on side0 are automatically mirrored to side1"). This
  * component can't detect the mode on its own.
  *
- * This is a runtime setting, not a compile-time one -- meant to live in the
- * dial's own Settings screen (NVS-backed, same mechanism as brightness,
- * haptics, etc.) alongside the pad's base URL, so both can be changed on
- * the device itself without a reflash. See dial_somnus_set_zone_mode() and
- * dial_somnus_connect() below. Whatever calls into dial_somnus first (the
- * worker task, on boot) should read both from dial_state's persisted
- * settings and apply them before the first real request.
+ * This is a runtime setting, not a compile-time one: it lives in the dial's
+ * own Settings screen ("Bed Mode"/"Pad Address" rows, scr_settings.c /
+ * scr_pad_address.c), NVS-backed via dial_state_get/set_zone_mode and
+ * dial_state_get/set_pad_url (same mechanism as brightness, haptics, etc.),
+ * so both can be changed on the device itself without a reflash. See
+ * dial_somnus_set_zone_mode() and dial_somnus_connect() below. main.c's
+ * worker task reads both from dial_state's persisted settings at boot before
+ * the first real request, and re-applies them live on every
+ * CMD_PAD_SETTINGS_CHANGED (posted whenever either Settings row commits a
+ * change) rather than waiting for a reboot.
  *
  * Threading: same rules as dial_mcp — call only from the worker task, never
  * from the LVGL task. Not reentrant; the worker is already single-threaded

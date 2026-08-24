@@ -3,7 +3,7 @@ idf_component_register(
          "scr_netpick.c" "scr_passkey.c"
          "scr_menu.c" "scr_wifi.c" "scr_about.c" "scr_update.c" "scr_updating.c" "scr_update_prompt.c"
          "scr_standby.c" "scr_welcome.c" "scr_sidepick.c"
-         "scr_settings.c" "scr_adjust_mode.c" "scr_brightness_menu.c" "scr_brightness.c" "dial_palette.c" "dial_list.c" "dial_font_num_88.c" "dial_font_icons_16.c" "dial_font_icons_20.c"
+         "scr_settings.c" "scr_pad_address.c" "scr_adjust_mode.c" "scr_brightness_menu.c" "scr_brightness.c" "dial_palette.c" "dial_list.c" "dial_font_num_88.c" "dial_font_icons_16.c" "dial_font_icons_20.c"
     INCLUDE_DIRS "."
     REQUIRES dial_state
     PRIV_REQUIRES esp_timer dial_haptics dial_power dial_display esp_app_format dial_ota esp_wifi dial_net)

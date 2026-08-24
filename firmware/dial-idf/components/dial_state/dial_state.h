@@ -242,6 +242,18 @@ typedef struct {
     "This firmware may be too old\n" \
     "chris023/orion-waveshare-rotary-dial"
 
+// Fallback pad address / zone-mode, used only until Settings has ever
+// persisted a real value (fresh device, or one that predates this
+// preference). Mirrors dial_somnus.h's SOMNUS_DEFAULT_BASE_URL/
+// SOMNUS_DEFAULT_SINGLE_ZONE_MODE without depending on that header --
+// dial_state is a leaf component (no REQUIRES beyond esp_timer/nvs_flash,
+// same reasoning as app_state_t.ota below not #include-ing dial_ota.h), so
+// this is a deliberate duplicate, not a typo. Keep both exactly in sync with
+// dial_somnus.h's own copies if either ever changes.
+#define DIAL_PAD_URL_MAX_LEN 127
+#define DIAL_PAD_DEFAULT_BASE_URL "http://192.168.1.169:8080"
+#define DIAL_PAD_DEFAULT_SINGLE_ZONE true
+
 typedef struct {
     // Connection / lifecycle
     conn_phase_t phase;
@@ -416,6 +428,19 @@ typedef struct {
     // NVS-absent restore -- see dial_state_get_sched_follow/
     // dial_state_set_sched_follow.
     bool sched_follow;
+
+    // Somnus pad address + zone mode (Settings' "Pad Address"/"Bed Mode"
+    // rows). Both start at the DIAL_PAD_DEFAULT_* fallback above until the
+    // user edits them; from then on this is the one persisted source of
+    // truth -- main.c's worker reads it at boot instead of the compiled
+    // SOMNUS_DEFAULT_* macros, and re-applies it live via
+    // CMD_PAD_SETTINGS_CHANGED whenever either setter below runs (see
+    // dial_somnus.h's own header note asking for exactly this design).
+    // pad_single_zone true = "One Bed" (Somnus app terminology), false =
+    // "Dual Sides" -- mirrors dial_somnus_get_zone_mode()'s single_zone
+    // sense exactly. Persisted to NVS "ui"/"pad_url" and "ui"/"pad_1zone".
+    char pad_base_url[DIAL_PAD_URL_MAX_LEN + 1];
+    bool pad_single_zone;
 
     // --- OTA (M6) ---
     // Mirrors dial_ota_info_t (components/dial_ota/dial_ota.h) field-for-
@@ -630,6 +655,22 @@ void dial_state_set_beta(bool enabled);
 bool dial_state_get_sched_follow(void);
 void dial_state_set_sched_follow(bool follow);
 
+// Somnus pad address + zone-mode preference (see app_state_t.pad_base_url/
+// pad_single_zone above). Same getter+setter shape as beta/sched_follow;
+// dial_state_get_pad_url copies into a caller-owned buffer of at least
+// DIAL_PAD_URL_MAX_LEN+1 bytes (a URL doesn't fit the plain "return by
+// value" shape the bool/uint8_t prefs use). Setters persist immediately to
+// NVS "ui"/"pad_url" and "ui"/"pad_1zone" respectively. Neither setter
+// touches dial_somnus itself -- dial_state has no business knowing about
+// the pad client, same division of labor as haptics_level/
+// dial_haptics_set_level -- the worker (main.c) is what actually calls
+// dial_somnus_connect()/dial_somnus_set_zone_mode(), via
+// CMD_PAD_SETTINGS_CHANGED below.
+void dial_state_get_pad_url(char *out, size_t out_sz);
+void dial_state_set_pad_url(const char *url);
+bool dial_state_get_zone_mode(void);
+void dial_state_set_zone_mode(bool single_zone);
+
 // --- Update prompt / auto-update (see app_state_t's comments above for what
 // each field means and its NVS key). All four setters persist immediately,
 // same shape as dial_state_set_beta -- callers are rare taps in the LVGL
@@ -701,6 +742,14 @@ typedef enum {
     // idle-loop call for the time-based ~25s auto-clear that covers the
     // case where the user never leaves the screen at all.
     CMD_OTA_CLEAR_FAILED,
+
+    // Settings' "Pad Address"/"Bed Mode" rows just persisted a new value via
+    // dial_state_set_pad_url()/dial_state_set_zone_mode() -- zone/a/b unused.
+    // The worker re-reads both from the store and re-applies them to
+    // dial_somnus live (dial_somnus_set_zone_mode() always;
+    // dial_somnus_connect() again to re-probe the (possibly new) address),
+    // rather than requiring a reboot. See main.c's handle_immediate_cmd.
+    CMD_PAD_SETTINGS_CHANGED,
 } cmd_kind_t;
 
 typedef struct {
