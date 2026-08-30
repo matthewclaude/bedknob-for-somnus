@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "dial_haptics.h"
 #include "dial_power.h"
@@ -108,6 +109,55 @@ bool dial_net_setup_requested(void) { return false; }
 void dial_net_bringup(void) {}
 const char *dial_net_ap_ssid(void) { return "SomnusDial-A1B2"; }
 void dial_net_on_event(dial_net_event_cb_t cb) { (void)cb; }
+
+/* ---- deterministic clock -------------------------------------------------
+ * scr_standby.c (the real, unmodified firmware source — CMakeLists.txt's
+ * "HARD RULE: nothing under firmware/ is modified" rules out fixing this at
+ * the call site) reads the clock straight from libc: time(NULL) then
+ * localtime_r(), no dial_time abstraction involved. Left alone, that means
+ * standby.png/standby-update.png render whatever moment the simulator
+ * happens to run at, so they show as "changed" after every single run with
+ * no actual layout change behind it (2026-08-30: confirmed benign, but not
+ * useful as a diff signal).
+ *
+ * Fixed here instead, by definition rather than a linker trick: a strong
+ * time()/localtime_r() symbol in one of the simulator's own object files
+ * wins the link over libc's dynamic one for the whole dial_sim executable
+ * (verified — libc's never gets called), so scr_standby.c gets a fixed
+ * moment without knowing anything changed. localtime_r() ignores its
+ * `timep` argument entirely and always returns the same struct: fixing only
+ * time()'s return value would still leave the rendered hour/weekday at the
+ * mercy of whatever TZ the host machine happens to have set, which defeats
+ * the point.
+ *
+ * The moment itself is picked to be unmistakably a placeholder, not
+ * anything that could be read as a real recorded timestamp: 2000-01-01
+ * 12:34:00 UTC — Y2K, ascending clock digits, and (not chosen for this,
+ * just how the calendar landed) a Saturday. Renders as clock "12:34", date
+ * "SAT - JAN 1". The epoch value below is that exact moment (946730040),
+ * kept consistent with the struct tm rather than an unrelated number, even
+ * though localtime_r() below never actually converts it.
+ */
+#define SIM_FIXED_EPOCH 946730040   /* 2000-01-01T12:34:00Z */
+
+time_t time(time_t *tloc)
+{
+    if (tloc) *tloc = SIM_FIXED_EPOCH;
+    return SIM_FIXED_EPOCH;
+}
+
+struct tm *localtime_r(const time_t *timep, struct tm *result)
+{
+    (void)timep;
+    memset(result, 0, sizeof(*result));
+    result->tm_year = 100;   // 2000 (years since 1900)
+    result->tm_mon  = 0;     // January (0-indexed)
+    result->tm_mday = 1;
+    result->tm_hour = 12;
+    result->tm_min  = 34;
+    result->tm_wday = 6;     // Saturday (0=Sunday, matches scr_standby.c's WD[])
+    return result;
+}
 
 /* ---- esp_app_desc --------------------------------------------------------
  * Fixed "v1.0.1 / v6.0" identity for scr_about.c's Firmware/IDF rows —
