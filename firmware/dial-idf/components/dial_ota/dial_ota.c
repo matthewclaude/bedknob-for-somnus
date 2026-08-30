@@ -38,7 +38,7 @@ static const char *TAG = "ota";
 // is_newer comparison; 5 of them is ~27KB, comfortably inside the cap.
 #define GITHUB_API_URL_LIST \
     "https://api.github.com/repos/matthewclaude/somnus-waveshare-rotary-dial/releases?per_page=5"
-#define ASSET_NAME     "orion-dial.bin"
+#define ASSET_NAME     "somnus-dial.bin"
 #define TAG_PREFIX     "dial-v"
 #define CHECK_BUF_CAP  (64 * 1024)   // release JSON is normally ~10-30KB
 // Beta channel only: how many of the list endpoint's (newest-first) entries

@@ -10,4 +10,4 @@ add_compile_options("-Wno-format")
 # pushed to GitHub ("dial-vX.Y.Z") must match this for the update check to
 # ever consider a release "current" once installed.
 set(PROJECT_VER "1.4.2")
-project(orion-dial)
+project(somnus-dial)
