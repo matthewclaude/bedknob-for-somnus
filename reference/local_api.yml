@@ -1,0 +1,209 @@
+openapi: 3.0.3
+info:
+  title: Somnus Pad Local HTTP API
+  version: 0.2.0
+  description: |
+    On-device HTTP API for querying and controlling the Somnus Pad.
+    The default HTTP port is 8080 (configurable via device preferences).
+
+    **Temperature readback:**
+    The device now returns the current measured temperature (`current_t`) for each
+    side in the state response. This value is `null` before the first sensor reading.
+
+    **Single-zone mode note:**
+    When the device is configured in single-zone mode, you should only operate
+    `side0`. Any `side1` fields in write requests are ignored (or may lead to
+    undefined behavior for power). Values set on `side0` are automatically
+    mirrored to `side1` by the device.
+servers:
+  - url: http://{deviceIp}:{port}
+    variables:
+      deviceIp:
+        default: "192.168.1.100"
+        description: IP address of the device on the local network.
+      port:
+        default: "8080"
+        description: Configured HTTP port (default is 8080).
+
+paths:
+  /api/state:
+    get:
+      summary: Get current device state
+      operationId: getState
+      responses:
+        "200":
+          description: Current state for both sides including temperature and any fatal error flag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+
+  /api/power:
+    post:
+      summary: Set power (on/off) for one or both sides
+      description: |
+        In single-zone mode, you should only provide `side0`. Providing `side1`
+        (alone or together with `side0`) can produce undefined/undesired behavior
+        because the firmware mirrors power states between sides.
+      operationId: setPower
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PowerRequest"
+      responses:
+        "200":
+          description: Updated state after applying the power change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "400":
+          description: Bad request (missing fields or wrong types).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/target_t:
+    post:
+      summary: Set target temperature for one or both sides
+      description: |
+        In single-zone mode, you should only provide `side0`. Providing `side1`
+        is not recommended because `side0` takes precedence and overwrites `side1`.
+      operationId: setTargetTemperature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TargetTemperatureRequest"
+      responses:
+        "200":
+          description: Updated state after applying the target temperature change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "400":
+          description: Bad request (missing fields or wrong types).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    StateResponse:
+      type: object
+      required:
+        - side0
+        - side1
+        - error
+      properties:
+        side0:
+          $ref: "#/components/schemas/SideState"
+        side1:
+          $ref: "#/components/schemas/SideState"
+        error:
+          type: boolean
+          description: True when a fatal error is active on the device.
+
+    SideState:
+      type: object
+      required:
+        - is_on
+        - is_wl_low
+        - target_t
+        - current_t
+      properties:
+        is_on:
+          type: boolean
+          description: Whether the side is currently powered on.
+        is_wl_low:
+          type: boolean
+          description: Water level is low for this side.
+        target_t:
+          type: number
+          format: float
+          description: Target temperature in °C.
+          minimum: 12
+          maximum: 42.3
+          example: 22.0
+        current_t:
+          type: number
+          format: float
+          nullable: true
+          description: Current measured temperature in °C. Null before first sensor reading.
+
+    PowerRequest:
+      type: object
+      description: At least one of side0 or side1 must be provided. In single-zone mode, only side0 should be sent.
+      minProperties: 1
+      properties:
+        side0:
+          type: object
+          required:
+            - is_on
+          properties:
+            is_on:
+              type: boolean
+        side1:
+          type: object
+          required:
+            - is_on
+          properties:
+            is_on:
+              type: boolean
+
+    TargetTemperatureRequest:
+      type: object
+      description: At least one of side0 or side1 must be provided. In single-zone mode, only side0 should be sent.
+      minProperties: 1
+      properties:
+        side0:
+          type: object
+          required:
+            - target_t
+          properties:
+            target_t:
+              type: number
+              format: float
+              description: Target temperature in °C (clamped to 12–42.3).
+              minimum: 12
+              maximum: 42.3
+              example: 22.0
+        side1:
+          type: object
+          required:
+            - target_t
+          properties:
+            target_t:
+              type: number
+              format: float
+              description: Target temperature in °C (clamped to 12–42.3).
+              minimum: 12
+              maximum: 42.3
+              example: 24.0
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.

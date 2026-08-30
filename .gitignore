@@ -36,3 +36,6 @@ firmware/backups/*.bin
 
 # Desktop UI simulator build output (cmake -B build -S simulator)
 /build/
+
+# Personal sleep data — must never be published
+reference/sleep_temps.csv

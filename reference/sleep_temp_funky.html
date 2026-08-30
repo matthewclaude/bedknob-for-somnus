@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sleep Temp Log</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Boogaloo&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0e0e14;
+            --card: #16161f;
+            --border: #2a2a3a;
+            --yellow: #f5e642;
+            --pink: #ff4fc8;
+            --blue: #42c8ff;
+            --green: #42ffb0;
+            --orange: #ff8c42;
+            --text: #e8e8f0;
+            --muted: #6b6b80;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Space Mono', monospace;
+            min-height: 100vh;
+            padding: 32px 20px;
+            overflow-x: hidden;
+        }
+
+        /* Animated grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(245,230,66,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(245,230,66,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        .header {
+            margin-bottom: 36px;
+            position: relative;
+        }
+
+        .header-eyebrow {
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.25em;
+            color: var(--pink);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .header h1 {
+            font-family: 'Boogaloo', cursive;
+            font-size: clamp(42px, 8vw, 72px);
+            line-height: 1;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, var(--yellow) 0%, var(--pink) 50%, var(--blue) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-sub {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 8px;
+            letter-spacing: 0.05em;
+        }
+
+        /* Decorative blobs */
+        .blob {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.12;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .blob-1 { width: 400px; height: 400px; background: var(--pink); top: -100px; right: -100px; }
+        .blob-2 { width: 300px; height: 300px; background: var(--blue); bottom: 100px; left: -80px; }
+        .blob-3 { width: 200px; height: 200px; background: var(--yellow); top: 50%; left: 40%; }
+
+        /* File upload */
+        .upload-zone {
+            border: 2px dashed var(--yellow);
+            border-radius: 16px;
+            padding: 32px;
+            text-align: center;
+            margin-bottom: 28px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: rgba(245,230,66,0.03);
+            position: relative;
+        }
+        .upload-zone:hover {
+            background: rgba(245,230,66,0.07);
+            border-color: var(--pink);
+        }
+        .upload-zone label {
+            cursor: pointer;
+            display: block;
+        }
+        .upload-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        .upload-text {
+            font-family: 'Boogaloo', cursive;
+            font-size: 20px;
+            color: var(--yellow);
+            margin-bottom: 4px;
+        }
+        .upload-hint {
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+        }
+        input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+        }
+        .stat-card:nth-child(1)::before { background: var(--yellow); }
+        .stat-card:nth-child(2)::before { background: var(--pink); }
+        .stat-card:nth-child(3)::before { background: var(--blue); }
+        .stat-card:nth-child(4)::before { background: var(--green); }
+        .stat-card:nth-child(5)::before { background: var(--orange); }
+        .stat-card:nth-child(6)::before { background: var(--blue); }
+        .stat-card:nth-child(7)::before { background: var(--pink); }
+
+        .stat-label {
+            font-size: 10px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+        .stat-value {
+            font-family: 'Boogaloo', cursive;
+            font-size: 30px;
+            line-height: 1;
+            color: var(--text);
+        }
+        .stat-card:nth-child(1) .stat-value { color: var(--yellow); }
+        .stat-card:nth-child(2) .stat-value { color: var(--pink); }
+        .stat-card:nth-child(3) .stat-value { color: var(--blue); }
+        .stat-card:nth-child(4) .stat-value { color: var(--green); }
+        .stat-card:nth-child(5) .stat-value { color: var(--orange); }
+        .stat-card:nth-child(6) .stat-value { color: var(--blue); }
+        .stat-card:nth-child(7) .stat-value { color: var(--pink); }
+
+        /* Chart container */
+        .chart-wrap {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .chart-title {
+            font-family: 'Boogaloo', cursive;
+            font-size: 22px;
+            color: var(--text);
+        }
+
+        .legend {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 0.05em;
+        }
+        .legend-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        canvas { display: block; }
+
+        /* Info / error */
+        .info-bar {
+            background: rgba(66, 200, 255, 0.08);
+            border: 1px solid rgba(66, 200, 255, 0.2);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 11px;
+            color: var(--blue);
+            letter-spacing: 0.05em;
+            margin-bottom: 16px;
+        }
+        .error-bar {
+            background: rgba(255, 79, 200, 0.08);
+            border: 1px solid rgba(255, 79, 200, 0.25);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 11px;
+            color: var(--pink);
+            letter-spacing: 0.05em;
+            margin-bottom: 16px;
+        }
+
+        .hidden { display: none !important; }
+
+        /* Scanline overlay for retro feel */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0,0,0,0.03) 2px,
+                rgba(0,0,0,0.03) 4px
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+
+    <div class="container">
+        <div class="header">
+            <div class="header-eyebrow">// temperature log viewer</div>
+            <h1>Sleep Temps 🌡️</h1>
+            <div class="header-sub">drop your sleep_temps.csv and see what your pad was up to</div>
+        </div>
+
+        <div class="upload-zone">
+            <label for="csvFile">
+                <div class="upload-icon">📂</div>
+                <div class="upload-text">Drop your CSV here</div>
+                <div class="upload-hint">or click to browse · sleep_temps.csv</div>
+            </label>
+            <input type="file" id="csvFile" accept=".csv" />
+        </div>
+
+        <div id="errorBar" class="error-bar hidden"></div>
+        <div id="infoBar" class="info-bar hidden"></div>
+
+        <div id="statsContainer" class="hidden">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Duration</div>
+                    <div class="stat-value" id="duration">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Data Points</div>
+                    <div class="stat-value" id="dataPoints">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Temp · Left</div>
+                    <div class="stat-value" id="avgLeft">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Temp · Right</div>
+                    <div class="stat-value" id="avgRight">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Temp Range</div>
+                    <div class="stat-value" id="tempRange">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Left &middot; powered on</div>
+                    <div class="stat-value" id="poweredLeft">&mdash;</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Right &middot; powered on</div>
+                    <div class="stat-value" id="poweredRight">&mdash;</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="chartContainer" class="chart-wrap hidden">
+            <div class="chart-header">
+                <div class="chart-title">Temperature over time</div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background:#42c8ff"></div>
+                        Left current
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background:#ff4fc8"></div>
+                        Right current
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background:#42c8ff; border-radius:0; width:14px; height:2px; margin: 3px 0; opacity:0.5;"></div>
+                        Left target
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background:#ff4fc8; border-radius:0; width:14px; height:2px; margin: 3px 0; opacity:0.5;"></div>
+                        Right target
+                    </div>
+                </div>
+            </div>
+            <div style="position:relative; height:360px;">
+                <canvas id="tempChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script>
+        let chartInstance = null;
+
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                try { parseAndDisplay(ev.target.result); }
+                catch(err) { showError('Error parsing CSV: ' + err.message); }
+            };
+            reader.readAsText(file);
+        });
+
+        function parseAndDisplay(csv) {
+            const lines = csv.trim().split('\n');
+            const data = { timestamps:[], s0c:[], s0t:[], s1c:[], s1t:[], s0ts:[], s1ts:[] };
+            // Build a map of timestamp -> best row (prefer powered-on rows)
+            const rowMap = new Map();
+            for (let i = 1; i < lines.length; i++) {
+                const v = lines[i].split(',');
+                if (v.length < 8) continue;
+                const ts = v[0];
+                const s0on = v[3].trim() === 'True';
+                const s1on = v[7].trim() === 'True';
+                if (!rowMap.has(ts) || s0on || s1on) rowMap.set(ts, v);
+            }
+
+            for (const [ts, v] of rowMap) {
+                const s0on = v[3].trim() === 'True';
+                const s1on = v[7].trim() === 'True';
+                if (!s0on && !s1on) continue;
+                data.timestamps.push(ts);
+                data.s0c.push(s0on ? parseFloat(v[1]) * 9/5 + 32 : null);
+                data.s0t.push(s0on ? parseFloat(v[2]) * 9/5 + 32 : null);
+                data.s1c.push(s1on ? parseFloat(v[5]) * 9/5 + 32 : null);
+                data.s1t.push(s1on ? parseFloat(v[6]) * 9/5 + 32 : null);
+                if (s0on) data.s0ts.push(ts);
+                if (s1on) data.s1ts.push(ts);
+            }
+
+            if (!data.timestamps.length) { showError('No valid data found.'); return; }
+
+            const labels = data.timestamps.map(ts => {
+                const d = new Date(ts);
+                return d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false});
+            });
+
+            const dur = calcDuration(data.timestamps[0], data.timestamps[data.timestamps.length-1]);
+            const s0vals = data.s0c.filter(v=>v!==null);
+            const s1vals = data.s1c.filter(v=>v!==null);
+            const avgL = s0vals.length ? (s0vals.reduce((a,b)=>a+b,0)/s0vals.length).toFixed(1) : '—';
+            const avgR = s1vals.length ? (s1vals.reduce((a,b)=>a+b,0)/s1vals.length).toFixed(1) : '—';
+            const allTemps = [...s0vals, ...s1vals];
+            const min = Math.min(...allTemps).toFixed(1);
+            const max = Math.max(...allTemps).toFixed(1);
+
+            document.getElementById('duration').textContent = dur;
+            document.getElementById('dataPoints').textContent = data.timestamps.length;
+            document.getElementById('avgLeft').textContent = avgL !== '—' ? avgL + '°F' : '—';
+            document.getElementById('avgRight').textContent = avgR !== '—' ? avgR + '°F' : '—';
+            document.getElementById('tempRange').textContent = min + '–' + max + '°';
+
+            const powL = data.s0ts.length >= 2 ? calcDuration(data.s0ts[0], data.s0ts[data.s0ts.length-1]) : '—';
+            const powR = data.s1ts.length >= 2 ? calcDuration(data.s1ts[0], data.s1ts[data.s1ts.length-1]) : '—';
+            document.getElementById('poweredLeft').textContent = powL;
+            document.getElementById('poweredRight').textContent = powR;
+
+            document.getElementById('statsContainer').classList.remove('hidden');
+            document.getElementById('chartContainer').classList.remove('hidden');
+            document.getElementById('errorBar').classList.add('hidden');
+
+            showInfo(`Loaded ${data.timestamps.length} readings · ${data.timestamps[0]} → ${data.timestamps[data.timestamps.length-1]}`);
+            renderChart(labels, data);
+        }
+
+        function calcDuration(start, end) {
+            const diff = new Date(end) - new Date(start);
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        function renderChart(labels, data) {
+            const ctx = document.getElementById('tempChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const allTemps = [...data.s0c, ...data.s1c, ...data.s0t, ...data.s1t].filter(v=>v!==null);
+            const yMin = Math.floor(Math.min(...allTemps)) - 3;
+            const yMax = Math.ceil(Math.max(...allTemps)) + 3;
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Left current',
+                            data: data.s0c,
+                            borderColor: '#42c8ff',
+                            backgroundColor: 'rgba(66,200,255,0.07)',
+                            borderWidth: 2,
+                            tension: 0.35,
+                            fill: true,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            pointHoverBackgroundColor: '#42c8ff'
+                        },
+                        {
+                            label: 'Right current',
+                            data: data.s1c,
+                            borderColor: '#ff4fc8',
+                            backgroundColor: 'rgba(255,79,200,0.05)',
+                            borderWidth: 2,
+                            tension: 0.35,
+                            fill: true,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            pointHoverBackgroundColor: '#ff4fc8'
+                        },
+                        {
+                            label: 'Left target',
+                            data: data.s0t,
+                            borderColor: '#42c8ff',
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
+                            tension: 0,
+                            fill: false,
+                            pointRadius: 0,
+                            pointHoverRadius: 0,
+                            opacity: 0.5
+                        },
+                        {
+                            label: 'Right target',
+                            data: data.s1t,
+                            borderColor: '#ff4fc8',
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
+                            tension: 0,
+                            fill: false,
+                            pointRadius: 0,
+                            pointHoverRadius: 0,
+                            opacity: 0.5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#16161f',
+                            borderColor: '#2a2a3a',
+                            borderWidth: 1,
+                            titleColor: '#6b6b80',
+                            bodyColor: '#e8e8f0',
+                            titleFont: { family: 'Space Mono', size: 10 },
+                            bodyFont: { family: 'Space Mono', size: 12 },
+                            padding: 10,
+                            callbacks: {
+                                label: ctx => `  ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}°F`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.04)' },
+                            ticks: {
+                                color: '#6b6b80',
+                                font: { family: 'Space Mono', size: 10 },
+                                maxRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 16
+                            }
+                        },
+                        y: {
+                            min: yMin, max: yMax,
+                            grid: { color: 'rgba(255,255,255,0.04)' },
+                            ticks: {
+                                color: '#6b6b80',
+                                font: { family: 'Space Mono', size: 10 },
+                                callback: v => v + '°F'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorBar');
+            el.textContent = '⚠ ' + msg;
+            el.classList.remove('hidden');
+            document.getElementById('statsContainer').classList.add('hidden');
+            document.getElementById('chartContainer').classList.add('hidden');
+        }
+
+        function showInfo(msg) {
+            const el = document.getElementById('infoBar');
+            el.textContent = '✓ ' + msg;
+            el.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
