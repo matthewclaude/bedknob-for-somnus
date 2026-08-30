@@ -216,12 +216,12 @@ static void apply_baseline(void)
 
     zone_state_t *a = &st->zones[ZONE_A];
     a->on = true;
-    a->temp_c = 21.1f;    // -> 70F
+    a->temp_dc = 211;     // 21.1C -> 70F
     a->actual_c = 21.1f;  // at target: HOLDING
 
     zone_state_t *b = &st->zones[ZONE_B];
     b->on = true;
-    b->temp_c = 22.2f;    // -> 72F target
+    b->temp_dc = 222;     // 22.2C -> 72F target
     b->actual_c = 20.0f;  // -> 68F current, still warming: HEATING
 
     st->ota.status = 0;   // OTA_IDLE
@@ -242,7 +242,11 @@ static void scenario_wifi_portal(void)
     apply_baseline();
     app_state_t *st = sim_state_ptr();
     st->phase = PH_WIFI_PORTAL;
-    snprintf(st->ap_ssid, sizeof(st->ap_ssid), "OrionDial-A1B2");
+    // Same format as the real construction site (dial_wifi.c's
+    // "SomnusDial-%02X%02X", MAC-derived) -- kept as a literal here since the
+    // simulator never links the real dial_net component (no ESP-IDF Wi-Fi
+    // driver on the host), same reasoning as stubs.c's dial_net_ap_ssid().
+    snprintf(st->ap_ssid, sizeof(st->ap_ssid), "SomnusDial-A1B2");
     ui_router_go(SCR_WIFI_PORTAL, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
     snapshot("wifi-portal");
@@ -327,10 +331,11 @@ static void scenario_dial_update(void)
 }
 
 // The Home face in RELATIVE scale. Deliberately a POSITIVE, OFF-GRID setpoint:
-// 30.0C -> 86F, which is level +2 (its anchor is 87F/30.5C) — so the render
-// proves the spliced '+' glyph draws AND that an off-grid device value shows as
-// the nearest level. Water below the setpoint keeps the heating overlay + pill
-// on screen, and the neutral notch/"LEVEL" suffix are visible.
+// 300dc (30.0°C), which is level +2 (its anchor is 306dc/30.6°C) — so the
+// render proves the spliced '+' glyph draws AND that an off-grid device
+// value shows as the nearest level. Water below the setpoint keeps the
+// heating overlay + pill on screen, and the neutral notch/"LEVEL" suffix
+// are visible.
 static void scenario_dial_relative(void)
 {
     apply_baseline();
@@ -339,7 +344,7 @@ static void scenario_dial_relative(void)
     st->ui_zone = ZONE_A;
     zone_state_t *a = &st->zones[ZONE_A];
     a->on = true;
-    a->temp_c = 30.0f;    // off-grid -> 86F -> level +2
+    a->temp_dc = 300;     // 30.0C, off-grid -> level +2
     a->actual_c = 26.0f;  // -> 79F, below setpoint: still warming
     st->generation++;     // direct field-sets don't bump it; make on_state re-run
     ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);

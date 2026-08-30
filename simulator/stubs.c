@@ -106,7 +106,7 @@ void dial_net_forget(void) {}
 void dial_net_request_setup(void) {}
 bool dial_net_setup_requested(void) { return false; }
 void dial_net_bringup(void) {}
-const char *dial_net_ap_ssid(void) { return "OrionDial-A1B2"; }
+const char *dial_net_ap_ssid(void) { return "SomnusDial-A1B2"; }
 void dial_net_on_event(dial_net_event_cb_t cb) { (void)cb; }
 
 /* ---- esp_app_desc --------------------------------------------------------
