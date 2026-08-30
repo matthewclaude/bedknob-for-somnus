@@ -44,7 +44,7 @@ static inline zone_kind_t dial_zone_kind(const zone_state_t *z, bool device_onli
     if (!device_online)               return ZK_OFFLINE;
     if (!z->on)                       return ZK_STANDBY;   // off IS standby, regardless of stale telemetry
     if (z->actual_c < 0)              return ZK_HOLDING;   // nothing measured yet to compare against
-    float delta = z->temp_c - z->actual_c;
+    float delta = (z->temp_dc / 10.0f) - z->actual_c;
     if (delta > 0.5f)  return ZK_HEATING;
     if (delta < -0.5f) return ZK_COOLING;
     return ZK_HOLDING;

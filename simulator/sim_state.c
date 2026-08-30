@@ -31,15 +31,15 @@ app_state_t *sim_state_ptr(void) { return &s_state; }
 void sim_state_reset(void)
 {
     memset(&s_state, 0, sizeof(s_state));
-    s_state.ui_temp_f[ZONE_A] = -1;
-    s_state.ui_temp_f[ZONE_B] = -1;
+    s_state.ui_temp_dc[ZONE_A] = -1;
+    s_state.ui_temp_dc[ZONE_B] = -1;
     // Matches dial_state_init(): -1 = "not yet discovered", so
-    // dial_state_temp_min_f()/_max_f() fall back to DIAL_TEMP_MIN_F/MAX_F
-    // (now the real 50-113F rails themselves) — 0 would be misread as a
-    // discovered-but-degenerate range, not "unknown", so this can't be left
-    // to the memset above.
-    s_state.temp_min_f = -1;
-    s_state.temp_max_f = -1;
+    // dial_state_temp_min_dc()/_max_dc() fall back to DIAL_TEMP_MIN_DC/MAX_DC
+    // (now the real 100-450dc / 10.0-45.0°C rails themselves) — 0 would be
+    // misread as a discovered-but-degenerate range, not "unknown", so this
+    // can't be left to the memset above.
+    s_state.temp_min_dc = -1;
+    s_state.temp_max_dc = -1;
     s_state.wifi_join_idx = -1;
     // Fresh-device defaults, matching dial_state_init exactly so screenshots
     // show what a new dial actually ships with.
@@ -60,9 +60,9 @@ void sim_state_reset(void)
 
 void dial_state_get(app_state_t *out) { *out = s_state; }
 
-void dial_state_set_ui_temp(zone_idx_t zone, int temp_f)
+void dial_state_set_ui_temp(zone_idx_t zone, int temp_dc)
 {
-    s_state.ui_temp_f[zone] = temp_f;
+    s_state.ui_temp_dc[zone] = temp_dc;
     s_state.generation++;
 }
 
@@ -265,5 +265,5 @@ void dial_cmd_post(const app_cmd_t *cmd)
     };
     const char *k = (cmd->kind >= 0 && (size_t)cmd->kind < sizeof(KIND) / sizeof(KIND[0]))
                         ? KIND[cmd->kind] : "?";
-    printf("[cmd] %s zone=%d a=%d b=%d temp_f=%d\n", k, cmd->zone, cmd->a, cmd->b, cmd->temp_f);
+    printf("[cmd] %s zone=%d a=%d b=%d temp_dc=%d\n", k, cmd->zone, cmd->a, cmd->b, cmd->temp_dc);
 }

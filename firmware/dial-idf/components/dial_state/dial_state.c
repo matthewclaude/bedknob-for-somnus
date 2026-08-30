@@ -105,13 +105,14 @@ void dial_state_init(void)
     // apply. An upgrading device overrides this back to absolute in
     // restore_prefs when it finds a pre-existing "zone" key but no "relmode".
     s_state.rel_mode = true;
-    // Device temperature range unknown until orion_discover_device() parses
-    // list_devices' temperature_range -- dial_state_temp_min_f()/_max_f()
-    // fall back to the DIAL_TEMP_MIN_F/MAX_F constants while these are -1.
-    s_state.temp_min_f = -1;
-    s_state.temp_max_f = -1;
+    // Device temperature range unknown until worker_task's first successful
+    // dial_somnus_connect() seeds it from the pad's fixed spec range --
+    // dial_state_temp_min_dc()/_max_dc() fall back to the
+    // DIAL_TEMP_MIN_DC/MAX_DC constants while these are -1.
+    s_state.temp_min_dc = -1;
+    s_state.temp_max_dc = -1;
     for (int z = 0; z < ZONE_COUNT; z++) {
-        s_state.ui_temp_f[z]         = -1;
+        s_state.ui_temp_dc[z]        = -1;
         s_state.zones[z].actual_c    = -1.0f;
     }
 }
@@ -267,10 +268,10 @@ void dial_state_set_rotation(uint8_t quarters)
     }
 }
 
-void dial_state_set_ui_temp(zone_idx_t zone, int temp_f)
+void dial_state_set_ui_temp(zone_idx_t zone, int temp_dc)
 {
     xSemaphoreTake(s_mux, portMAX_DELAY);
-    s_state.ui_temp_f[zone] = temp_f;
+    s_state.ui_temp_dc[zone] = temp_dc;
     s_state.generation++;
     xSemaphoreGive(s_mux);
 }

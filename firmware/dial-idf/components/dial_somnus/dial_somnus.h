@@ -61,10 +61,17 @@ typedef struct {
                             // spec: current_t is nullable, "Null before first
                             // sensor reading"
     float current_c;       // only valid if has_current
-    float target_c;        // spec: 12-42.3, whole-degree steps confirmed empirically
-                            // against a real pad (see project notes) -- always a
-                            // clean integer in practice, but the wire format is a
-                            // float and we don't assume otherwise here
+    float target_c;        // spec: 12-42.3. Real-pad test (2026-08-30): POSTed a
+                            // fractional target_t (20.5 against a pad sitting at
+                            // 20.0) and a GET ten seconds later still read 20.5 --
+                            // the pad accepts and holds fractional values, no
+                            // snapping to whole degrees. (Caveat: the pad was
+                            // powered off during that test, so this confirms
+                            // storage granularity, not control-loop granularity.)
+                            // The dial's own knob still steps in whole 1.0°C
+                            // detents by deliberate design (matches the Somnus
+                            // app's own scale), NOT because the pad requires it --
+                            // see dial_state.h's canonical-unit comment.
     bool  water_low;       // spec field name: is_wl_low
 } somnus_side_state_t;
 
@@ -106,11 +113,19 @@ bool dial_somnus_get_state(somnus_state_t *out);
 // out-of-range value still round-trips and you can see what the pad
 // actually applied on the next poll.
 //
+// double, not float: the caller (main.c) computes this straight from an
+// integer tenths-of-°C value via a plain `/ 10.0` double division, so the
+// exact double reaches cJSON_CreateNumber() with no float->double promotion
+// in between. That promotion used to be a real bug — a float32 rounding
+// error promoted to double made cJSON's own round-trip-or-fallback printer
+// emit 15-17 digits of noise (e.g. "21.700000762939453") instead of a clean
+// value. Passing a float here would silently reintroduce it, so don't.
+//
 // If SOMNUS_SINGLE_ZONE_MODE is true and side == SOMNUS_SIDE_1, this is a
 // silent no-op that returns true without making any network call — per
 // spec, side1 writes are undefined in this mode, so we simply never send
 // one, rather than trusting the pad to ignore it safely.
-bool dial_somnus_set_temp(somnus_side_t side, float temp_c);
+bool dial_somnus_set_temp(somnus_side_t side, double temp_c);
 
 // POST /api/power for one side. Same SOMNUS_SINGLE_ZONE_MODE guard as
 // dial_somnus_set_temp — side1 writes are silently skipped, not sent.

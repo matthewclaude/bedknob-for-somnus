@@ -36,93 +36,126 @@ typedef enum {
 
 typedef enum { ZONE_A = 0, ZONE_B = 1, ZONE_COUNT = 2 } zone_idx_t;
 
-// ABSOLUTE display range in °F (Fahrenheit/Celsius modes). Superseded at
-// runtime by the device's OWN reported range (list_devices'
-// temperature_range, °C on the wire) — main.c's orion_discover_device()
-// parses and commits it into app_state_t.temp_min_f/temp_max_f; screens read
-// it through dial_state_temp_min_f()/dial_state_temp_max_f() below, never
-// these macros directly, except as the fallback those two functions use
-// before discovery has ever run (fresh boot, offline). Earlier firmware
-// (<=v1.0.x) hardcoded 55-110 here — narrower than the device's real
-// 10-45°C (50-113°F) range on purpose, so an existing °F user's arc wouldn't
-// visibly change — but the owner has since asked for the real range
-// everywhere, so the fallback now matches it exactly: even a dial that has
-// never completed discovery gets the full range, not a narrowed one. Orion
-// takes °C; the °F lookup is the linear formula rounded to 0.1°C, so
-// conversion round-trips.
-#define DIAL_TEMP_MIN_F 50
-#define DIAL_TEMP_MAX_F 113
+/*
+ * Canonical temperature unit (2026-08-30 units fix, see the Q1 audit this
+ * fixes): tenths of a degree Celsius, integer, "dc" for short. The pad's own
+ * wire unit IS Celsius (target_t/current_t, local_api spec) and the
+ * confirmed real adjustment step is exactly 1.0°C — so the setpoint is
+ * stored, stepped, and written in dc EVERYWHERE (zone_state_t.temp_dc,
+ * app_state_t.ui_temp_dc, app_cmd_t.temp_dc, the DIAL_REL_* level tables).
+ * °F exists ONLY as a render-time label — dial_dc_to_f() below, called
+ * exclusively from scr_dial.c's render_numeral() — and is never stored, never
+ * stepped, and never sent anywhere. This is the reverse of the pre-fix
+ * design (whole °F was canonical, Celsius was derived at POST time), which
+ * silently produced fractional, non-1.0°C POST bodies on every knob turn: a
+ * real-pad test (2026-08-30) confirmed the pad accepts and holds fractional
+ * target_t with no snapping, so there was no floor catching that drift.
+ *
+ * dial_c_to_f(float c) below is kept, unchanged, for the ONE thing it was
+ * always legitimately used for: display of the pad's raw measured-water
+ * reading (zone_state_t.actual_c), which has no canonical-storage role and
+ * is never round-tripped back into a write. It must never again be used on
+ * the setpoint.
+ */
+static inline int dial_c_to_f(float c) { return (int)lroundf(c * 1.8f + 32.0f); }
 
-static inline int   dial_c_to_f(float c) { return (int)lroundf(c * 1.8f + 32.0f); }
-static inline float dial_f_to_c(int f)   { return roundf(((f - 32) / 1.8f) * 10.0f) / 10.0f; }
+// Setpoint display-only conversion: canonical dc (tenths of °C) -> nearest
+// whole °F, for render_numeral()'s °F mode. Called ONLY at render time —
+// never on a read or write path, never stored back — so there is no
+// C->F->C round-trip anywhere in the setpoint's life. (There used to be a
+// dial_f_to_c(int f) alongside dial_c_to_f: it was the write-path half of
+// that round-trip and is deleted, not renamed — nothing should ever again
+// convert a whole-°F value back into the canonical unit.)
+static inline int dial_dc_to_f(int dc) { return (int)lroundf((float)dc * 0.18f + 32.0f); }
+
+// ABSOLUTE display range, tenths of °C. Superseded at runtime by the pad's
+// own fixed range (dial_somnus.h: 12.0-42.3°C, seeded once into
+// app_state_t.temp_min_dc/temp_max_dc right after the first successful
+// connect — see main.c's worker_task) — screens read it through
+// dial_state_temp_min_dc()/dial_state_temp_max_dc() below, never these
+// macros directly, except as the fallback those two functions use before
+// that first connect has ever completed (fresh boot, offline). 100/450 is
+// the exact tenths-of-°C equivalent of the pre-fix 50/113°F fallback pair
+// (10.0°C/45.0°C) — unit-converted, not re-picked, so this fallback covers
+// the same real range it always did.
+#define DIAL_TEMP_MIN_DC 100
+#define DIAL_TEMP_MAX_DC 450
 
 /*
  * RELATIVE temperature scale (Orion's third temperature_scale table). A signed
- * −10…+10 "level" scale where 0 = 27.5°C (81.5°F), the midpoint of the device
- * range; negative is cooler, positive warmer. It is purely a display/input
+ * −10…+10 "level" scale where 0 = 27.5°C, the midpoint of the device range;
+ * negative is cooler, positive warmer. It is purely a display/input
  * convention on our side — the wire is always °C (set_zone takes Celsius; there
- * is no scale/level parameter on any Orion tool, confirmed by live probe).
+ * is no scale/level parameter on any Orion tool, confirmed by live probe) —
+ * and is NOT the same thing as the Q1 fix's 1.0°C-per-detent absolute-mode
+ * step: a relative-mode detent moves one LEVEL, and the levels below are
+ * deliberately NOT evenly 1.0°C apart (~1.75°C average, see the bracket
+ * table), matching the original Orion design this table preserves.
  *
- * We keep the internal setpoint in whole °F either way (dial_state's temp is
- * °C on the wire, °F for UI). Each level is carried by the whole °F below,
- * chosen so its dial_f_to_c() lands strictly inside that level's Celsius
- * bracket — so a device poll can never nudge the displayed level, and every
- * value we write is on Orion's grid. These two tables are the ONLY source of
- * truth; the discover-time tripwire in main.c re-checks them against the live
- * temperature_scale.relative and logs loudly on any mismatch.
+ * Each level is carried by a tenths-of-°C value below, chosen so it lands
+ * strictly inside that level's Celsius bracket — so a device poll can never
+ * nudge the displayed level, and every value we write is on Orion's grid.
+ * These two tables are the ONLY source of truth; the discover-time tripwire
+ * in main.c re-checks them against the live temperature_scale.relative and
+ * logs loudly on any mismatch.
  *
- *   DIAL_REL_F[L+10]  = whole °F carrying level L (−10…+10).
- *   DIAL_REL_LO_F[i]  = lowest whole °F that belongs to level (−9 + i); the
- *                       nearest-level boundaries, derived from the CELSIUS
- *                       midpoints (not midpoints of the °F carriers, which
- *                       disagree at a few boundaries). Ties resolve toward the
- *                       WARMER level, consistently (that single rule also picks
- *                       the level-0 carrier 82 over 81 and the +8 boundary 104).
+ * Values are a straight unit conversion of the pre-fix whole-°F tables
+ * (°F -> tenths-of-°C, rounded to the nearest 0.1°C, exactly the rounding
+ * dial_dc_to_f's now-deleted inverse used to do) — mechanically transcribed,
+ * not re-derived, so every boundary/tie decision the original design made
+ * (documented there as "ties resolve toward the WARMER level" — e.g. the
+ * level-0 carrier landing on 82°F over 81°F, and the +8 boundary on 104°F)
+ * carries over unchanged. See test/test_dial_rel.c for the invariants this
+ * table must keep holding.
+ *
+ *   DIAL_REL_DC[L+10]  = tenths of °C carrying level L (−10…+10).
+ *   DIAL_REL_LO_DC[i]  = lowest tenths-of-°C value that belongs to level
+ *                        (−9 + i); the nearest-level boundaries.
  */
 #define DIAL_REL_MIN (-10)
 #define DIAL_REL_MAX ( 10)
-#define DIAL_REL_MIN_F  50   // level −10 rail (= 10.0°C)
-#define DIAL_REL_MAX_F 113   // level +10 rail (= 45.0°C)
+#define DIAL_REL_MIN_DC 100   // level −10 rail (= 10.0°C)
+#define DIAL_REL_MAX_DC 450   // level +10 rail (= 45.0°C)
 
-static const uint8_t DIAL_REL_F[21] = {
-    50, 54, 57, 61, 64, 66, 69, 73, 76, 79, 82,
-    84, 87, 90, 92, 95, 99, 102, 106, 109, 113
+static const uint16_t DIAL_REL_DC[21] = {
+    100, 122, 139, 161, 178, 189, 206, 228, 244, 261, 278,
+    289, 306, 322, 333, 350, 372, 389, 411, 428, 450
 };
-static const uint8_t DIAL_REL_LO_F[20] = {
-    52, 56, 59, 63, 65, 68, 72, 75, 78, 81,
-    83, 86, 89, 91, 94, 97, 101, 104, 108, 112
+static const uint16_t DIAL_REL_LO_DC[20] = {
+    111, 133, 150, 172, 183, 200, 222, 239, 256, 272,
+    283, 300, 317, 328, 344, 361, 383, 400, 422, 444
 };
 
-// Nearest relative level for a whole °F (clamped to −10…+10). Uses the boundary
-// table: f is at least level (−9 + i) iff f ≥ DIAL_REL_LO_F[i].
-static inline int dial_rel_from_f(int f)
+// Nearest relative level for a tenths-of-°C value (clamped to −10…+10). Uses
+// the boundary table: dc is at least level (−9 + i) iff dc ≥ DIAL_REL_LO_DC[i].
+static inline int dial_rel_from_dc(int dc)
 {
     int lvl = DIAL_REL_MIN;
     for (int i = 0; i < 20; i++)
-        if (f >= DIAL_REL_LO_F[i]) lvl = DIAL_REL_MIN + 1 + i;
+        if (dc >= DIAL_REL_LO_DC[i]) lvl = DIAL_REL_MIN + 1 + i;
     return lvl;
 }
 
-// The whole °F carrying a level (level clamped to range).
-static inline int dial_rel_to_f(int level)
+// The tenths-of-°C value carrying a level (level clamped to range).
+static inline int dial_rel_to_dc(int level)
 {
     if (level < DIAL_REL_MIN) level = DIAL_REL_MIN;
     if (level > DIAL_REL_MAX) level = DIAL_REL_MAX;
-    return DIAL_REL_F[level - DIAL_REL_MIN];
+    return DIAL_REL_DC[level - DIAL_REL_MIN];
 }
 
 // One detent = exactly one level in the turned direction, from whatever level
 // is currently DISPLAYED (so an off-grid device value snaps onto the grid in
 // the direction the user turned — the numeral and the bed always move together
-// or not at all). Returns the new carrier °F; equals f only when pinned at a
-// rail (caller treats that as the range stop).
-static inline int dial_rel_step(int f, int detents)
+// or not at all). Returns the new carrier's tenths-of-°C value; equals dc only
+// when pinned at a rail (caller treats that as the range stop).
+static inline int dial_rel_step(int dc, int detents)
 {
-    int cur = dial_rel_from_f(f);
+    int cur = dial_rel_from_dc(dc);
     int nl  = cur + detents;
     if (nl < DIAL_REL_MIN) nl = DIAL_REL_MIN;
     if (nl > DIAL_REL_MAX) nl = DIAL_REL_MAX;
-    return (nl == cur) ? f : dial_rel_to_f(nl);
+    return (nl == cur) ? dc : dial_rel_to_dc(nl);
 }
 
 // Parse an "HH:MM" (24h) time string into minutes-from-midnight. Returns
@@ -205,12 +238,22 @@ static inline uint16_t dial_scr_timeout_next(uint16_t cur)
  * exposes exactly on/off, one setpoint, one measured reading, and a low-water
  * flag per side (somnus_side_state_t), with no name, no thermal-relief
  * concept, and no server-side sleep schedule to mirror. Field names/shapes
- * below intentionally still match dial_somnus.h's own somnus_side_state_t
- * 1:1 so main.c's worker can copy one straight into the other.
+ * below otherwise still match dial_somnus.h's own somnus_side_state_t —
+ * EXCEPT the setpoint, which is the canonical tenths-of-°C int here
+ * (temp_dc) against the wire's own float (target_c) there; main.c's worker
+ * quantizes explicitly at the boundary instead of copying it straight
+ * across, see temp_dc's own comment below.
  */
 typedef struct {
     bool  on;
-    float temp_c;      // setpoint (somnus_side_state_t.target_c, spec: 12-42.3 C)
+    // Setpoint, tenths of °C, the canonical unit (see the block comment above
+    // zone_idx_t). NOT a straight 1:1 mirror of somnus_side_state_t.target_c
+    // (which stays float, the wire's own type) — main.c's somnus_refresh_state()
+    // rounds the pad's reported float to the nearest 0.1°C on the way in, the
+    // one deliberate, one-directional C(float)->C(int tenths) quantization
+    // this design makes; nothing downstream of this field ever converts
+    // through °F. Spec range 12.0-42.3°C = 120-423 here.
+    int   temp_dc;
     float actual_c;     // measured water temp (current_c); <0 = unknown (mirrors
                         // somnus_side_state_t.has_current — the pad reports no
                         // reading at all before its first sensor sample)
@@ -308,23 +351,25 @@ typedef struct {
     // again with no further plumbing. Not session-optimistic like Orion's
     // version was; there's no write path to be optimistic about.
     bool    away;
-    // Absolute temperature range, whole °F, mirrored here once worker_task
-    // connects successfully. Somnus's pad has no discovery
+    // Absolute temperature range, tenths of °C, mirrored here once
+    // worker_task connects successfully. Somnus's pad has no discovery
     // call to report its own rails (unlike Orion's list_devices), but the
     // local_api spec fixes them at 12.0-42.3°C regardless of pad -- see
-    // dial_somnus.h. This, not the DIAL_TEMP_MIN_F/MAX_F constants, is what
+    // dial_somnus.h. This, not the DIAL_TEMP_MIN_DC/MAX_DC constants, is what
     // the arc range / knob clamp / drag clamp use in ABSOLUTE mode.
     // -1 = not yet known (fresh boot, before the first successful connect)
-    // -- dial_state_temp_min_f()/_max_f() below fall back to the
-    // DIAL_TEMP_MIN_F/MAX_F constants then.
-    int     temp_min_f;
-    int     temp_max_f;
+    // -- dial_state_temp_min_dc()/_max_dc() below fall back to the
+    // DIAL_TEMP_MIN_DC/MAX_DC constants then.
+    int     temp_min_dc;
+    int     temp_max_dc;
 
     // Wall clock
     bool    clock_valid;
 
-    // UI intent (optimistic layer, kept apart from device truth)
-    int     ui_temp_f[ZONE_COUNT];  // shown setpoint °F; -1 = follow device
+    // UI intent (optimistic layer, kept apart from device truth). Canonical
+    // unit tenths of °C (see the block comment above zone_idx_t) -- NOT °F,
+    // even though the field predates that fix and used to be.
+    int     ui_temp_dc[ZONE_COUNT]; // shown setpoint, tenths of °C; -1 = follow device
     zone_idx_t ui_zone;             // which side the UI is showing (persisted)
 
     // --- Onboarding (M4) ---
@@ -546,19 +591,20 @@ static inline zone_idx_t dial_state_primary_zone(const app_state_t *st)
     return (!st->zone_present[ZONE_A] && st->zone_present[ZONE_B]) ? ZONE_B : ZONE_A;
 }
 
-// Effective ABSOLUTE-mode temperature range: the device's own reported rails
-// once discovery has found them, else the DIAL_TEMP_MIN_F/MAX_F fallback
-// (see app_state_t.temp_min_f/temp_max_f's comment). Every absolute-mode
-// consumer (scr_dial.c's arc range, knob clamp, drag clamp) reads the range
-// through these two, never the macros or the raw fields directly, so there
-// is exactly one place that decides "known vs. fallback".
-static inline int dial_state_temp_min_f(const app_state_t *st)
+// Effective ABSOLUTE-mode temperature range, tenths of °C: the device's own
+// reported rails once discovery has found them, else the
+// DIAL_TEMP_MIN_DC/MAX_DC fallback (see app_state_t.temp_min_dc/temp_max_dc's
+// comment). Every absolute-mode consumer (scr_dial.c's arc range, knob
+// clamp, drag clamp) reads the range through these two, never the macros or
+// the raw fields directly, so there is exactly one place that decides
+// "known vs. fallback".
+static inline int dial_state_temp_min_dc(const app_state_t *st)
 {
-    return st->temp_min_f >= 0 ? st->temp_min_f : DIAL_TEMP_MIN_F;
+    return st->temp_min_dc >= 0 ? st->temp_min_dc : DIAL_TEMP_MIN_DC;
 }
-static inline int dial_state_temp_max_f(const app_state_t *st)
+static inline int dial_state_temp_max_dc(const app_state_t *st)
 {
-    return st->temp_max_f >= 0 ? st->temp_max_f : DIAL_TEMP_MAX_F;
+    return st->temp_max_dc >= 0 ? st->temp_max_dc : DIAL_TEMP_MAX_DC;
 }
 
 // Initialize the store (mutex + defaults). Call once before any other call.
@@ -578,7 +624,9 @@ void dial_state_commit(void (*mutate)(app_state_t *st, void *arg), void *arg);
 void dial_state_set_phase(conn_phase_t phase, const char *err);
 
 // Hot-path setter used by the dial screen during knob/drag interaction.
-void dial_state_set_ui_temp(zone_idx_t zone, int temp_f);
+// temp_dc is the canonical unit, tenths of °C — see the block comment above
+// zone_idx_t.
+void dial_state_set_ui_temp(zone_idx_t zone, int temp_dc);
 
 // Optimistic power flip — call from the UI on tap, so the face answers the
 // press instead of waiting for the write to the pad to come back. The next
@@ -717,7 +765,7 @@ int64_t dial_state_last_input_us(void);
 // client (see dial_somnus.h). The Settings-destructive and OTA commands are
 // device-agnostic (dial_net/dial_ota, not Orion/Somnus) and are unchanged.
 typedef enum {
-    CMD_SET_TEMP,      // zone + temp_f
+    CMD_SET_TEMP,      // zone + temp_dc
     CMD_TOGGLE_ON,     // zone + a = the DESIRED on state (1/0), not "flip it".
                        // The UI flips the store optimistically before posting,
                        // so a worker that re-derived !current would undo it.
@@ -755,7 +803,7 @@ typedef enum {
 typedef struct {
     cmd_kind_t kind;
     zone_idx_t zone;
-    int        temp_f;  // CMD_SET_TEMP
+    int        temp_dc; // CMD_SET_TEMP, tenths of °C (canonical unit)
     int        a, b;    // generic args: only CMD_TOGGLE_ON's `a` is used today;
                          // `b` is kept for shape/alignment with dial_cmd_post's
                          // callers and any future command that needs a second.

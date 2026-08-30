@@ -1,7 +1,9 @@
 /*
  * SCR_DIAL — the temperature dial (design-spec.md §4, "HOME FACE").
- * Arc drag + knob detents set the target °F; tap the power disc to toggle;
- * swipe left/right to show the other side. All input posts commands to the
+ * Arc drag + knob detents set the target temperature (internally tenths of
+ * °C, the canonical unit — see dial_state.h; °F is a render_numeral()-only
+ * display conversion, never stored); tap the power disc to toggle; swipe
+ * left/right to show the other side. All input posts commands to the
  * worker queue and renders optimistically; the poll reconciles later.
  *
  * The chassis ring (arc), fixed numeral anchor, and state-token colors are
@@ -54,7 +56,7 @@ static lv_obj_t *s_handle;       // setpoint drag handle — the ONLY temp touch
 
 static lv_obj_t  *s_level;              // the value-step overlay arc
 static lv_color_t s_level_accent;       // cached: the drag path has no state snapshot
-static float      s_actual_f = -1.0f;   // measured water temp, °F; <0 = unknown
+static int        s_actual_dc = -1;     // measured water temp, tenths of °C; <0 = unknown
 
 static lv_obj_t *s_name_lbl;
 static lv_obj_t *s_underline_solid, *s_underline_dash;
@@ -71,33 +73,36 @@ static lv_point_t s_dash_pts[2];
 
 static zone_idx_t s_zone = ZONE_A;
 
-// The setpoint currently shown (optimistic); -1 until first state arrives.
-static int s_shown_f = -1;
+// The setpoint currently shown (optimistic), tenths of °C — the canonical
+// unit (see dial_state.h's block comment); -1 until first state arrives.
+static int s_shown_dc = -1;
 
 // Display-units cache (design-spec.md's units toggle, M4): updated from
 // apply_palette_and_state on every on_state, read by render_numeral — which
-// is also called mid-drag/mid-detent, where only the raw °F value is at
-// hand. The store keeps the setpoint in °F regardless.
+// is also called mid-drag/mid-detent, where only the raw dc value is at
+// hand. The store keeps the setpoint in tenths of °C regardless; °F/°C here
+// only pick render_numeral()'s display format.
 static bool s_units_c;
 
 // Relative-scale cache (owner: togglable absolute/relative setpoint scale),
 // same lifecycle as s_units_c: set from apply_palette_and_state, read by
 // render_numeral and on_knob (both run without a fresh snapshot). The internal
-// setpoint stays whole °F; relative is a −10…+10 level view over it.
+// setpoint stays tenths of °C; relative is a −10…+10 level view over it.
 static bool s_rel;
 
-// Current configured arc range (°F). Absolute mode keeps the shipped 55–110;
-// relative mode widens to 50–113 so all 21 levels are reachable (owner: widen
-// only in relative mode, so an existing °F user's arc never moves). -1 forces
-// configure_arc_range() to set it on the first render after each create().
+// Current configured arc range, tenths of °C. Absolute mode keeps the pad's
+// own 120–423 (12.0–42.3°C); relative mode widens to 100–450 so all 21
+// levels are reachable (owner: widen only in relative mode, so an existing
+// absolute-mode user's arc never moves). -1 forces configure_arc_range() to
+// set it on the first render after each create().
 static int s_arc_min = -1, s_arc_max = -1;
 
 // Setpoint drag handle state. s_dragging is true between the handle's PRESSED
-// and RELEASED so on_gesture/on_state never fight an in-progress drag; s_press_f
-// is the setpoint at press start, so a tap on the handle (no movement) commits
-// nothing.
+// and RELEASED so on_gesture/on_state never fight an in-progress drag;
+// s_press_dc is the setpoint (tenths of °C) at press start, so a tap on the
+// handle (no movement) commits nothing.
 static bool s_dragging;
-static int  s_press_f;
+static int  s_press_dc;
 
 // Chevron pulse (design-spec.md §6): only running while heating/cooling, and
 // only restarted when that changes or the day/night duration changes.
@@ -187,15 +192,16 @@ static void chevron_stop(void)
 
 /* ---- water level: value step over the arc ------------------------------ */
 
-// Temperature -> degrees into the arc's own 0..270 sweep (rotation adds 135).
-// Same mapping the setpoint indicator uses, so the level and the fill land on
-// one scale. Uses the CURRENT arc range so the water overlay stays aligned with
-// the (mode-dependent) indicator — 55–110 in absolute, 50–113 in relative.
-static uint16_t level_angle(float f)
+// Temperature (tenths of °C) -> degrees into the arc's own 0..270 sweep
+// (rotation adds 135). Same mapping the setpoint indicator uses, so the
+// level and the fill land on one scale. Uses the CURRENT arc range so the
+// water overlay stays aligned with the (mode-dependent) indicator —
+// 120–423dc in absolute, 100–450dc in relative.
+static uint16_t level_angle(float dc)
 {
-    if (f < s_arc_min) f = s_arc_min;
-    if (f > s_arc_max) f = s_arc_max;
-    float d = 270.0f * (f - s_arc_min) / (float)(s_arc_max - s_arc_min);
+    if (dc < s_arc_min) dc = s_arc_min;
+    if (dc > s_arc_max) dc = s_arc_max;
+    float d = 270.0f * (dc - s_arc_min) / (float)(s_arc_max - s_arc_min);
     return (uint16_t)lroundf(d);
 }
 
@@ -203,14 +209,14 @@ static uint16_t level_angle(float f)
 // Cheap and idempotent — only touches the widget when the range actually
 // changes (a mode toggle OR a fresh device-reported range landing), so it
 // never disturbs an in-progress drag. Absolute mode's rails come from the
-// device itself (dial_state_temp_min_f/_max_f — owner: use Orion's own
-// min/max, not a hardcoded guess), falling back to DIAL_TEMP_MIN_F/MAX_F
-// only before discovery has run; relative mode's 21-level table is
-// untouched by this and keeps its own fixed rails.
+// device itself (dial_state_temp_min_dc/_max_dc — owner: use the pad's own
+// min/max, not a hardcoded guess), falling back to DIAL_TEMP_MIN_DC/MAX_DC
+// only before the first successful connect has run; relative mode's
+// 21-level table is untouched by this and keeps its own fixed rails.
 static void configure_arc_range(const app_state_t *st)
 {
-    int mn = s_rel ? DIAL_REL_MIN_F : dial_state_temp_min_f(st);
-    int mx = s_rel ? DIAL_REL_MAX_F : dial_state_temp_max_f(st);
+    int mn = s_rel ? DIAL_REL_MIN_DC : dial_state_temp_min_dc(st);
+    int mx = s_rel ? DIAL_REL_MAX_DC : dial_state_temp_max_dc(st);
     if (mn != s_arc_min || mx != s_arc_max) {
         lv_arc_set_range(s_arc, mn, mx);
         s_arc_min = mn;
@@ -227,7 +233,7 @@ static void configure_arc_range(const app_state_t *st)
 // its own knob at the band centerline = (inner span)/2 − indic_width/2; we mirror
 // that exactly, read from the live object, so the handle sits dead-center on the
 // ring regardless of the arc's padding.
-static void position_handle(int f)
+static void position_handle(int dc)
 {
     if (!s_handle || s_arc_max <= s_arc_min) return;
     lv_coord_t span = LV_MIN(lv_obj_get_width(s_arc), lv_obj_get_height(s_arc))
@@ -235,7 +241,7 @@ static void position_handle(int f)
                       - lv_obj_get_style_pad_right(s_arc, LV_PART_MAIN);
     float r = (span > 0 ? span : 2 * ARC_R) / 2.0f
               - lv_obj_get_style_arc_width(s_arc, LV_PART_INDICATOR) / 2.0f;
-    float frac = (float)(f - s_arc_min) / (float)(s_arc_max - s_arc_min);
+    float frac = (float)(dc - s_arc_min) / (float)(s_arc_max - s_arc_min);
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
     float ang = (135.0f + frac * 270.0f) * (float)M_PI / 180.0f;
@@ -244,9 +250,10 @@ static void position_handle(int f)
     lv_obj_align(s_handle, LV_ALIGN_CENTER, dx, dy);
 }
 
-// Map a live touch point (screen coords) back to a setpoint °F along the sweep.
-// Angles in the bottom gap fold to whichever rail is nearer, so a finger that
-// slides off the bottom pins cleanly instead of jumping across the gap.
+// Map a live touch point (screen coords) back to a setpoint (tenths of °C)
+// along the sweep. Angles in the bottom gap fold to whichever rail is
+// nearer, so a finger that slides off the bottom pins cleanly instead of
+// jumping across the gap.
 static int value_from_point(lv_point_t p)
 {
     float theta = atan2f((float)(p.y - CY), (float)(p.x - CX)) * 180.0f / (float)M_PI;
@@ -258,16 +265,16 @@ static int value_from_point(lv_point_t p)
     return s_arc_min + (int)lroundf(frac * (float)(s_arc_max - s_arc_min));
 }
 
-static void level_render(int target_f)
+static void level_render(int target_dc)
 {
     if (!s_level) return;
-    if (s_actual_f < 0) {                       // no measurement yet
+    if (s_actual_dc < 0) {                      // no measurement yet
         lv_obj_add_flag(s_level, LV_OBJ_FLAG_HIDDEN);
         return;
     }
 
-    uint16_t a_water = level_angle(s_actual_f);
-    uint16_t a_set   = level_angle((float)target_f);
+    uint16_t a_water = level_angle((float)s_actual_dc);
+    uint16_t a_set   = level_angle((float)target_dc);
     bool cooling = a_water > a_set;
 
     uint16_t a0 = cooling ? a_set : 0;
@@ -328,13 +335,13 @@ static void apply_palette_and_state(const app_state_t *st)
                         : (kind == ZK_STANDBY) ? LV_OPA_30 : LV_OPA_COVER;
     lv_obj_set_style_arc_opa(s_arc, indic_opa, LV_PART_INDICATOR);
 
-    // Water level. Cached in °F (and the accent with it) so a drag or a detent
-    // can re-draw the step without waiting for the next poll — the water doesn't
-    // move while you turn the knob, but the setpoint does, and that's what
-    // decides which side of it the water is on.
-    s_actual_f = (z->actual_c >= 0) ? (float)dial_c_to_f(z->actual_c) : -1.0f;
+    // Water level. Cached in tenths of °C (and the accent with it) so a drag
+    // or a detent can re-draw the step without waiting for the next poll —
+    // the water doesn't move while you turn the knob, but the setpoint does,
+    // and that's what decides which side of it the water is on.
+    s_actual_dc = (z->actual_c >= 0) ? (int)lroundf(z->actual_c * 10.0f) : -1;
     s_level_accent = accent;
-    level_render(s_shown_f);
+    level_render(s_shown_dc);
 
     // Side name + identity underline.
     lv_obj_set_style_text_color(s_name_lbl, pal->ink_secondary, 0);
@@ -369,10 +376,10 @@ static void apply_palette_and_state(const app_state_t *st)
     else       lv_obj_add_flag(s_zero_notch, LV_OBJ_FLAG_HIDDEN);
 
     // Setpoint handle: themed to the live accent and parked at the setpoint.
-    // Left alone while the user is dragging it — they own s_shown_f then, and a
+    // Left alone while the user is dragging it — they own s_shown_dc then, and a
     // reposition from a stray commit would fight the finger.
     lv_obj_set_style_bg_color(s_handle, accent, 0);
-    if (!s_dragging) position_handle(s_shown_f);
+    if (!s_dragging) position_handle(s_shown_dc);
 
     // State pill: surface fill, state-accent border/text/glyph — a computed
     // HEATING/COOLING/HOLDING readout, purely derived from kind (the same
@@ -489,34 +496,43 @@ static void apply_palette_and_state(const app_state_t *st)
     }
 }
 
-// The value passed in is always °F — the internal representation. Relative mode
-// shows the nearest −10…+10 level ("+3" / "0" / "-3"); the '+' is the glyph
-// spliced into dial_font_num_88 (level 0 is a bare "0", no sign). Absolute mode
-// keeps °F, or a one-decimal °C conversion when s_units_c (M4).
-static void render_numeral(int temp_f)
+// The value passed in is always tenths of °C (dc) — the internal, canonical
+// representation (see dial_state.h). Relative mode shows the nearest
+// −10…+10 level ("+3" / "0" / "-3"); the '+' is the glyph spliced into
+// dial_font_num_88 (level 0 is a bare "0", no sign). Absolute mode shows the
+// dc value directly (a trivial /10 split, exact — no rounding, since it IS
+// the canonical unit) when s_units_c, or dial_dc_to_f() when not (M4 units
+// toggle). °F is display-only math with no bearing on what gets stored or
+// posted: after the Q1 units fix, absolute mode steps in exact whole 1.0°C
+// increments, so the °F numeral now steps IRREGULARLY (e.g. 68, 70, 72, 73,
+// 75 — each is the nearest whole °F to a clean whole-°C value). That
+// irregularity is the correct, expected result of the setpoint actually
+// landing on the pad's own grid every time — do not smooth or interpolate
+// it away here.
+static void render_numeral(int temp_dc)
 {
     char t[8];
     if (s_rel) {
-        int lvl = dial_rel_from_f(temp_f);
+        int lvl = dial_rel_from_dc(temp_dc);
         if (lvl == 0) snprintf(t, sizeof(t), "0");
         else          snprintf(t, sizeof(t), "%+d", lvl);   // "+3" / "-3"
     } else if (s_units_c) {
-        snprintf(t, sizeof(t), "%.1f", dial_f_to_c(temp_f));
+        snprintf(t, sizeof(t), "%d.%d", temp_dc / 10, temp_dc % 10);
     } else {
-        snprintf(t, sizeof(t), "%d", temp_f);
+        snprintf(t, sizeof(t), "%d", dial_dc_to_f(temp_dc));
     }
     lv_label_set_text(s_temp_lbl, t);
 }
 
-static void post_temp_for(zone_idx_t zone, int temp_f)
+static void post_temp_for(zone_idx_t zone, int temp_dc)
 {
-    if (zone == s_zone) s_shown_f = temp_f;
-    dial_state_set_ui_temp(zone, temp_f);
-    app_cmd_t cmd = { .kind = CMD_SET_TEMP, .zone = zone, .temp_f = temp_f };
+    if (zone == s_zone) s_shown_dc = temp_dc;
+    dial_state_set_ui_temp(zone, temp_dc);
+    app_cmd_t cmd = { .kind = CMD_SET_TEMP, .zone = zone, .temp_dc = temp_dc };
     dial_cmd_post(&cmd);
 }
 
-static void post_temp(int temp_f) { post_temp_for(s_zone, temp_f); }
+static void post_temp(int temp_dc) { post_temp_for(s_zone, temp_dc); }
 
 // Setpoint handle drag. The handle is the ONLY temperature touch target: the
 // arc itself is display-only (non-clickable), so a press on the ring away from
@@ -536,7 +552,7 @@ static void handle_event_cb(lv_event_t *e)
 
     if (code == LV_EVENT_PRESSED) {
         s_dragging = true;
-        s_press_f = s_shown_f;
+        s_press_dc = s_shown_dc;
         dial_state_stamp_input();
         return;
     }
@@ -547,31 +563,31 @@ static void handle_event_cb(lv_event_t *e)
         if (!indev) return;
         lv_point_t p;
         lv_indev_get_point(indev, &p);
-        int f = value_from_point(p);
+        int dc = value_from_point(p);
         // Live feedback: the fill, numeral (nearest level in relative), water
         // step and handle all follow the finger; nothing is committed until
         // release (matches the old arc-drag behaviour).
-        s_shown_f = f;
-        lv_arc_set_value(s_arc, f);
-        render_numeral(f);
-        level_render(f);
-        position_handle(f);
+        s_shown_dc = dc;
+        lv_arc_set_value(s_arc, dc);
+        render_numeral(dc);
+        level_render(dc);
+        position_handle(dc);
         dial_state_stamp_input();
         return;
     }
 
     // LV_EVENT_RELEASED / LV_EVENT_PRESS_LOST — end of the drag.
     s_dragging = false;
-    int f = s_shown_f;
+    int dc = s_shown_dc;
     if (s_rel) {                          // commit exactly on the relative-level grid
-        f = dial_rel_to_f(dial_rel_from_f(f));
-        s_shown_f = f;
-        lv_arc_set_value(s_arc, f);
-        render_numeral(f);
-        level_render(f);
-        position_handle(f);
+        dc = dial_rel_to_dc(dial_rel_from_dc(dc));
+        s_shown_dc = dc;
+        lv_arc_set_value(s_arc, dc);
+        render_numeral(dc);
+        level_render(dc);
+        position_handle(dc);
     }
-    if (f != s_press_f) post_temp_for(zone, f);   // a tap that didn't move commits nothing
+    if (dc != s_press_dc) post_temp_for(zone, dc);   // a tap that didn't move commits nothing
 }
 
 // Tap the ambient "Update available" notice (only clickable while it's
@@ -637,7 +653,7 @@ static void power_long_press_cb(lv_event_t *e)
 static void create(lv_obj_t *scr, void *arg)
 {
     s_zone = (zone_idx_t)(uintptr_t)arg;
-    s_shown_f = -1;
+    s_shown_dc = -1;
     s_chevron_active = false;
     s_stale_shown = false;
     s_units_c = false;   // on_state (called right after create) sets the real value
@@ -653,8 +669,8 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_center(s_arc);
     lv_arc_set_rotation(s_arc, 135);
     lv_arc_set_bg_angles(s_arc, 0, 270);
-    lv_arc_set_range(s_arc, DIAL_TEMP_MIN_F, DIAL_TEMP_MAX_F);
-    lv_arc_set_value(s_arc, (DIAL_TEMP_MIN_F + DIAL_TEMP_MAX_F) / 2);
+    lv_arc_set_range(s_arc, DIAL_TEMP_MIN_DC, DIAL_TEMP_MAX_DC);
+    lv_arc_set_value(s_arc, (DIAL_TEMP_MIN_DC + DIAL_TEMP_MAX_DC) / 2);
     lv_obj_set_style_arc_width(s_arc, 16, LV_PART_MAIN);
     lv_obj_set_style_arc_width(s_arc, 16, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(s_arc, true, LV_PART_INDICATOR);
@@ -913,7 +929,7 @@ static void destroy(void)
     if (s_pill_glyph) lv_anim_del(s_pill_glyph, NULL);
     if (s_stale_dot)  lv_anim_del(s_stale_dot, NULL);
 
-    s_actual_f = -1.0f;
+    s_actual_dc = -1;
 
     s_level = NULL;
     s_zero_notch = NULL;
@@ -938,12 +954,21 @@ static void on_state(const app_state_t *st)
 
     // Optimistic intent wins while set; otherwise follow the device. Resolved
     // BEFORE apply_palette_and_state, which lays the water stripes out against
-    // s_shown_f — reading a stale target there would leave them a poll behind.
+    // s_shown_dc — reading a stale target there would leave them a poll behind.
     // Skipped entirely while the handle is being dragged: the finger owns
-    // s_shown_f then, and a commit landing mid-drag must not yank it away.
+    // s_shown_dc then, and a commit landing mid-drag must not yank it away.
+    //
+    // z->temp_dc is ALREADY the canonical tenths-of-°C value (quantized once,
+    // from the pad's own wire float, at the main.c boundary — see
+    // zone_state_t.temp_dc's comment) — taken straight, with no conversion of
+    // any kind here. This is the Q1 units fix's core: the old version of this
+    // line read dial_c_to_f(z->temp_c), rounding the pad's real Celsius value
+    // to the nearest whole °F to seed the knob's baseline — the first half of
+    // the C->F->C round-trip that made every subsequent knob turn miss the
+    // pad's own 1.0°C grid. There is nothing left to round here.
     if (!s_dragging) {
-        int f = (st->ui_temp_f[s_zone] >= 0) ? st->ui_temp_f[s_zone] : dial_c_to_f(z->temp_c);
-        s_shown_f = f;
+        int dc = (st->ui_temp_dc[s_zone] >= 0) ? st->ui_temp_dc[s_zone] : z->temp_dc;
+        s_shown_dc = dc;
     }
 
     // Sets s_units_c (among other things) before render_numeral below reads it
@@ -952,8 +977,8 @@ static void on_state(const app_state_t *st)
     apply_palette_and_state(st);
 
     if (!s_dragging) {
-        lv_arc_set_value(s_arc, s_shown_f);
-        render_numeral(s_shown_f);
+        lv_arc_set_value(s_arc, s_shown_dc);
+        render_numeral(s_shown_dc);
     }
     // Side name is set once, at create() time, from s_zone alone (generic
     // "RIGHT SIDE"/"LEFT SIDE" — same pattern as scr_sidepick.c). Somnus's
@@ -964,25 +989,28 @@ static void on_state(const app_state_t *st)
 
 static bool on_knob(int detents)
 {
-    if (!s_arc || s_shown_f < 0) return false;
+    if (!s_arc || s_shown_dc < 0) return false;
 
     // Relative: one detent = exactly one level in the turned direction, from
     // whatever level is displayed (dial_rel_step snaps an off-grid value onto
     // the grid as it moves, so the numeral and the bed always move together).
-    // Absolute: one detent = 1°F, clamped to s_arc_min/s_arc_max — the same
-    // device-reported (or fallback) rails configure_arc_range() just set,
-    // read back here rather than re-deriving them, since this branch only
-    // runs when s_rel is false (so s_arc_min/max already hold the absolute
-    // range, not the relative one).
+    // Absolute: one detent = 10 tenths = exactly 1.0°C (the Q1 units fix's
+    // design decision — matches the Somnus app's own whole-degree scale, so
+    // the dial and the app never disagree about the setpoint, even though
+    // the pad itself accepts finer values), clamped to s_arc_min/s_arc_max —
+    // the same device-reported (or fallback) rails configure_arc_range() just
+    // set, read back here rather than re-deriving them, since this branch
+    // only runs when s_rel is false (so s_arc_min/max already hold the
+    // absolute range, not the relative one).
     int nf;
     if (s_rel) {
-        nf = dial_rel_step(s_shown_f, detents);
+        nf = dial_rel_step(s_shown_dc, detents);
     } else {
-        nf = s_shown_f + detents;
+        nf = s_shown_dc + detents * 10;
         if (nf < s_arc_min) nf = s_arc_min;
         if (nf > s_arc_max) nf = s_arc_max;
     }
-    if (nf == s_shown_f) {                          // pinned at the range stop
+    if (nf == s_shown_dc) {                         // pinned at the range stop
         dial_haptics_play_soft(HAPTIC_STOP);
         int dir = detents > 0 ? 1 : -1;
         anim_nudge(s_num_box, dir);
@@ -991,7 +1019,7 @@ static bool on_knob(int detents)
     }
 
     lv_arc_set_value(s_arc, nf);
-    s_shown_f = nf;
+    s_shown_dc = nf;
     render_numeral(nf);
     level_render(nf);
     position_handle(nf);

@@ -335,8 +335,8 @@ static void mut_device_state(app_state_t *st, void *arg)
         zone_state_t keep = st->zones[z];
         st->zones[z] = d->zones[z];
         if (predates_input) {                       // see the note above
-            st->zones[z].on     = keep.on;
-            st->zones[z].temp_c = keep.temp_c;
+            st->zones[z].on      = keep.on;
+            st->zones[z].temp_dc = keep.temp_dc;
         }
     }
     for (int z = 0; z < ZONE_COUNT; z++) st->zone_present[z] = d->present[z];
@@ -355,18 +355,18 @@ static void mut_device_state(app_state_t *st, void *arg)
     // quiet-period poll runs with no newer input and clears the stale intent).
     if (!predates_input)
         for (int z = 0; z < ZONE_COUNT; z++)
-            st->ui_temp_f[z] = -1;
+            st->ui_temp_dc[z] = -1;
 }
 
-// temp_min_f/temp_max_f: the pad's fixed range (local_api spec, dial_somnus.h
+// temp_min_dc/temp_max_dc: the pad's fixed range (local_api spec, dial_somnus.h
 // -- no discovery call reports it, unlike Orion's list_devices), seeded once
 // after a successful dial_somnus_connect(). See worker_task's call site.
-typedef struct { int temp_min_f, temp_max_f; } temp_range_t;
+typedef struct { int temp_min_dc, temp_max_dc; } temp_range_t;
 static void mut_temp_range(app_state_t *st, void *arg)
 {
     temp_range_t *r = arg;
-    st->temp_min_f = r->temp_min_f;
-    st->temp_max_f = r->temp_max_f;
+    st->temp_min_dc = r->temp_min_dc;
+    st->temp_max_dc = r->temp_max_dc;
 }
 
 /*
@@ -383,11 +383,11 @@ static void mut_zone_on(app_state_t *st, void *arg)
     st->zones[u->zone].on = u->on;
 }
 
-typedef struct { int zone; float temp_c; int64_t issued_us; } zone_temp_t;
+typedef struct { int zone; int temp_dc; int64_t issued_us; } zone_temp_t;
 static void mut_zone_temp(app_state_t *st, void *arg)
 {
     zone_temp_t *u = arg;
-    st->zones[u->zone].temp_c = u->temp_c;          // the pad now holds this target
+    st->zones[u->zone].temp_dc = u->temp_dc;        // the pad now holds this target
 
     // Only retire the optimistic display value if nothing newer has been dialled
     // in since this write left. Clearing it unconditionally is what made the
@@ -395,7 +395,7 @@ static void mut_zone_temp(app_state_t *st, void *arg)
     // in-flight write happened to carry — a number the user had already turned
     // past. The newer value has its own CMD_SET_TEMP queued behind this one.
     if (dial_state_last_input_us() <= u->issued_us)
-        st->ui_temp_f[u->zone] = -1;
+        st->ui_temp_dc[u->zone] = -1;
 }
 
 static void mut_retry_in(app_state_t *st, void *arg)  { st->retry_in_s = *(int *)arg; }
@@ -561,7 +561,13 @@ static bool somnus_refresh_state(void)
     for (int z = 0; z < ZONE_COUNT; z++) {
         const somnus_side_state_t *side = &s.side[z];
         d.zones[z].on        = side->is_on;
-        d.zones[z].temp_c    = side->target_c;
+        // The ONE deliberate, one-directional quantization boundary: the
+        // wire's own float (arbitrary precision, whatever the pad reports)
+        // rounds to the nearest 0.1°C to enter the canonical tenths-of-°C
+        // representation. Purely Celsius-to-Celsius -- no °F is ever
+        // involved on this path, so this is not the round-trip the Q1 fix
+        // removed.
+        d.zones[z].temp_dc   = (int)lroundf(side->target_c * 10.0f);
         d.zones[z].actual_c  = side->has_current ? side->current_c : -1.0f;
         d.zones[z].water_low = side->water_low;
     }
@@ -570,7 +576,7 @@ static bool somnus_refresh_state(void)
     for (int z = 0; z < ZONE_COUNT; z++)
         if (d.present[z])
             ESP_LOGI(TAG, "side %c: on=%d set=%.1fC water=%.1fC%s",
-                     'A' + z, d.zones[z].on, d.zones[z].temp_c, d.zones[z].actual_c,
+                     'A' + z, d.zones[z].on, d.zones[z].temp_dc / 10.0f, d.zones[z].actual_c,
                      d.zones[z].water_low ? " LOW-WATER" : "");
 
     dial_state_commit(mut_device_state, &d);
@@ -798,9 +804,11 @@ static void worker_task(void *arg)
 
     // Fixed pad range (local_api spec, dial_somnus.h) — no discovery call to
     // report it, unlike Orion's list_devices, so seed it once here instead
-    // of per-poll.
+    // of per-poll. Hardcoded directly in the canonical unit (tenths of °C):
+    // 12.0-42.3°C == 120-423dc, no conversion needed or wanted — there is no
+    // °F anywhere upstream of this to convert from.
     {
-        temp_range_t range = { dial_c_to_f(12.0f), dial_c_to_f(42.3f) };
+        temp_range_t range = { 120, 423 };
         dial_state_commit(mut_temp_range, &range);
     }
 
@@ -839,8 +847,8 @@ static void worker_task(void *arg)
             // a trip through its own screen (SCR_SETTINGS) — but if one lands
             // mid-drain, stop coalescing and handle it right after rather
             // than silently mis-treating it as a toggle.
-            int last_temp[ZONE_COUNT] = { -1, -1 };
-            int want_on[ZONE_COUNT]   = { -1, -1 };   // -1 = untouched this burst
+            int last_temp_dc[ZONE_COUNT] = { -1, -1 };  // tenths of °C, canonical unit
+            int want_on[ZONE_COUNT]      = { -1, -1 };  // -1 = untouched this burst
             bool have_pending = false;
             app_cmd_t pending;
             // The command carries the DESIRED on state, so the last one posted
@@ -848,7 +856,7 @@ static void worker_task(void *arg)
             // !current from the store — which now flips optimistically on tap,
             // so re-deriving would have undone the user's own press.)
             do {
-                if (cmd.kind == CMD_SET_TEMP)       last_temp[cmd.zone] = cmd.temp_f;
+                if (cmd.kind == CMD_SET_TEMP)       last_temp_dc[cmd.zone] = cmd.temp_dc;
                 else if (cmd.kind == CMD_TOGGLE_ON) want_on[cmd.zone] = cmd.a ? 1 : 0;
                 else { have_pending = true; pending = cmd; break; }
             } while (dial_cmd_receive(&cmd, 0));
@@ -865,9 +873,15 @@ static void worker_task(void *arg)
                     if (dial_somnus_set_power((somnus_side_t)z, up.on))
                         dial_state_commit(mut_zone_on, &up);
                 }
-                if (last_temp[z] >= 0) {
-                    zone_temp_t up = { z, dial_f_to_c(last_temp[z]), issued_us };
-                    if (dial_somnus_set_temp((somnus_side_t)z, up.temp_c))
+                if (last_temp_dc[z] >= 0) {
+                    // int tenths -> double directly, no float intermediate:
+                    // this is the Q1 fix's other half (dial_somnus_set_temp's
+                    // doc comment) — it's what keeps the JSON body a clean
+                    // "21.7"/"22.0" instead of a float32-promoted
+                    // "21.700000762939453".
+                    double c = last_temp_dc[z] / 10.0;
+                    zone_temp_t up = { z, last_temp_dc[z], issued_us };
+                    if (dial_somnus_set_temp((somnus_side_t)z, c))
                         dial_state_commit(mut_zone_temp, &up);
                 }
             }

@@ -231,6 +231,13 @@ static bool post_side_field(const char *path, somnus_side_t side,
     cJSON_Delete(root);
     if (!body) { set_error("OOM building request body"); return false; }
 
+    // Verification for the units fix (2026-08-30): log the exact bytes going
+    // over the wire, so a clean "21.7"/"22.0" can be confirmed by eye against
+    // the float->double promotion bug this used to carry (see
+    // dial_somnus_set_temp's doc comment) — never something like
+    // "21.700000762939453".
+    ESP_LOGI(TAG, "POST %s %s", path, body);
+
     char *resp = NULL;
     bool ok = do_request(path, HTTP_METHOD_POST, body, &resp);
     free(body);
@@ -238,7 +245,7 @@ static bool post_side_field(const char *path, somnus_side_t side,
     return ok;
 }
 
-bool dial_somnus_set_temp(somnus_side_t side, float temp_c)
+bool dial_somnus_set_temp(somnus_side_t side, double temp_c)
 {
     return post_side_field("/api/target_t", side, "target_t", cJSON_CreateNumber(temp_c));
 }
