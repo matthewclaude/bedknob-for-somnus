@@ -5,7 +5,7 @@
 /*
  * Firmware updates from GitHub Releases (M6): the version check hits the
  * public repo's GitHub API (api.github.com), and the image itself is
- * esp_https_ota'd from the release's "orion-dial.bin" asset (a 302 to
+ * esp_https_ota'd from the release's "somnus-dial.bin" asset (a 302 to
  * objects.githubusercontent.com, which esp_https_ota follows natively). TLS
  * on both hosts verifies against an embedded multi-root PEM (trust_roots.pem,
  * EMBED_TXTFILES -- see dial_ota.c) curated to survive a routine CA rotation
@@ -62,7 +62,7 @@ void dial_ota_get(dial_ota_info_t *out);
 // scanned defensively -- see dial_ota.c), compare its tag_name (stripped of
 // the "dial-v" prefix) against the running esp_app_get_description()
 // version -- prerelease-aware, semver §11 -- and -- if newer -- record the
-// "orion-dial.bin" asset's download URL for a subsequent
+// "somnus-dial.bin" asset's download URL for a subsequent
 // dial_ota_download_and_apply(). Leaves status OTA_AVAILABLE (newer found),
 // OTA_IDLE (already current, or nothing to compare), or OTA_FAILED
 // (network/parse error, see .err). Worker task only. `beta` is the caller's
