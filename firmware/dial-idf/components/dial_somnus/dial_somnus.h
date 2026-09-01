@@ -9,7 +9,7 @@
  * ported from).
  *
  * No cloud, no auth, no OAuth, no MCP envelope: the pad exposes a tiny plain
- * JSON REST API on the local network (default 192.168.1.169:8080):
+ * JSON REST API on the local network (default 192.168.1.100:8080):
  *
  *   GET  /api/state      -> current state for both sides
  *   POST /api/power      -> {"side0": {"is_on": true}, "side1": {...}}
@@ -45,9 +45,12 @@
 
 // Compile-time fallback only, used if no base URL has ever been configured
 // via Settings yet (e.g. very first boot before the user's entered one).
+// This is the address the official local_api spec uses as its own example,
+// NOT a real pad — every pad gets whatever its network hands it, so the
+// Settings screen's "Pad Address" row is the real entry path.
 // Once dial_somnus_connect() has been called with a real address, prefer
 // that over this default everywhere else in the codebase.
-#define SOMNUS_DEFAULT_BASE_URL "http://192.168.1.169:8080"
+#define SOMNUS_DEFAULT_BASE_URL "http://192.168.1.100:8080"
 
 // Same idea for zone mode: this is only the fallback used before the user
 // has ever set the toggle in Settings. true = single-zone ("One Bed").
@@ -81,7 +84,7 @@ typedef struct {
                             // is active on the device"
 } somnus_state_t;
 
-// Point the client at the pad. base_url like "http://192.168.1.169:8080",
+// Point the client at the pad. base_url like "http://192.168.1.100:8080",
 // no trailing slash. Call once, early — does an initial reachability probe
 // via a real GET, there is no session to open. If the user changes the IP
 // in Settings later, call this again with the new address before the next

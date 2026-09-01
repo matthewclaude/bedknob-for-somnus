@@ -294,7 +294,7 @@ typedef struct {
 // this is a deliberate duplicate, not a typo. Keep both exactly in sync with
 // dial_somnus.h's own copies if either ever changes.
 #define DIAL_PAD_URL_MAX_LEN 127
-#define DIAL_PAD_DEFAULT_BASE_URL "http://192.168.1.169:8080"
+#define DIAL_PAD_DEFAULT_BASE_URL "http://192.168.1.100:8080"
 #define DIAL_PAD_DEFAULT_SINGLE_ZONE true
 
 typedef struct {
