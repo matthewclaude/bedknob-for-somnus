@@ -1,7 +1,15 @@
 # Spec: Connect-phase flapping and the escape-hatch bug
 
-Status: **ANALYSIS AND PROPOSAL, NOT YET APPROVED (2026-09-01).** No code
-written against this spec. This is a standalone spec, not a subsection of
+Status: **PROPOSAL, NOT ADOPTED (as of 2026-09-02).** The bug this spec
+analyzes was fixed on 2026-09-01 by the *minimal* alternative it argues
+against — adding `PH_SOMNUS_CONNECTING` and `PH_PAD_DISCOVERY` to
+`nav_policy()`'s existing "never trap the user" case group (`main.c` ~297),
+plus `SCR_TIMEZONE` added to the sticky-screen list. That fix is verified on
+hardware. `PH_PAD_UNREACHABLE` and the `pad_ever_connected` first-boot flag
+proposed here do **not** exist in the tree. Whether to still do the fuller
+redesign is an open decision, not a scheduled one; the trace below is the
+reference for that state machine either way. No code written against this
+spec. This is a standalone spec, not a subsection of
 `docs/SPEC-pad-discovery.md` — see "Why its own spec" below for why.
 
 ## Why its own spec, not a section of SPEC-pad-discovery.md

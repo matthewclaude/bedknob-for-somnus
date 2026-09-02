@@ -1,10 +1,28 @@
 # Spec: Pad auto-discovery
 
-Status: **INVESTIGATION COMPLETE, NOT YET APPROVED (2026-09-01).** This
-supersedes any earlier draft in the owner's project notes — the numbers
-below come from reading the actual sdkconfig, the actual `main.c` loop, and
-the actual reference implementation, not from an estimate. No code has been
-written against this spec yet.
+Status: **IMPLEMENTED AND VERIFIED ON HARDWARE (2026-09-01).** Shipped in
+`somnus-v0.1.x` as `components/dial_pad_discovery/`. Verified end to end: pad
+address set to a wrong value, dial power-cycled, it scanned with the progress
+screen, found the real pad, went to the dial face, and re-persisted the
+address itself. Record in `docs/HARDWARE-bringup-log.md` and `V1-scope.md`
+item 1.
+
+> **As built vs. as specified — read this before citing the integration
+> section.** What shipped is the design in this document *except* the phase
+> model: the connect loop still sets `PH_SOMNUS_CONNECTING`, and the trapped-
+> user bug was fixed with the four-line `nav_policy()` case-group patch that
+> the collapsed "Original §9.2 analysis" below describes — **not** the
+> `PH_PAD_UNREACHABLE` redesign from `SPEC-connect-phases.md` that the
+> "Concrete integration point" section shows. `PH_PAD_UNREACHABLE` does not
+> exist in the tree. `SPEC-connect-phases.md` remains an unadopted proposal.
+> Not yet exercised on hardware: the pass-2 slow sweep, the found-nothing
+> path, and navigating away mid-scan. The 300ms pass-1 timeout has not been
+> re-measured from the ESP32 itself (Refinement 2's standing note).
+
+Everything below this line is the investigation as written on 2026-09-01,
+kept intact as the design record — the numbers come from reading the actual
+sdkconfig, the actual `main.c` loop, and the actual reference implementation,
+not from an estimate.
 
 **Revised same day:** added probe ordering (Refinement 1) and a two-pass
 timeout (Refinement 2), both scoped to attack the 38.4s sweep time without
@@ -703,10 +721,17 @@ are illustrative, not final.
   `docs/SPEC-connect-phases.md`, pending review, not written here.
 - Not deciding the first-boot-phase-tone question — proposed in that same
   spec (a persisted `pad_ever_connected` flag), pending review.
-- Not touching the temporary `192.168.1.169` default, the `main.c`
-  connect-loop fix, the relative-scale fix, or the timezone work.
+- Not touching the temporary `192.168.1.169` default (since reverted to
+  `192.168.1.100`, 2026-09-02), the `main.c` connect-loop fix, the
+  relative-scale fix, or the timezone work.
 
 ## Open questions for the owner
+
+**Resolved by shipping (2026-09-01):** Q1 — accepted as specified (4 probes,
+256-host cap, two passes). Q2 — *not* adopted; the minimal `nav_policy`
+patch shipped instead, see the as-built note at the top. Q3 — deferred; no
+`pad_ever_connected` flag exists. Q4 — resolved as recorded below. Kept for
+history:
 
 1. Does the 4-concurrent-probe / 256-host-cap / 57.6-second-worst-case-for-a-
    `/24` combination (up from the 38.4s single-pass baseline, and up again

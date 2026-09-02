@@ -1,7 +1,11 @@
 # Spec: Somnus relative ("LEVEL") scale fix
 
-Status: **APPROVED AND IN BUILD (2026-09-01).** Empirically established against
-the real Somnus pad on 2026-09-01; implementing the same day.
+Status: **SHIPPED AND VERIFIED ON HARDWARE (2026-09-01).** Empirically
+established against the real Somnus pad on 2026-09-01, implemented the same
+day, and confirmed on the physical dial: the level scale matches the Somnus
+app across the full −15…+15 range, and app-side changes appear on the dial
+at its next poll. `test/test_dial_rel.c` rewritten and passing. The
+`rel_mode` default question in "Out of scope" was decided 2026-09-02.
 
 ## Problem
 

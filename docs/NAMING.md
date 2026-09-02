@@ -39,9 +39,9 @@ construction is not worth losing.
    bookmarked the page.
 2. **Bedknob Mini** — the whole rename, same shape as the Mac app's.
 3. **Two GitHub repo renames**, both manual and both the owner's to do.
-4. **The Claude Project docs** (`somnus-dial-project-summary.md`, `V1-scope.md`) still use
-   the old names throughout — §5 of the summary is still headed "SomnusDialPreview". Fold
-   that into the rename pass rather than doing it piecemeal.
+4. **The Claude Project docs** — headings and prose updated to the new names Sep 2 2026.
+   The summary's *filename* (`somnus-dial-project-summary.md`) and the Project's own
+   title/instructions still say "Somnus Dial"; fold those into the rename pass.
 
 ## Naming assets
 

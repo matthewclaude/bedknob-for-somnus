@@ -6,7 +6,14 @@
 
 ---
 
-## 1. The finding that started this — this part is a real, current bug
+## 1. The finding that started this — RESOLVED 2026-09-02
+
+> **Resolution:** option 1 + option 2 below were taken. The "Adjustment mode"
+> row is hidden from Settings; the pref, screen and wiring stay dormant in
+> the tree (same treatment as the AWAY badge); the three stale comments were
+> corrected. Recorded in `docs/HARDWARE-bringup-log.md` §9.6. The analysis is
+> kept because §6 depends on it.
+
 
 `sched_follow` is **fully built as a setting and read by nothing.**
 
@@ -85,6 +92,8 @@ Start small: **wire `sched_follow` to a real consumer with a single hardcoded tw
 
 Un-hiding the "Adjustment mode" Settings row is part of that work.
 
-## 9. Hard prerequisite
+## 9. Hard prerequisite — satisfied once, 2026-09-02
 
-The dial has never been observed across a full night. Before it is given authority over the bed's temperature while the owner sleeps, it should first be watched doing the passive thing correctly — tracking the pad through an overnight cycle without dropping its connection or losing the plot.
+The original prerequisite: before the dial is given authority over the bed's temperature while the owner sleeps, it should first be watched doing the passive thing correctly — tracking the pad through an overnight cycle without dropping its connection or losing the plot.
+
+**Done once.** The dial ran one full night unattended and tracked the pad's own 3-stage schedule correctly — no hang, crash, or Wi-Fi drop (`docs/HARDWARE-bringup-log.md` §14.1). Multi-night heap growth is still uninstrumented; treat that as the remaining bar before this feature is picked up.

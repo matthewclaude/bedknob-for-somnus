@@ -1,6 +1,18 @@
 # Spec: Timezone source (captive portal)
 
-Status: **APPROVED AND IN BUILD (2026-09-01).**
+Status: **SHIPPED 2026-09-01; one real-world failure open (2026-09-02).**
+Both mechanisms are built and verified on hardware — the portal's hidden
+`tz` field and the Settings → Timezone row — and the clock shows correct
+local time. **But the portal path fails when provisioning from an iPhone:**
+the hidden field arrives empty, the save is a silent no-op, and because
+`dial_time_valid()` stays false the dial never offers an OTA update either.
+See "Observed failure" below and `V1-scope.md` item 11 for the fix (a
+setup gate in `nav_policy()` routing to `SCR_TIMEZONE` when no zone has
+ever been persisted). **That fix is written — it sits in the working tree
+uncommitted as of the evening of 2026-09-02 (`main.c`, `dial_state.c/.h`,
+`scr_timezone.c`, `ui_router.h`, `dial_wifi.c`) — but has not been built,
+flashed, or committed.** Until it is on the board and verified, item 11
+stays open.
 
 ## Problem
 
@@ -240,3 +252,117 @@ actual state.
   finished neutralizing one baked-in personal constant (the pad IP); it does
   not need another.
 - IP geolocation or any new network dependency.
+
+---
+
+## Observed failure: the portal mechanism does not work on an iPhone (2026-09-02)
+
+**Status: OPEN. This section supersedes any reading of the sections above as
+"the portal captures the zone."** On the first real run of the fresh-install
+path (`V1-scope.md` item 4), on a genuinely erased board running `0.1.3`:
+iPhone joined the dial's SoftAP, entered Wi-Fi credentials, the dial joined
+the network — and **Settings → Timezone read "Not set."** The clock ran UTC.
+
+### What was ruled out, with evidence rather than assumption
+
+- **Body truncation is not the cause.** `save_post()` caps the read at 255
+  bytes (`dial_wifi.c:552-554`) and the `tz` field is last in the form, so it
+  is the first thing lost — but the arithmetic does not support it here. The
+  body is `ssid=<enc>&pass=<enc>&tz=America%2FChicago`; the tz field costs
+  about 20 bytes and the fixed keys about 15, leaving roughly **223 encoded
+  bytes** for SSID plus password. A normal credential pair is nowhere near
+  that. Truncation remains a real hazard for a pathological password and the
+  field ordering that protects the password is still correct — it is simply
+  not what happened.
+- **The parsing is correct.** `tp += 3` past the needle, `&`-bounded, copied
+  into a fixed 64-byte local, URL-decoded, character-checked before
+  `dial_time_set_iana_tz()` is reached. Read, not assumed.
+- **Empty input is a clean no-op with no misleading log.**
+  `iana_tz_chars_ok()` returns false on `!s[0]` before the character loop, and
+  the `else if (tz[0])` guard means an empty field logs nothing at all. So
+  silence in the log is itself the signal: it means the field arrived empty.
+- **Not the on-device-picker gap this spec already documents.** The
+  `SCR_NETPICK` / `dial_net_submit_creds()` path was not used. This was the
+  browser portal, which is the path the mechanism above is written for.
+
+### What is not known
+
+**Why the iPhone's webview did not fill the field.** The likely suspect is
+iOS's captive-network mini-browser rather than full Safari, but that is a
+guess about someone else's webview and nothing here should depend on it.
+
+One cheap experiment isolates it, if anyone wants the answer: with the dial in
+portal mode, dismiss the auto-popup and open `http://192.168.4.1` **manually
+in Safari**. If the zone lands that way, the captive-network webview is the
+culprit and full Safari is fine. Worth ten seconds; worth zero as a fix,
+because a setup path that only works when the user knows to bypass the popup
+is not a setup path.
+
+### Why this is worse than a wrong clock
+
+`dial_time_valid()` is `s_synced && s_tz_set`, so with no zone it is
+permanently false — and **everything gated on a valid clock silently never
+runs.** Per `docs/SPEC-update-prompt.md`'s gate table and `main.c`'s update
+prompt, that includes the entire update-prompt path. An iPhone-provisioned
+dial therefore:
+
+1. shows UTC on the face,
+2. swaps to the night palette at the wrong hour (`dial_palette_is_night()`
+   reads local time), and
+3. **never offers a firmware update**, with no error anywhere.
+
+The bring-up log's §10 already recorded this knock-on shape ("anything gated
+on a valid clock never ran"). It was fixed for the *cause* it had then — no
+caller at all — and has now returned through a different door.
+
+## Fix 1 (required): a setup gate in `nav_policy()`
+
+After the first successful connect, if no zone has **ever** been persisted,
+route to `SCR_TIMEZONE` instead of the dial face. This does not care what any
+browser did, which is the point.
+
+Everything it needs already exists — the screen, the curated 11 zones, the
+`CMD_TZ_CHANGED` plumbing, the NVS persistence, and `SCR_TIMEZONE`'s presence
+in the sticky-screen set (added when `docs/SPEC-connect-phases.md`'s fix found
+it missing). This is a `nav_policy()` condition, not a feature.
+
+Constraints, each for a reason:
+
+- **Test `dial_time_get_iana_tz()`, never `dial_time_valid()`.** The latter is
+  also false before SNTP lands, which would fire the gate during every normal
+  boot.
+- **Place it after the OTA-install takeover and after the `SCR_WELCOME`
+  block**, matching the existing precedence — an install in flight and the
+  first-run splash both outrank it.
+- **Dismissal is in-RAM, not persisted — mirror `welcomed` exactly.** A
+  `tz_prompted` flag set when the user leaves the screen stops a routine
+  state commit from re-forcing it, and keeps the "never trap the user"
+  property. Do **not** persist it: if the user skips and reboots, asking again
+  is correct, because the clock is still wrong. `app_state_t.welcomed` is
+  already documented as deliberately unpersisted for the same reason.
+- **Never gate the pad connection on it.** Same discipline the portal handler
+  already follows for credentials: a missing zone must not stop the dial
+  working.
+
+## Fix 2 (optional): make the portal degrade instead of failing silently
+
+Turn the hidden `tz` input into a **visible `<select>` of the same 11 curated
+zones**, prefilled by the existing `Intl` call when it works. When the script
+does not run, the user gets a one-tap choice on a phone keyboard instead of
+silence — and picking from a phone is better than picking with a knob. Costs
+about eleven lines of HTML in `dial_wifi.c` and does not change the body
+budget, since the submitted value is the same length as today's.
+
+This is the belt to Fix 1's braces. Fix 1 alone is sufficient; Fix 2 alone is
+not, because it still cannot help the `SCR_NETPICK` path.
+
+## Comment correction owed in `dial_wifi.c`
+
+The comment above the hidden field says the empty-field case is fine because
+"there's already a `<noscript>` fallback elsewhere on this page for exactly
+that case." **That `<noscript>` only reveals the "other network" box.** There
+is no timezone fallback of any kind. The empty-field *handling* is genuinely
+safe — clean no-op, nothing corrupted — but the comment reads as though
+graceful degradation exists, and it does not. This is the same shape as the
+five bugs in the bring-up log's §12: a comment describing a protection the
+code does not have. Fix the comment in whichever pass implements Fix 1 or 2.
