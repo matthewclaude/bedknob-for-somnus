@@ -82,66 +82,61 @@ static inline int dial_dc_to_f(int dc) { return (int)lroundf((float)dc * 0.18f +
 #define DIAL_TEMP_MAX_DC 450
 
 /*
- * RELATIVE temperature scale (Orion's third temperature_scale table). A signed
- * −10…+10 "level" scale where 0 = 27.5°C, the midpoint of the device range;
- * negative is cooler, positive warmer. It is purely a display/input
- * convention on our side — the wire is always °C (set_zone takes Celsius; there
- * is no scale/level parameter on any Orion tool, confirmed by live probe) —
- * and is NOT the same thing as the Q1 fix's 1.0°C-per-detent absolute-mode
- * step: a relative-mode detent moves one LEVEL, and the levels below are
- * deliberately NOT evenly 1.0°C apart (~1.75°C average, see the bracket
- * table), matching the original Orion design this table preserves.
+ * RELATIVE temperature scale ("LEVEL" mode). A signed −15…+15 level scale,
+ * uniform, Celsius-native: 1.0°C per level, level 0 = 27.0°C. Purely a
+ * display/input convention on our side — the wire is always °C (set_zone
+ * takes Celsius) — but unlike this file's pre-2026-09-01 version, it now IS
+ * the same 1.0°C-per-step as absolute mode; a relative-mode detent moves one
+ * level == exactly 1.0°C, nothing fancier.
  *
- * Each level is carried by a tenths-of-°C value below, chosen so it lands
- * strictly inside that level's Celsius bracket — so a device poll can never
- * nudge the displayed level, and every value we write is on Orion's grid.
- * These two tables are the ONLY source of truth; the discover-time tripwire
- * in main.c re-checks them against the live temperature_scale.relative and
- * logs loudly on any mismatch.
+ * This replaces a −10…+10 lookup table that was mechanically transcribed
+ * from Orion's (the upstream product's) whole-Fahrenheit relative scale.
+ * That table was wrong for this product: it was never re-derived against
+ * the Somnus app, so it silently disagreed with what the Somnus app itself
+ * displays for the same bed temperature, at every level, the entire time
+ * this port has existed. Three measurements against the real pad on
+ * 2026-09-01 pin the actual Somnus scale — app level −15 = 12.0°C, −6 =
+ * 21.0°C, +15 = 42.0°C — which is exactly uniform at 1.0°C/level, so the
+ * fix is arithmetic, not a corrected table. Full derivation and the
+ * measurements: docs/SPEC-somnus-relative-scale.md.
  *
- * Values are a straight unit conversion of the pre-fix whole-°F tables
- * (°F -> tenths-of-°C, rounded to the nearest 0.1°C, exactly the rounding
- * dial_dc_to_f's now-deleted inverse used to do) — mechanically transcribed,
- * not re-derived, so every boundary/tie decision the original design made
- * (documented there as "ties resolve toward the WARMER level" — e.g. the
- * level-0 carrier landing on 82°F over 81°F, and the +8 boundary on 104°F)
- * carries over unchanged. See test/test_dial_rel.c for the invariants this
- * table must keep holding.
+ * The old table's rails (10.0°C/45.0°C) also exceeded the Somnus API's
+ * accepted range (12.0-42.3°C per local_api spec) — the pad silently
+ * clamped, so the dial's extreme levels collapsed onto the same real
+ * temperature. The new rails sit inside the API's accepted range instead.
  *
- *   DIAL_REL_DC[L+10]  = tenths of °C carrying level L (−10…+10).
- *   DIAL_REL_LO_DC[i]  = lowest tenths-of-°C value that belongs to level
- *                        (−9 + i); the nearest-level boundaries.
+ * See test/test_dial_rel.c for the invariants this must keep holding.
  */
-#define DIAL_REL_MIN (-10)
-#define DIAL_REL_MAX ( 10)
-#define DIAL_REL_MIN_DC 100   // level −10 rail (= 10.0°C)
-#define DIAL_REL_MAX_DC 450   // level +10 rail (= 45.0°C)
+#define DIAL_REL_MIN     (-15)
+#define DIAL_REL_MAX     ( 15)
+#define DIAL_REL_MIN_DC  120   // level −15 rail (12.0°C, the API minimum)
+#define DIAL_REL_MAX_DC  420   // level +15 rail (42.0°C)
+#define DIAL_REL_ZERO_DC 270   // level 0 (27.0°C)
 
-static const uint16_t DIAL_REL_DC[21] = {
-    100, 122, 139, 161, 178, 189, 206, 228, 244, 261, 278,
-    289, 306, 322, 333, 350, 372, 389, 411, 428, 450
-};
-static const uint16_t DIAL_REL_LO_DC[20] = {
-    111, 133, 150, 172, 183, 200, 222, 239, 256, 272,
-    283, 300, 317, 328, 344, 361, 383, 400, 422, 444
-};
-
-// Nearest relative level for a tenths-of-°C value (clamped to −10…+10). Uses
-// the boundary table: dc is at least level (−9 + i) iff dc ≥ DIAL_REL_LO_DC[i].
-static inline int dial_rel_from_dc(int dc)
-{
-    int lvl = DIAL_REL_MIN;
-    for (int i = 0; i < 20; i++)
-        if (dc >= DIAL_REL_LO_DC[i]) lvl = DIAL_REL_MIN + 1 + i;
-    return lvl;
-}
-
-// The tenths-of-°C value carrying a level (level clamped to range).
+// The tenths-of-°C value carrying a level (level clamped to range first).
 static inline int dial_rel_to_dc(int level)
 {
     if (level < DIAL_REL_MIN) level = DIAL_REL_MIN;
     if (level > DIAL_REL_MAX) level = DIAL_REL_MAX;
-    return DIAL_REL_DC[level - DIAL_REL_MIN];
+    return DIAL_REL_ZERO_DC + 10 * level;
+}
+
+// Nearest relative level for a tenths-of-°C value (clamped to −15…+15).
+// Rounds to nearest, never truncates -- truncation would bias every
+// off-grid value toward zero. Ties (exactly halfway between two levels)
+// resolve toward the WARMER level, i.e. round-half-up on (dc -
+// DIAL_REL_ZERO_DC)/10 regardless of sign: integer division truncates
+// toward zero in C, so plain "/10" would round -0.5 the wrong way (toward
+// zero, i.e. warmer, only on one side) -- the explicit floor below makes
+// the half-up rule symmetric across zero instead.
+static inline int dial_rel_from_dc(int dc)
+{
+    int diff = dc - DIAL_REL_ZERO_DC + 5;   // +5: round-half-up, not truncate
+    int lvl  = diff / 10;
+    if (diff % 10 < 0) lvl--;               // true floor for negative diff
+    if (lvl < DIAL_REL_MIN) lvl = DIAL_REL_MIN;
+    if (lvl > DIAL_REL_MAX) lvl = DIAL_REL_MAX;
+    return lvl;
 }
 
 // One detent = exactly one level in the turned direction, from whatever level
