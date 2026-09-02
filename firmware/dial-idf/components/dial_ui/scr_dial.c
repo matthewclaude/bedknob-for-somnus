@@ -51,6 +51,20 @@ static lv_obj_t *s_handle;       // setpoint drag handle — the ONLY temp touch
  *
  * Recomputed only when a poll moves the water or the user moves the target.
  */
+// The setpoint numeral's opacity while the side is OFF, on either face, along
+// with its unit/LEVEL suffix and the WATER caption. Pitched below everything
+// else so the numeral joins the chassis rather than sitting above it: once the
+// pill is hidden and the power button has gone quiet, a full-strength numeral
+// is the last thing that still reads as a live setting. It also has to lose
+// decisively to the power button, which keeps a full-strength ink_secondary
+// ring and glyph while off -- that button is the only thing worth touching on
+// an off face, so it must be the loudest, both at rest and when it breathes at
+// a blocked adjustment (power_hint_pulse).
+//
+// From upstream 07c3d14 + cd8acf8 (Chris Meyer, 2026-08-16), which arrived at
+// the same rule in two steps: relative face first, then both.
+#define NUM_STANDBY_OPA LV_OPA_30
+
 #define LEVEL_OPA_UNDER  77     // ~30%: `bg` wash deepening the fill  (heating)
 #define LEVEL_OPA_OVER   82     // ~32%: accent ghost over the track   (cooling)
 
@@ -188,6 +202,42 @@ static void chevron_stop(void)
 {
     lv_anim_del(s_pill_glyph, set_opa_cb);
     lv_obj_set_style_opa(s_pill_glyph, LV_OPA_100, 0);
+}
+
+// Power-button hint: two slow breathes when something tries to change the
+// temperature while the zone is off. Same ping-pong ease_in_out vocabulary as
+// the chevron above, but finite -- it answers one input rather than
+// advertising an ongoing state -- and pointed at the control that unblocks
+// things instead of at the one that was just refused.
+//
+// From upstream 8615c3b (Chris Meyer, 2026-08-16).
+static void power_hint_pulse(void)
+{
+    if (!s_power_btn) return;
+    // Already breathing: let it finish. Restarting per detent would pin the
+    // animation to its first frame for the whole of a spin.
+    if (lv_anim_get(s_power_btn, set_opa_cb)) return;
+    lv_obj_set_style_opa(s_power_btn, LV_OPA_COVER, 0);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_power_btn);
+    lv_anim_set_exec_cb(&a, set_opa_cb);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_40);
+    lv_anim_set_time(&a, 260);
+    lv_anim_set_playback_time(&a, 260);
+    lv_anim_set_repeat_count(&a, 2);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_start(&a);
+}
+
+// The setpoint stays on screen while a zone is off (dimmed, as the rest of the
+// face is), which is exactly what made it read as adjustable in a dark room.
+// Every path that would move it asks this first.
+static bool zone_is_off(void)
+{
+    app_state_t st;
+    dial_state_get(&st);
+    return !st.zones[s_zone].on;
 }
 
 /* ---- water level: value step over the arc ------------------------------ */
@@ -365,19 +415,28 @@ static void apply_palette_and_state(const app_state_t *st)
 
     // Water caption — display-only °C conversion when units_c (M4); the
     // store keeps actual_c as-is either way.
+    // Drops to the same rest tier as the numeral while the side is off: it is
+    // a live measurement, so leaving it at full strength would make it the
+    // brightest text on an off face and undo the rest of the quieting.
     lv_obj_set_style_text_color(s_water_lbl, pal->ink_secondary, 0);
-    lv_obj_set_style_text_opa(s_water_lbl, LV_OPA_80, 0);
+    lv_obj_set_style_text_opa(s_water_lbl, z->on ? LV_OPA_80 : NUM_STANDBY_OPA, 0);
     char water[16];
     if (z->actual_c < 0) snprintf(water, sizeof(water), "WATER --");
     else if (st->units_c) snprintf(water, sizeof(water), "WATER %.1f\xC2\xB0", z->actual_c);
     else snprintf(water, sizeof(water), "WATER %d\xC2\xB0", dial_c_to_f(z->actual_c));
     lv_label_set_text(s_water_lbl, water);
 
-    // Setpoint numeral — ink_primary always (never state-tinted); dimmed only
-    // for OFFLINE (design-spec.md's "numeral whose color never lies").
+    // Setpoint numeral — ink_primary always (never state-tinted); dimmed for
+    // OFFLINE (design-spec.md's "numeral whose color never lies") and, more
+    // deeply, while the side is off. Off wins over offline: NUM_STANDBY_OPA is
+    // quieter than the offline tier, and a zone the user just switched off has
+    // less claim on attention than one that merely lost its pad.
     lv_obj_set_style_text_color(s_temp_lbl, pal->ink_primary, 0);
-    lv_obj_set_style_text_opa(s_temp_lbl, (kind == ZK_OFFLINE) ? 115 : LV_OPA_COVER, 0);
+    lv_obj_set_style_text_opa(s_temp_lbl,
+                              !z->on          ? NUM_STANDBY_OPA :
+                              kind == ZK_OFFLINE ? 115 : LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(s_unit_lbl, pal->ink_secondary, 0);
+    lv_obj_set_style_text_opa(s_unit_lbl, z->on ? LV_OPA_COVER : NUM_STANDBY_OPA, 0);
     // Relative mode has no unit — the suffix names the quantity instead. The
     // measured-water caption above keeps its degree, so an absolute
     // reference stays on the face in every mode.
@@ -567,6 +626,15 @@ static void handle_event_cb(lv_event_t *e)
     zone_idx_t zone = (zone_idx_t)(uintptr_t)lv_event_get_user_data(e);
 
     if (code == LV_EVENT_PRESSED) {
+        // Inert while the zone is off, for the same reason the knob is.
+        // Leaving s_dragging false makes PRESSING/RELEASED fall out at the
+        // guard below, so the wedge never moves and nothing is posted. Visual
+        // only here: the finger is already on the glass looking at the screen,
+        // so the power button's breathe is the whole message.
+        if (zone_is_off()) {
+            power_hint_pulse();
+            return;
+        }
         s_dragging = true;
         s_press_dc = s_shown_dc;
         dial_state_stamp_input();
@@ -954,6 +1022,7 @@ static void destroy(void)
     if (s_num_box)    lv_anim_del(s_num_box, NULL);
     if (s_arc)        lv_anim_del(s_arc, NULL);
     if (s_pill_glyph) lv_anim_del(s_pill_glyph, NULL);
+    if (s_power_btn)  lv_anim_del(s_power_btn, NULL);
     if (s_stale_dot)  lv_anim_del(s_stale_dot, NULL);
 
     s_actual_dc = -1;
@@ -1018,6 +1087,22 @@ static void on_state(const app_state_t *st)
 static bool on_knob(int detents)
 {
     if (!s_arc || s_shown_dc < 0) return false;
+
+    // Powered off: the temperature is not adjustable, so nothing here moves
+    // the wedge or posts a setpoint. Turning used to do both against a zone
+    // that isn't running -- in the dark that reads as a working control that
+    // quietly does nothing, and on a Somnus pad it is a real write to a side
+    // the user just switched off. Consume the detent with the same soft stop
+    // pulse a range stop gives (same "that input went nowhere" family) and
+    // breathe the power button so the eye lands on what unblocks it.
+    //
+    // Upstream 8615c3b also cleared a pending rail-push Boost arm here; this
+    // port has no Boost, so there is nothing to clear.
+    if (zone_is_off()) {
+        power_hint_pulse();
+        dial_haptics_play_soft(HAPTIC_STOP);
+        return true;
+    }
 
     // Relative: one detent = exactly one level in the turned direction, from
     // whatever level is displayed (dial_rel_step snaps an off-grid value onto
