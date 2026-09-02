@@ -182,7 +182,24 @@ static void dispatch_tick(lv_timer_t *t)
         if (s_nav_policy) {
             void *arg = s_current_arg;
             screen_id_t want = s_nav_policy(&st, &arg);
-            ui_router_go(want, arg, LV_SCR_LOAD_ANIM_FADE_ON);  // no-op if unchanged
+            // Phase-driven (automatic) navigation loads SYNCHRONOUSLY. An animated
+            // load leaves LVGL's d->scr_to_load pending ~220ms; when a phase flaps,
+            // a later load finalizes that still-pending target and, if it was freed
+            // in the churn, LVGL dereferences a dangling screen (LoadProhibited in
+            // lv_obj_get_disp via scr_load_internal). A time-0 load completes within
+            // this same lv_timer_handler pass, so scr_to_load is never pending across
+            // ticks. Interactive screen changes keep their fade (user-paced).
+            //
+            // Upstream 76162de (Chris Meyer, 2026-08-31), which hit this on the
+            // OAuth re-link path and reproduced it on ESP32-S3: 4 crashes/~45min
+            // before, 0 after. This port has no OAuth, but PH_SOMNUS_CONNECTING /
+            // PH_DEGRADED and PH_PAD_DISCOVERY flap the same way -- BACKOFF_MIN_S
+            // is 5s while the animation is 220ms. Same mechanism, different phases.
+            //
+            // The 400ms guard in ui_router_go() below stays: it covers interactive
+            // loads, which still animate. This closes the automatic path, which the
+            // guard only caught reactively, on the second rapid load.
+            ui_router_go(want, arg, LV_SCR_LOAD_ANIM_NONE);  // no-op if unchanged
             scr = s_screens[s_current];
         }
         if (scr && scr->on_state) scr->on_state(&st);
