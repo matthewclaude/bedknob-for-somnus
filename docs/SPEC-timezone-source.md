@@ -190,15 +190,13 @@ equivalent protected store standing in front of it — `dial_time` keeps its
 state entirely outside dial_state — so the command has to carry the
 choice itself, not just announce that something changed.
 
-**Known latency gap, accepted, not fixed here:** the command queue is only
-drained in the steady-state loop, unreachable until the pad connect retry
-loop succeeds. A timezone change made from Settings while the pad is
-unreachable sits queued until it connects — which, unlike the portal's
-brief provisioning window, can be indefinite if the pad never comes up. This
-is the exact same latency characteristic `CMD_PAD_SETTINGS_CHANGED` already
-has for the Pad Address row, for the identical structural reason — not a
-new problem this row introduces. The connect loop is not being restructured
-to close it.
+**Latency gap — CLOSED in `f08dbb7` (2026-09-02).** This paragraph used to
+accept that the command queue was only drained in the steady-state loop, so a
+timezone change made while the pad was unreachable sat queued until it
+connected. `backoff_wait()` now services immediate commands between connect
+attempts (`docs/REVIEW-2026-09-02.md` F3), so a Settings-raised pick applies
+during the next backoff second, pad or no pad. The gate-raised pick fires only
+in `PH_READY` (F1) and never meets the loop at all.
 
 ### Displaying the current value
 
