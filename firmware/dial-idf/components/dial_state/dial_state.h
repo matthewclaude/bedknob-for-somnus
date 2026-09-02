@@ -507,14 +507,22 @@ typedef struct {
     // Default false (stable channel only) both here and in an NVS-absent
     // restore -- see dial_state_get_beta/dial_state_set_beta.
     bool beta;
-    // "Dial adjusts" preference: true = Follow schedule (a knob turn during
-    // tonight's active sleep-schedule phase retargets THAT PHASE via
-    // override_sleep_schedule_tonight, leaving the rest of tonight's
-    // schedule in control — matches the Orion phone app); false = Hold
-    // tonight (a knob turn always set_zones a plain hold for the rest of the
-    // night, this dial's original behavior). main.c's worker reads this out
-    // of its app_state_t snapshot the same way it reads beta above — dial_state
-    // has no business knowing about MCP tool calls. Persisted to NVS
+    // "Dial adjusts" preference: true = Follow schedule, false = Hold
+    // tonight. Originally meant a knob turn during tonight's active
+    // sleep-schedule phase either retargeted just that phase (Follow, via
+    // Orion's override_sleep_schedule_tonight) or set a plain hold for the
+    // rest of the night (Hold) — matching the Orion phone app's own toggle.
+    // That write path (main.c's temp_write_phase()/sleep_phase_now()) did
+    // not survive the Somnus port's worker_task rewrite and was never
+    // replaced: main.c has zero references to sched_follow today, so this
+    // is currently a UI-only preference a user can change with no
+    // downstream effect. Kept as a dormant field rather than pulled
+    // outright — same treatment as app_state_t.away above — because
+    // SCR_ADJUST_MODE (Schedule/Hold, still reachable via scr_dial.c's
+    // power-disc long-press even though scr_settings.c's row to it is
+    // hidden — see that file) and this NVS value are exactly what a real
+    // dial-side scheduling write path would want to read once one exists;
+    // see docs/SPEC-dial-side-scheduling.md. Persisted to NVS
     // "ui"/"sched_follow". Default TRUE (owner decision) both here and in an
     // NVS-absent restore -- see dial_state_get_sched_follow/
     // dial_state_set_sched_follow.
@@ -628,10 +636,13 @@ static inline bool dial_state_is_dual(const app_state_t *st)
     return st->zone_present[ZONE_A] && st->zone_present[ZONE_B];
 }
 
-// The zone a single-zone device actually has (and, on a dual device, the side
-// whose schedule the worker's overnight write-path logic follows — see
-// sleep_phase_now()/temp_write_phase() in main.c). ZONE_A unless the device
-// reports only ZONE_B.
+// The zone a single-zone device actually has. ZONE_A unless the device
+// reports only ZONE_B. (This used to also double as "the side whose
+// schedule the worker's overnight write-path follows," via
+// sleep_phase_now()/temp_write_phase() in main.c — those functions didn't
+// survive the Somnus port's worker_task rewrite; see app_state_t.sched_
+// follow's own comment above and docs/SPEC-dial-side-scheduling.md for
+// that feature's current, dormant state.)
 static inline zone_idx_t dial_state_primary_zone(const app_state_t *st)
 {
     return (!st->zone_present[ZONE_A] && st->zone_present[ZONE_B]) ? ZONE_B : ZONE_A;

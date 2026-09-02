@@ -623,8 +623,14 @@ static void power_event_cb(lv_event_t *e)
 
 // Long-press the POWER DISC (§2 — quick-actions' screen-wide long-press is
 // gone; this replaces what it carried) opens the Schedule/Hold picker
-// (SCR_ADJUST_MODE) — the same destination temp_write_
-// phase()'s comment in main.c ties directly to the knob's write behavior.
+// (SCR_ADJUST_MODE). This is that screen's arg-1+zone entry point — its
+// OTHER entry point, scr_settings.c's "Adjustment mode" row, is hidden
+// (2026-09-02; see that file's header comment and
+// docs/SPEC-dial-side-scheduling.md): the choice this screen makes,
+// app_state_t.sched_follow, is currently read by nothing outside the UI,
+// main.c's temp_write_phase()/sleep_phase_now() having not survived the
+// Somnus port's worker_task rewrite. This long-press entry point is
+// untouched and needed no changes.
 //
 // A short tap on this same object still just toggles power (power_event_cb,
 // LV_EVENT_CLICKED) — LVGL 8.4 fires CLICKED on release regardless of

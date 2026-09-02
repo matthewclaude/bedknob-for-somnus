@@ -34,10 +34,19 @@
  * turn commits exactly like a tap does — same persist, same HAPTIC_CONFIRM,
  * same description update.
  *
- * Keeps the underlying pref, NVS key, and write-path logic exactly as they
- * were (app_state_t.sched_follow / dial_state_set_sched_follow / main.c's
- * temp_write_phase()/sleep_phase_now()) — this file is a presentation
- * change only.
+ * Keeps the underlying pref and NVS key exactly as they were
+ * (app_state_t.sched_follow / dial_state_set_sched_follow) — this file is a
+ * presentation change only. UPDATE (2026-09-02): the write-path logic this
+ * comment used to also name here, main.c's temp_write_phase()/
+ * sleep_phase_now(), did not survive the Somnus port's worker_task rewrite
+ * and nothing replaced it — sched_follow is currently read by nothing
+ * outside the UI. This screen and the pref stay in the tree exactly as
+ * built, dormant, ready for a real write path to exist; see
+ * docs/SPEC-dial-side-scheduling.md. scr_settings.c's "Adjustment mode" row
+ * (this screen's arg-0 entry point) is hidden for the same reason — see
+ * that file's header comment — but this screen's other entry point
+ * (scr_dial.c's power-disc long-press, arg 1+zone) is untouched and this
+ * file needed no changes at all.
  */
 #include "ui_screens_internal.h"
 #include "dial_haptics.h"

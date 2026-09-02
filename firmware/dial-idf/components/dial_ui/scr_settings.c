@@ -15,17 +15,30 @@
  * collapsed out of this list (M7) so a single value cell here never has to
  * summarize two independent percentages.
  *
- * Row order (owner-approved): Back, Adjustment mode, Brightness, Scale,
- * Units, Haptics, Rotation, Factory reset. Settings a user returns to sit on
- * top — what the knob does to the bed (Adjustment mode) and brightness on a
- * bedside device are the two people actually revisit. Install-once display
- * prefs (Scale/Units/Haptics/Rotation) sit below that; the destructive row
- * stays last.
+ * Row order (owner-approved): Back, Brightness, Scale, Units, Haptics,
+ * Rotation, Factory reset. Settings a user returns to sit on top —
+ * brightness on a bedside device is the one people actually revisit most.
+ * Install-once display prefs (Scale/Units/Haptics/Rotation) sit below that;
+ * the destructive row stays last. ("Adjustment mode" used to open this list
+ * — see below for why it's hidden now, not why it's gone from the order.)
  *
  * Away mode and Re-link Orion were removed along with the rest of the Orion
  * OAuth/MCP pipeline (see components/dial_somnus): the pad's local API has
  * no away-mode endpoint, and dial_somnus is an unauthenticated local client
  * with no token to re-link.
+ *
+ * "Adjustment mode" (Schedule/Hold) is HIDDEN from this list, not removed
+ * (2026-09-02, bring-up log 9.6 / docs/SPEC-dial-side-scheduling.md item 1):
+ * its only consumers, main.c's temp_write_phase()/sleep_phase_now(), did not
+ * survive the Somnus port's worker_task rewrite and were never replaced, so
+ * the preference is currently read by nothing outside the UI — a user could
+ * change it here and nothing downstream would act on it. The pref, its NVS
+ * key, and scr_adjust_mode.c all stay in the tree exactly as they are (same
+ * dormant treatment as app_state_t.away above), ready to start working again
+ * the moment a real write path exists — see docs/SPEC-dial-side-scheduling.md.
+ * This is a Settings-list change only: the screen itself (SCR_ADJUST_MODE)
+ * is still fully reachable via scr_dial.c's power-disc long-press, so it is
+ * not dead code and nothing about it needed deleting.
  *
  * "Screen timeout" (the lock-screen/standby idle threshold, dial_power's
  * STANDBY level — owner request: "a configurable lock screen timer... in an
@@ -69,7 +82,7 @@
 
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
-static lv_obj_t *s_val_scale, *s_val_units, *s_val_adjust_mode, *s_val_haptics, *s_val_rotation;
+static lv_obj_t *s_val_scale, *s_val_units, *s_val_haptics, *s_val_rotation;
 static lv_obj_t *s_val_screen_timeout;
 static lv_obj_t *s_val_timezone;
 static lv_obj_t *s_val_pad_address, *s_val_bed_mode;
@@ -199,21 +212,11 @@ static void row_units_cb(lv_event_t *e)
     dial_state_set_units_c(!st.units_c);
 }
 
-// Opens the Adjustment mode screen (scr_adjust_mode.c) — plain navigation,
-// same as Brightness below. A single value cell here can name WHICH mode is
-// active ("Schedule"/"Hold") but can't explain what either one actually
-// does to a knob turn hours from now — that explanation is the whole point
-// of the sub-screen, so this row just points at it (see app_state_t.sched_follow
-// and main.c's temp_write_phase()/sleep_phase_now() for the write-path logic
-// the choice picks). arg 0 = "came from Settings" (see scr_adjust_mode.c's
-// header comment for its full origin-arg encoding) — this is one of that
-// screen's three entry points, and its Back/swipe-right returns here.
-static void row_adjust_mode_cb(lv_event_t *e)
-{
-    (void)e;
-    dial_haptics_play(HAPTIC_TICK);
-    ui_router_go(SCR_ADJUST_MODE, (void *)(uintptr_t)0, LV_SCR_LOAD_ANIM_MOVE_LEFT);
-}
+// row_adjust_mode_cb (the "Adjustment mode" row's tap handler) was removed
+// from here 2026-09-02 along with the row itself — see this file's header
+// comment for why the row is hidden. scr_adjust_mode.c is untouched and
+// still reachable via scr_dial.c's power-disc long-press (arg 1+zone); only
+// this screen's own entry point (arg 0) lost its row.
 
 // Off -> Low -> High -> Auto -> Off, same cycle-through-a-fixed-set idiom
 // row_rotation_cb uses for its four values (just not a plain modulo, since
@@ -361,16 +364,11 @@ static void create(lv_obj_t *scr, void *arg)
     // changed nothing you couldn't change faster by swiping.
     make_row(s_list, LV_SYMBOL_LEFT "  Back", row_back_cb, NULL);
 
-    // "Adjustment mode" is the longest label in this list — at Mont 24 it
-    // alone eats most of a row's ~288px content width, so a right-aligned
-    // value beside it collides (same class of overlap the confirm rows'
-    // "Tap again to confirm" hits below, just triggered here by the LABEL
-    // instead of the value). Same fix: the value drops to a second,
-    // left-aligned line under the label rather than sharing its line.
-    lv_obj_t *am_row = make_row(s_list, "Adjustment mode", row_adjust_mode_cb, &s_val_adjust_mode);
-    lv_obj_align(lv_obj_get_child(am_row, 0), LV_ALIGN_LEFT_MID, 0, -16);
-    lv_obj_set_width(s_val_adjust_mode, LV_PCT(100));
-    lv_obj_align(s_val_adjust_mode, LV_ALIGN_LEFT_MID, 0, 16);
+    // "Adjustment mode" row intentionally omitted here — hidden, not
+    // deleted; see this file's header comment and
+    // docs/SPEC-dial-side-scheduling.md for why. scr_adjust_mode.c, its NVS
+    // pref, and its other entry point (scr_dial.c's power-disc long-press)
+    // are untouched.
 
     make_row(s_list, "Brightness",    row_brightness_cb,    NULL);
     make_row(s_list, "Screen timeout", row_screen_timeout_cb, &s_val_screen_timeout);
@@ -414,7 +412,12 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_align(s_title_lbl, LV_ALIGN_CENTER, 0, 64 - CY);
 
     apply_palette(scr);
-    dial_list_settle(s_list, 1);   // open on "Adjustment mode" (index 1), not on Back
+    // Open on "Brightness" (index 1), not on Back. This used to say
+    // "Adjustment mode" — that row held index 1 before it was hidden
+    // 2026-09-02 (see header comment); Brightness inherited the slot for
+    // free once the row above it was removed, so no index change was
+    // needed here, only this comment.
+    dial_list_settle(s_list, 1);
     s_confirm_timer = lv_timer_create(confirm_timer_cb, 250, NULL);
 }
 
@@ -423,7 +426,7 @@ static void destroy(void)
     if (s_confirm_timer) { lv_timer_del(s_confirm_timer); s_confirm_timer = NULL; }
     s_list = NULL;
     s_title_lbl = NULL;
-    s_val_scale = s_val_units = s_val_adjust_mode = s_val_haptics = s_val_rotation = NULL;
+    s_val_scale = s_val_units = s_val_haptics = s_val_rotation = NULL;
     s_val_screen_timeout = NULL;
     s_val_timezone = NULL;
     s_val_pad_address = s_val_bed_mode = NULL;
@@ -446,7 +449,8 @@ static void on_state(const app_state_t *st)
         lv_label_set_text(s_val_units, st->units_c ? "\xC2\xB0" "C (water)" : "\xC2\xB0" "F (water)");
     else
         lv_label_set_text(s_val_units, st->units_c ? "\xC2\xB0" "C" : "\xC2\xB0" "F");
-    lv_label_set_text(s_val_adjust_mode, st->sched_follow ? "Schedule" : "Hold");
+    // No s_val_adjust_mode update here: that row is hidden (see header
+    // comment) and its label object no longer exists.
     lv_label_set_text(s_val_screen_timeout, dial_scr_timeout_label(st->screen_timeout_s));
     // Indexed directly by the stored value (see app_state_t.haptics_level):
     // 0=Off, 1=Auto, 2=Low, 3=High.
