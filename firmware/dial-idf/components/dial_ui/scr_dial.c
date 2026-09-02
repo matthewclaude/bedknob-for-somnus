@@ -344,6 +344,22 @@ static void apply_palette_and_state(const app_state_t *st)
     level_render(s_shown_dc);
 
     // Side name + identity underline.
+    //
+    // The text is set HERE, on every state commit, not once at create().
+    // It used to be create()-only, which meant flipping Settings -> Bed Mode
+    // left the face still claiming a side. dial_state_is_dual() tracks that
+    // setting (main.c seeds present[ZONE_B] = !single_zone), so this is the
+    // right predicate rather than a separate read of pad_single_zone.
+    //
+    // "BOTH SIDES" rather than "ONE BED": the label's real job on a device
+    // that cannot detect zone mode from the API is to make a WRONG Bed Mode
+    // setting visible. Single-zone silently skips every side1 write, so a
+    // dial set to single against a dual bed leaves a partner cold with no
+    // error anywhere. "BOTH SIDES" is a claim a user can falsify at a
+    // glance; a mode name is not.
+    lv_label_set_text(s_name_lbl, dial_state_is_dual(st)
+                          ? (s_zone == ZONE_A ? "RIGHT SIDE" : "LEFT SIDE")
+                          : "BOTH SIDES");
     lv_obj_set_style_text_color(s_name_lbl, pal->ink_secondary, 0);
     apply_identity(pal, night);
 
@@ -745,7 +761,12 @@ static void create(lv_obj_t *scr, void *arg)
     // #5 Side name.
     s_name_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_name_lbl, &lv_font_montserrat_16, 0);
-    lv_label_set_text(s_name_lbl, s_zone == ZONE_A ? "RIGHT SIDE" : "LEFT SIDE");
+    // Placeholder only — apply_palette_and_state() sets the real text on the
+    // first state commit. Single-zone is the right thing to assume before the
+    // device has said anything, matching dial_state_is_dual()'s own default
+    // (see its comment: false until the device says otherwise, so a booting
+    // dial never flashes a partner face that may not exist).
+    lv_label_set_text(s_name_lbl, "BOTH SIDES");
     lv_obj_align(s_name_lbl, LV_ALIGN_CENTER, 0, 64 - CY);
 
     // #6 Identity underline (solid bar + dashed line variant, one shown).
@@ -986,11 +1007,12 @@ static void on_state(const app_state_t *st)
         lv_arc_set_value(s_arc, s_shown_dc);
         render_numeral(s_shown_dc);
     }
-    // Side name is set once, at create() time, from s_zone alone (generic
-    // "RIGHT SIDE"/"LEFT SIDE" — same pattern as scr_sidepick.c). Somnus's
+    // Side name is refreshed in apply_palette_and_state() above, since it
+    // depends on zone mode and that is user-settable at runtime. Somnus's
     // local API carries no per-side name to upgrade it with, unlike Orion's
-    // list_devices zones[].user.first_name, so there's nothing to refresh
-    // here on a state commit.
+    // list_devices zones[].user.first_name — which is why design-spec.md
+    // section 8's "actual first name, never LEFT/RIGHT" cannot be honored
+    // here and the generic side labels stand in for it.
 }
 
 static bool on_knob(int detents)
