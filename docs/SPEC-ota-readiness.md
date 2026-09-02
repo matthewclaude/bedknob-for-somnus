@@ -982,3 +982,106 @@ if so whether they still describe `192.168.1.169` as a live,
 must-not-be-committed concern, since as of this pass that concern is
 resolved in code (§8 above) but may still read as open in those two docs
 once they're found or written.
+
+---
+
+## 9. The beta channel — already built, never run
+
+Added 2026-09-02, from a read of `dial_ota.c`, `dial_state.c`, `scr_update.c`,
+`release.yml` and the two manifests. **Every piece of the beta pipeline
+exists. Nothing has ever used it.** Zero prereleases have been cut.
+
+### 9.1 What is already wired
+
+| Piece | Where |
+|---|---|
+| `beta` preference, NVS `ui/beta`, off on a fresh device | `dial_state.c:93`, `:241`, `:524-541` |
+| Settings → Update → **Beta builds** toggle | `scr_update.c:226`, `:378`, `:463` |
+| `CMD_OTA_CHECK` → `dial_ota_check(st.beta)` | `dial_state.h:837` |
+| Stable endpoint `/releases/latest` (excludes prereleases by definition) | `dial_ota.c` `GITHUB_API_URL` |
+| Beta endpoint `/releases?per_page=5` (includes them) | `dial_ota.c` `GITHUB_API_URL_LIST` |
+| Tag `*-beta.*` → GitHub **prerelease** | `release.yml`, "Classify release channel" |
+| Pages `firmware/beta/` vs `firmware/latest/`, `keep_files: true` | `release.yml`, `deploy-pages` |
+| `manifest-beta.json` + the flasher's "Install beta build instead" box | `web-flasher/` |
+
+**The prerelease flag is the entire channel separation.** A stable dial polls
+`/releases/latest`, which excludes prereleases, so it can never see a beta no
+matter what is published. Nothing else enforces it.
+
+### 9.2 Cutting one — four steps
+
+1. `set(PROJECT_VER "X.Y.Z-beta.N")` in `firmware/dial-idf/CMakeLists.txt`
+2. A `## X.Y.Z-beta.N` section in `CHANGELOG.md`
+3. `git tag somnus-vX.Y.Z-beta.N && git push somnus somnus-vX.Y.Z-beta.N`
+4. Settings → Update → Beta builds → On, then Check for updates
+
+### 9.3 Four things that will bite
+
+**The CHANGELOG is load-bearing.** The workflow hard-fails with *"No '## $VER'
+section in CHANGELOG.md. Add one describing what changed, then re-tag."* A beta
+needs its own section under the exact `-beta.N` string. Re-tagging is the
+expensive recovery — delete the tag on both remotes and push again.
+
+**`PROJECT_VER` must equal the tag exactly**, suffix included, or the verify
+step fails the build. So a beta release means committing a beta version string.
+
+**The dial inspects only the newest 5 releases.** `per_page=5` and
+`RELEASES_LIST_SCAN_CAP` are both deliberate: the unbounded list measured ~70KB
+once a project had a dozen releases and blew past `CHECK_BUF_CAP`, failing every
+beta check with "release JSON too large". Cut six releases in a row and a beta
+can scroll out of view. Do not raise the cap without re-checking the buffer.
+
+**The version ordering is deliberate — do not "fix" it.** `is_newer()` ranks a
+stable `X.Y.Z` above any `X.Y.Z-beta.N` of the same core, which means a beta
+tester graduates onto the matching stable release automatically, and a dial
+already on stable `1.1.0` never "upgrades" to `1.1.0-beta.2` even with the
+toggle on. Between two betas of the same core, higher N wins.
+
+### 9.4 The trap build for §6 step 4, ready to run
+
+The deliberate rollback test **is** the first beta build. Same pipeline, one
+extra line of code.
+
+On a throwaway branch, never merged, make the first statement of `app_main()`
+(`main/main.c:1296`, above `dial_display_start()`) an unconditional crash:
+
+```c
+void app_main(void)
+{
+    abort();   // TRAP BUILD -- rollback test only, never merge
+    dial_display_start();
+```
+
+Above `dial_display_start()` on purpose: it crashes before `dial_ota_init()`
+(`:1305`) and long before `dial_ota_mark_valid_if_pending()` (`:525`), which is
+the condition the bootloader's abort-scan turns on. The screen stays dark for
+the trap boot, which is itself the observable — it goes black, then comes back
+on the old firmware.
+
+Then `PROJECT_VER "0.1.3-beta.99"`, a `## 0.1.3-beta.99` CHANGELOG section, tag
+`somnus-v0.1.3-beta.99`, push, and let a dial with Beta builds on install it.
+
+Expected: install → reboot into the trap → immediate crash → the **next** boot
+lands on the previous good firmware with no intervention. Confirm the reverted
+version under Menu → About, or in the serial log.
+
+### 9.5 Clean up immediately afterwards, or you get a loop
+
+Two hazards, both easy to miss and both worse than the test itself.
+
+**A dial with Beta builds still on will reinstall the trap.** After rollback it
+is running the old version again, and `0.1.3-beta.99` is still the newest thing
+on the list endpoint — `is_newer()` says yes, correctly. Left alone with
+auto-check on, that is an install/crash/rollback loop. **Turn Beta builds off on
+the dial the moment rollback is confirmed**, or use Skip this version, and
+delete the prerelease from `matthewclaude/somnus-dial-releases`.
+
+**The flasher will serve the trap image to the public.** A beta deploy writes
+`firmware/beta/somnus-dial-merged.bin` to Pages, and the flasher page's "Install
+beta build instead" checkbox points straight at it. Anyone who ticks that box
+while the trap is published gets a deliberately bricked build. Delete the
+release *and* overwrite `firmware/beta/` with a real beta — or accept that the
+beta channel is unsafe until you do.
+
+Neither hazard exists for the stable channel, which is why this test is
+beta-only rather than a plain version bump.
