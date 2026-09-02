@@ -21,6 +21,38 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.3 — 2026-09-02
+
+### Fixed
+
+- **A side you had switched off was still adjustable, and still wrote to the
+  pad.** The setpoint stayed drawn while a zone was off, and both the knob and
+  the drag handle still moved it — so turning the dial on a side you had just
+  turned off sent a new target temperature to that side of the bed, with
+  nothing on screen saying so. Both inputs now check power first. The knob
+  gives the same soft-stop pulse it gives at a range limit, and the power
+  button breathes twice to point at the control that unblocks things.
+
+- **A crash during connection flapping.** Phase-driven screen changes loaded
+  with an animation, leaving a load pending for about a fifth of a second; if
+  the connection state changed again in that window, the dial could finalize a
+  screen that had already been torn down and reset. Those loads are now
+  synchronous.
+
+### Changed
+
+- **An off side is now quiet, not just dimmer.** The temperature numeral, its
+  unit, and the WATER caption drop back while a side is off, so the power
+  button is the brightest thing on the face.
+
+- **One Bed mode says BOTH SIDES.** It previously said RIGHT SIDE, naming
+  something that does not exist — in One Bed mode the dial writes one side and
+  the pad mirrors it. If the label ever disagrees with your bed, the Bed Mode
+  setting is wrong.
+
+Ported from Orion Dial (chris023/orion-waveshare-rotary-dial): 8615c3b,
+07c3d14, cd8acf8, 76162de.
+
 ## 0.1.2 — 2026-09-01
 
 ### Changed
