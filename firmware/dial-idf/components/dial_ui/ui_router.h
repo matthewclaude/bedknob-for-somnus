@@ -27,6 +27,7 @@ typedef enum {
     SCR_WELCOME,          // fresh-device onboarding splash (M4)
     SCR_SIDEPICK,         // "which side of the bed?" (M4, reused from Settings)
     SCR_SETTINGS,         // settings list (M4, arg: unused/NULL — returns to SCR_MENU)
+    SCR_TIMEZONE,         // curated timezone picker (docs/SPEC-timezone-source.md; arg: unused/NULL — returns to SCR_SETTINGS)
     SCR_PAD_ADDRESS,      // edit the Somnus pad's base URL (arg: unused/NULL — returns to SCR_SETTINGS)
     SCR_ADJUST_MODE,      // Schedule vs. Hold choice screen (arg: packed origin — 0 = Settings, 1+zone = the dial face; see scr_adjust_mode.c's header comment)
     SCR_BRIGHTNESS_MENU,  // Day/Night brightness submenu (arg: unused/NULL — returns to SCR_SETTINGS)

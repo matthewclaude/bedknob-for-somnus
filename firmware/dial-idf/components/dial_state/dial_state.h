@@ -228,6 +228,49 @@ static inline uint16_t dial_scr_timeout_next(uint16_t cur)
 }
 
 /*
+ * Curated timezone list for Settings' "Timezone" row (docs/SPEC-timezone-
+ * source.md's "A curated list, not the full table" section) — NOT the
+ * ~400-zone posix_tz_db table dial_time.c embeds; dial_list.h walks one row
+ * per detent, and ~400 rows is not a knob-scrollable list. A short,
+ * US/UK/EU/AU-weighted set covers essentially every real user. This is the
+ * single source both scr_timezone.c (the rows it renders) and main.c's
+ * handle_immediate_cmd (CMD_TZ_CHANGED below resolves the tapped index back
+ * through this same table) read — never duplicated between the two.
+ *
+ * Every IANA string here was checked against dial_time.c's embedded
+ * zones.csv directly, not assumed to resolve — a caller passing a name the
+ * table doesn't have is dial_time_set_iana_tz()'s own safe no-op (dial_time.h),
+ * but a curated entry that silently never applied would be a much quieter,
+ * much worse version of the exact bug this whole feature exists to fix.
+ * "UTC" alone is NOT a key in that table (only "Etc/UTC" is) — caught by
+ * that check, not shipped as originally proposed. "Europe/Berlin" was
+ * dropped for a different reason after the fact (2026-09-01): it shares
+ * both an offset and DST rules with "Europe/Paris", so the two originally
+ * had the same "Central Europe" label -- indistinguishable rows in a
+ * knob-scrolled list, and the Settings row couldn't say which one was
+ * actually stored either. Safe to remove entries here: the selection is
+ * persisted by IANA string (dial_time.c's "iana_tz" NVS key), never by
+ * index into this table -- CMD_TZ_CHANGED's index (below) only lives from
+ * the moment a row is tapped to the moment handle_immediate_cmd resolves
+ * it to a string, in the same boot, and is never itself written to NVS.
+ *
+ * This is a convenience layer, not a restriction: the full table stays
+ * embedded and the Wi-Fi portal (dial_wifi.c's root_get()/save_post()) still
+ * accepts whatever IANA zone a browser reports, curated or not.
+ */
+#define DIAL_TZ_COUNT 11
+static const char *const DIAL_TZ_IANA[DIAL_TZ_COUNT] = {
+    "America/New_York", "America/Chicago", "America/Denver", "America/Phoenix",
+    "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu",
+    "Europe/London", "Europe/Paris", "Australia/Sydney", "Etc/UTC",
+};
+static const char *const DIAL_TZ_LABEL[DIAL_TZ_COUNT] = {
+    "Eastern", "Central", "Mountain", "Arizona",
+    "Pacific", "Alaska", "Hawaii",
+    "UK", "Central Europe", "Sydney", "UTC",
+};
+
+/*
  * Trimmed for the Somnus pad's local API (components/dial_somnus/dial_somnus.h)
  * in place of the Orion zone_state_t above/before it — the pad's /api/state
  * exposes exactly on/off, one setpoint, one measured reading, and a low-water
@@ -793,15 +836,27 @@ typedef enum {
     // dial_somnus_connect() again to re-probe the (possibly new) address),
     // rather than requiring a reboot. See main.c's handle_immediate_cmd.
     CMD_PAD_SETTINGS_CHANGED,
+
+    // Settings' "Timezone" row (docs/SPEC-timezone-source.md's Threading
+    // section) -- `a` = index into DIAL_TZ_IANA/DIAL_TZ_LABEL above. Unlike
+    // CMD_PAD_SETTINGS_CHANGED, the row could NOT persist this itself before
+    // posting: dial_time_set_iana_tz() mutates global libc TZ state that
+    // worker_task's dial_time_now() callers read concurrently at steady
+    // state, so the call has to happen ON worker_task, not the LVGL task --
+    // there is no dial_state-owned, mutex-protected store standing in front
+    // of it the way pad_base_url has. -> dial_time_set_iana_tz(DIAL_TZ_IANA[a]).
+    CMD_TZ_CHANGED,
 } cmd_kind_t;
 
 typedef struct {
     cmd_kind_t kind;
     zone_idx_t zone;
     int        temp_dc; // CMD_SET_TEMP, tenths of °C (canonical unit)
-    int        a, b;    // generic args: only CMD_TOGGLE_ON's `a` is used today;
-                         // `b` is kept for shape/alignment with dial_cmd_post's
-                         // callers and any future command that needs a second.
+    int        a, b;    // generic args: CMD_TOGGLE_ON's `a` = desired on state,
+                         // CMD_TZ_CHANGED's `a` = index into DIAL_TZ_IANA/
+                         // DIAL_TZ_LABEL above; `b` is still unused by anything,
+                         // kept for shape/alignment with dial_cmd_post's callers
+                         // and any future command that needs a second.
 } app_cmd_t;
 
 void dial_cmd_post(const app_cmd_t *cmd);

@@ -737,6 +737,21 @@ static void handle_immediate_cmd(const app_cmd_t *cmd)
             dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
         break;
     }
+    // Settings' Timezone row (dial_state.h's CMD_TZ_CHANGED comment,
+    // docs/SPEC-timezone-source.md's Threading section): the ONLY place
+    // dial_time_set_iana_tz() is called for this row, deliberately -- this
+    // is the same task every dial_time_now() reader above already runs on,
+    // which is the whole reason the row couldn't call it directly from LVGL.
+    // Bounds-checked: cmd->a is a UI-supplied index into a compile-time
+    // table, not user-typed text, but a stale build mismatch (screen and
+    // table built from different DIAL_TZ_COUNT) is still worth a loud log
+    // instead of an out-of-bounds read.
+    case CMD_TZ_CHANGED:
+        if (cmd->a >= 0 && cmd->a < DIAL_TZ_COUNT)
+            dial_time_set_iana_tz(DIAL_TZ_IANA[cmd->a]);
+        else
+            ESP_LOGE(TAG, "CMD_TZ_CHANGED: index %d out of range", cmd->a);
+        break;
     default:
         break;   // CMD_SET_TEMP/CMD_TOGGLE_ON never reach here (see the drain loop)
     }

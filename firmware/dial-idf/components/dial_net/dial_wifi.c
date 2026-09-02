@@ -27,6 +27,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "lwip/sockets.h"
+#include "dial_time.h"
 
 static const char *TAG = "net";
 
@@ -334,6 +335,25 @@ static void url_decode(char *s)
     *o = 0;
 }
 
+// Whitelist for the portal's tz= field: only characters an IANA zone name
+// can actually contain (letters, digits, '/', '_', '+', '-' -- e.g.
+// "America/Argentina/Buenos_Aires", "Etc/GMT+12"). This bounds save_post()'s
+// OWN parsing/buffers; it's independent of (and in addition to) the safe
+// no-op dial_time_set_iana_tz() itself already guarantees on bad input --
+// see the Input bounding section of docs/SPEC-timezone-source.md.
+static bool iana_tz_chars_ok(const char *s)
+{
+    if (!s[0]) return false;
+    for (; *s; s++) {
+        char c = *s;
+        bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') || c == '/' || c == '_' ||
+                  c == '+' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
 /*
  * The network list is scanned ONCE, before any phone is attached, and cached.
  *
@@ -493,6 +513,18 @@ static esp_err_t root_get(httpd_req_t *req)
         "<noscript><style>#otherwrap{display:block}</style></noscript>"
         "<label for=pass>Password</label>"
         "<input name=pass id=pass type=password placeholder='Wi-Fi password'>"
+        // Timezone, piggybacked on this same form: the browser already knows
+        // it (docs/SPEC-timezone-source.md) and Settings has no zone picker
+        // (scrolling ~400 IANA names with a knob has the same input-model
+        // problem as the Pad Address row). Hidden, filled by script, not by
+        // the person filling out the form. On a browser with JS off or
+        // without Intl (there's already a <noscript> fallback elsewhere on
+        // this page for exactly that case), the field just submits empty —
+        // save_post() treats empty the same as "not present", the safe no-op
+        // dial_time_set_iana_tz() already guarantees.
+        "<input type=hidden id=tz name=tz>"
+        "<script>try{document.getElementById('tz').value="
+        "Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}</script>"
         "<button type=submit>Connect</button></form>"
         "<p class=hint>The dial's setup network disappears as soon as it starts connecting &mdash; "
         "that's expected, and your phone will drop back to its usual Wi-Fi.</p>"
@@ -520,6 +552,28 @@ static esp_err_t save_post(httpd_req_t *req)
               strncpy(other, oo, sizeof(other) - 1); url_decode(other); if (amp) *amp = '&'; }
     if (pp) { pp += 5; char *amp = strchr(pp, '&'); if (amp) *amp = 0;
               strncpy(s_form_pass, pp, sizeof(s_form_pass) - 1); url_decode(s_form_pass); }
+
+    // Timezone (docs/SPEC-timezone-source.md): applied here, unconditionally
+    // and independent of the ssid/pass validation below -- never gates
+    // credential saving or the Wi-Fi connect attempt, and this handler is
+    // the only place a browser-filled value can reach dial_time, so it's
+    // captured on every submit, even one that's about to be rejected below
+    // for a missing network choice. Bounded to a fixed local buffer (same
+    // shape as ssid/other/pass above) and character-checked BEFORE it ever
+    // reaches dial_time_set_iana_tz(), whose own bound only protects itself,
+    // not this file's buffers. An empty, oversized-before-truncation, or
+    // invalid-charset value simply isn't passed down -- dial_time is left
+    // exactly as it was, per dial_time_set_iana_tz()'s own no-op contract.
+    char tz[64] = { 0 };
+    char *tp = strstr(body, "tz=");
+    if (tp) { tp += 3; char *amp = strchr(tp, '&'); if (amp) *amp = 0;
+              strncpy(tz, tp, sizeof(tz) - 1); url_decode(tz); if (amp) *amp = '&'; }
+    if (iana_tz_chars_ok(tz)) {
+        if (!dial_time_set_iana_tz(tz))
+            ESP_LOGW(TAG, "portal-submitted tz \"%s\" not in the embedded zone table", tz);
+    } else if (tz[0]) {
+        ESP_LOGW(TAG, "portal-submitted tz failed character check, ignoring");
+    }
 
     // One question, one answer: the typed name is only consulted when the list
     // itself said "not listed", so there is never a case where both are filled

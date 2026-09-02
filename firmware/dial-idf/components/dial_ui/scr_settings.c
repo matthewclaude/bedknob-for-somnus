@@ -36,9 +36,19 @@
  * 10m — same idiom as Rotation below, not a submenu; five values don't need
  * one).
  *
+ * "Timezone" (docs/SPEC-timezone-source.md) sits right after Rotation, still
+ * inside the install-once display-prefs group (Scale/Units/Haptics/Rotation)
+ * rather than mixed in with Pad Address/Bed Mode below: it's a device/display
+ * setting like those four, not a pad-connection one. Opens the curated
+ * picker sub-screen (scr_timezone.c) like Pad Address does its own text
+ * entry — a value column here can't show 12 choices, and the on-device
+ * picker is the whole point (the Wi-Fi setup portal already sets this for
+ * anyone who provisioned through a browser; this row is the backstop for
+ * everyone else, and the ONLY way to change it after initial setup at all).
+ *
  * "Pad Address" and "Bed Mode" (replacing the compile-time SOMNUS_DEFAULT_*
  * macros dial_somnus.h's own header note asks for a real Settings row to
- * replace) sit right after Rotation: like Scale/Units/Haptics/Rotation
+ * replace) sit right after Timezone: like Scale/Units/Haptics/Rotation
  * they're install-once — set when the dial first meets its pad, rarely
  * touched again — but they're pad-connection settings, not display prefs, so
  * they get their own pair at the end of that group rather than being mixed
@@ -51,6 +61,7 @@
 #include "dial_haptics.h"
 #include "dial_list.h"
 #include "dial_display.h"
+#include "dial_time.h"
 
 #define CY 180
 #define ROW_H          76
@@ -60,6 +71,7 @@ static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_scale, *s_val_units, *s_val_adjust_mode, *s_val_haptics, *s_val_rotation;
 static lv_obj_t *s_val_screen_timeout;
+static lv_obj_t *s_val_timezone;
 static lv_obj_t *s_val_pad_address, *s_val_bed_mode;
 
 typedef enum { CONFIRM_FACTORY = 0, CONFIRM_COUNT } confirm_id_t;
@@ -262,6 +274,19 @@ static void row_screen_timeout_cb(lv_event_t *e)
     dial_state_set_screen_timeout_s(next);
 }
 
+// Opens the curated timezone picker (scr_timezone.c, docs/SPEC-timezone-
+// source.md) — plain navigation, same as Adjustment mode/Brightness above.
+// Value cell shows the current zone's curated label, the raw IANA string if
+// a zone was set but isn't one of the 11 curated choices, or "Not set" if
+// none has ever been persisted (see on_state) — the picker itself is where
+// the actual choice happens, this row just shows where things stand.
+static void row_timezone_cb(lv_event_t *e)
+{
+    (void)e;
+    dial_haptics_play(HAPTIC_TICK);
+    ui_router_go(SCR_TIMEZONE, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
 // Opens the Pad Address text-entry screen (scr_pad_address.c) — plain
 // navigation, same as Adjustment mode/Brightness above. Value cell shows the
 // currently persisted address (see on_state), scheme stripped for brevity.
@@ -353,6 +378,7 @@ static void create(lv_obj_t *scr, void *arg)
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
     make_row(s_list, "Haptics",       row_haptics_cb,       &s_val_haptics);
     make_row(s_list, "Rotation",      row_rotation_cb,      &s_val_rotation);
+    make_row(s_list, "Timezone",      row_timezone_cb,      &s_val_timezone);
 
     // Pad Address's value is a full URL — too long to share Adjustment
     // mode's label with a right-aligned value, so it gets the same
@@ -399,6 +425,7 @@ static void destroy(void)
     s_title_lbl = NULL;
     s_val_scale = s_val_units = s_val_adjust_mode = s_val_haptics = s_val_rotation = NULL;
     s_val_screen_timeout = NULL;
+    s_val_timezone = NULL;
     s_val_pad_address = s_val_bed_mode = NULL;
     for (int i = 0; i < CONFIRM_COUNT; i++) s_val_confirm[i] = NULL;
     s_armed = CONFIRM_COUNT;
@@ -426,6 +453,24 @@ static void on_state(const app_state_t *st)
     static const char *HAPTICS_TXT[] = { "Off", "Low", "Auto", "High" };   // index == haptic_level_t
     lv_label_set_text(s_val_haptics,
         HAPTICS_TXT[st->haptics_level <= HAPTIC_LEVEL_HIGH ? st->haptics_level : HAPTIC_LEVEL_AUTO]);
+
+    // Priority order (docs/SPEC-timezone-source.md's "Displaying the
+    // current value"): the curated label if the persisted IANA string
+    // matches one of the 11 rows scr_timezone.c offers; the raw IANA string
+    // itself if a zone WAS set but isn't one of those 12 (e.g. the Wi-Fi
+    // portal applied a browser-detected zone outside this list) — never
+    // silently hidden or mapped to the wrong row; "Not set" only when
+    // dial_time_get_iana_tz() reports nothing has ever been persisted,
+    // which is this device's actual, current, honest state.
+    char tz_iana[48];
+    if (dial_time_get_iana_tz(tz_iana, sizeof tz_iana)) {
+        const char *label = NULL;
+        for (int i = 0; i < DIAL_TZ_COUNT; i++)
+            if (strcmp(tz_iana, DIAL_TZ_IANA[i]) == 0) { label = DIAL_TZ_LABEL[i]; break; }
+        lv_label_set_text(s_val_timezone, label ? label : tz_iana);
+    } else {
+        lv_label_set_text(s_val_timezone, "Not set");
+    }
 
     // Scheme stripped for the subtitle: the row is already labeled "Pad
     // Address", so "http://" is implied, not informative, and every
