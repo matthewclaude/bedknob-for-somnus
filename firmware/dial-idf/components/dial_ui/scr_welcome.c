@@ -18,7 +18,7 @@
  */
 #include "ui_screens_internal.h"
 
-static lv_obj_t *s_title, *s_sub;
+static lv_obj_t *s_title, *s_qual, *s_sub;
 
 static void dismiss_cb(lv_event_t *e) { (void)e; dial_state_set_welcomed(); }
 
@@ -29,11 +29,23 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
     lv_obj_add_event_cb(scr, dismiss_cb, LV_EVENT_CLICKED, NULL);
 
+    // Name and qualifier as separate labels, mirroring the brand lockup
+    // (docs/NAMING.md). The short form alone is the on-device rule everywhere
+    // else, because space is tight -- but this is the FIRST thing a new user
+    // sees after flashing, and "BEDKNOB" by itself does not tell them what it
+    // controls. One line of context, once, on the only screen that gets it.
     s_title = lv_label_create(scr);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_title, pal->ink_primary, 0);
-    lv_label_set_text(s_title, "SOMNUS DIAL");
-    lv_obj_align(s_title, LV_ALIGN_CENTER, 0, -16);
+    lv_label_set_text(s_title, "BEDKNOB");
+    lv_obj_align(s_title, LV_ALIGN_CENTER, 0, -34);
+
+    s_qual = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_qual, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_qual, pal->ink_secondary, 0);
+    lv_obj_set_style_text_letter_space(s_qual, 3, 0);
+    lv_label_set_text(s_qual, "FOR SOMNUS");
+    lv_obj_align(s_qual, LV_ALIGN_CENTER, 0, -2);
 
     s_sub = lv_label_create(scr);
     lv_obj_set_width(s_sub, 260);
@@ -42,10 +54,10 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_text_font(s_sub, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_sub, pal->ink_secondary, 0);
     lv_label_set_text(s_sub, "Turn the knob or tap to begin");
-    lv_obj_align(s_sub, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(s_sub, LV_ALIGN_CENTER, 0, 36);
 }
 
-static void destroy(void) { s_title = s_sub = NULL; }
+static void destroy(void) { s_title = s_qual = s_sub = NULL; }
 
 static void on_state(const app_state_t *st)
 {
@@ -55,6 +67,7 @@ static void on_state(const app_state_t *st)
     lv_obj_t *scr = lv_obj_get_parent(s_title);
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
     lv_obj_set_style_text_color(s_title, pal->ink_primary, 0);
+    lv_obj_set_style_text_color(s_qual, pal->ink_secondary, 0);
     lv_obj_set_style_text_color(s_sub, pal->ink_secondary, 0);
 }
 
