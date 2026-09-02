@@ -194,6 +194,84 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
         (st->phase == PH_BOOT || st->phase == PH_WIFI_CONNECTING || st->phase == PH_WIFI_PORTAL))
         return SCR_WELCOME;
 
+    // Timezone setup gate (docs/SPEC-timezone-source.md's "Fix 1"): after the
+    // first successful PAD connect, if no timezone has EVER been applied,
+    // route to SCR_TIMEZONE instead of the dial face -- once per boot,
+    // dismissible, same "never trap the user" discipline as everything else
+    // in this function. Checked here, after the OTA takeover and SCR_WELCOME
+    // blocks above, matching their existing precedence: an install in flight
+    // and the first-run splash both outrank this.
+    //
+    // PH_READY ONLY (docs/REVIEW-2026-09-02.md F1). PH_READY has exactly one
+    // pre-steady-state setter, immediately after dial_somnus_connect()
+    // succeeds in worker_task, so it is the one phase that can never be
+    // observed while the worker is still inside its initial connect loop.
+    // That matters because the pick this screen produces is CMD_TZ_CHANGED,
+    // applied only by handle_immediate_cmd, and the connect loop services
+    // the command queue only inside backoff_wait()'s sleeps -- never while
+    // it is blocked in the connect probe (5s) or the discovery scan (up to
+    // ~58s). The earlier phase list (PH_SOMNUS_CONNECTING/PH_PAD_DISCOVERY/
+    // PH_DEGRADED) raised this screen the instant Wi-Fi came up, i.e. at
+    // exactly the moment a pick would sit unapplied the longest; the spec's
+    // "after the first successful connect" meant the pad, not Wi-Fi. A
+    // steady-state PH_DEGRADED or PH_WIFI_LOST device returns to PH_READY on
+    // its next good poll, so excluding those loses nothing. (PH_WIFI_LOST was
+    // never a safe "only after READY" marker anyway: net_event_cb sets it
+    // from PH_DEGRADED too, and the connect loop sets PH_DEGRADED before
+    // PH_READY has ever been reached.)
+    //
+    // Tests dial_time_get_posix_tz(), never dial_time_valid(): the latter is
+    // `s_synced && s_tz_set` and so is ALSO false before SNTP has synced even
+    // once this boot, regardless of whether a zone was ever set -- gating on
+    // it would fire this screen on every normal boot until SNTP lands, not
+    // just on a device that has genuinely never had a zone. And the POSIX
+    // getter, not dial_time_get_iana_tz() (REVIEW F2): a device flashed over
+    // from the dial-v1.4.x line has "posix_tz" in NVS but no "iana_tz" --
+    // its clock is right and dial_time_start() already restored it, so it
+    // has nothing to be asked. An IANA name set always implies a POSIX rule
+    // set (dial_time.h), so this test is a superset of the old one.
+    //
+    // Threading: dial_time_get_posix_tz() takes no lock -- it reads s_tz_set
+    // then s_posix_tz (dial_time.c), both written only by apply_posix_tz(),
+    // the same unsynchronized cross-task-read risk HARDWARE-bringup-log.md
+    // §11 already documents for Settings' timezone label, which reads the
+    // sibling IANA getter from the LVGL task. Safe HERE specifically because
+    // of an ORDERING guarantee, not because the read itself is any safer:
+    // this gate only ever acts (returns SCR_TIMEZONE) at a moment it read
+    // s_tz_set as false, and apply_posix_tz() has three callers -- the NVS
+    // restore in dial_time_start() (worker task, complete before PH_READY is
+    // committed, and the phase commit's mutex orders it), the portal's
+    // save_post() (httpd task, complete before the join that precedes all
+    // of this), and CMD_TZ_CHANGED's handling in handle_immediate_cmd -- by
+    // which point st->tz_prompted is already true, because scr_timezone.c's
+    // zone_row_cb() calls dial_state_set_tz_prompted() BEFORE it posts
+    // CMD_TZ_CHANGED, not after. So by the time this read could possibly
+    // see a different value, this gate's OTHER condition (!st->tz_prompted)
+    // has already gone false and stopped it from acting on it. This is a
+    // real dependency on that ordering, not a coincidence -- if zone_row_cb
+    // is ever changed to post before it sets tz_prompted, re-check this
+    // comment before assuming the gate is still safe.
+    //
+    // Never gates the pad connection or any credential path -- this only
+    // changes which screen is shown; the connect/pad-discovery loop below
+    // runs identically either way.
+    //
+    // *arg packs "0 = Settings, 1+zone = elsewhere", scr_adjust_mode.c's own
+    // s_origin idiom (that file's header comment), so scr_timezone.c can
+    // tell this gate-forced visit apart from a deliberate Settings->Timezone
+    // one and send a skip/pick back to the right place instead of always
+    // returning to Settings. The "elsewhere" here is the dial face with the
+    // current zone, the same "policy-raised screen dismisses to SCR_DIAL
+    // with the zone arg" precedent scr_update_prompt.c:111 already uses for
+    // another nav_policy-raised screen.
+    if (st->phase == PH_READY && !st->tz_prompted) {
+        char tz[64];
+        if (!dial_time_get_posix_tz(tz, sizeof tz)) {
+            *arg = (void *)(uintptr_t)(1 + st->ui_zone);
+            return SCR_TIMEZONE;
+        }
+    }
+
     switch (st->phase) {
     case PH_WIFI_PORTAL: {
         // A password the router rejected sends the user straight back to the
@@ -293,9 +371,22 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             // passive set above): both are Settings sub-screens reached by a
             // deliberate tap, and a routine poll landing mid-choice must not
             // yank the user off either one.
+            //
+            // SCR_TIMEZONE added here 2026-09-02: the 2026-09-01 audit named
+            // in the no-have_state block below added it to THAT list only
+            // and never wired it in here — the exact symmetric gap that same
+            // audit found and fixed for SCR_ADJUST_MODE in the OPPOSITE
+            // direction (present here, missing there). What this entry
+            // protects is the SETTINGS-raised visit (arg 0): a routine poll
+            // landing while someone is mid-scroll on Settings -> Timezone
+            // must not yank them onto the dial face any more than it may
+            // while they're on Pad Address right next to it. It is NOT what
+            // protects the gate-raised visit -- that one never reaches this
+            // line, because the gate above returns before the phase switch
+            // for as long as it is active (docs/REVIEW-2026-09-02.md F7).
             if (passive || cur == SCR_SETTINGS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE ||
-                cur == SCR_PAD_ADDRESS) return cur;
+                cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE) return cur;
             // First link on a fresh device: pick a default side before showing
             // the dial (SCR_SIDEPICK). Nothing to pick on a single-zone topper,
             // so that device goes straight to its one face. The `cur` half of
@@ -613,15 +704,82 @@ static bool somnus_refresh_state(void)
 
 /* ---- worker supervisor ------------------------------------------------- */
 
-// Sleep `seconds` while publishing a countdown for the error screen.
-static void backoff_wait(int seconds)
+// Defined below, after the OTA helpers it needs; backoff_wait() is the one
+// pre-connect caller.
+static void handle_immediate_cmd(const app_cmd_t *cmd);
+
+// Sleep `seconds` while publishing a countdown for the error screen, AND
+// service the UI->worker command queue while doing so (docs/REVIEW-2026-09-02.md
+// F3). Before this, the initial connect loop never called dial_cmd_receive():
+// every command posted while the pad was unreachable -- including the ones
+// that exist to FIX an unreachable dial (CMD_WIFI_RESET, CMD_FACTORY_RESET,
+// CMD_OTA_CHECK; the 2026-07-28 "never trap the user" incident) -- sat queued
+// until a pad connect that might never come, so those screens were reachable
+// but inert ("Restarting..." that never restarted).
+//
+// Only here, between attempts: not during dial_somnus_connect() (5s HTTP
+// timeout) or the discovery scan (up to ~58s), so a command posted then
+// waits for the current attempt to finish -- and, deliberately, so an OTA
+// download can never run concurrently with the subnet scan (docs/
+// SPEC-pad-discovery.md's one-connection-at-a-time rule).
+//
+// Per kind, pre-connect (nothing below has a pad dependency):
+//   CMD_WIFI_RESET / CMD_FACTORY_RESET -- NVS write + esp_restart(); they
+//     never return, so the loop's state is irrelevant.
+//   CMD_OTA_CHECK / CMD_OTA_APPLY / CMD_OTA_CLEAR_FAILED -- dial_ota only,
+//     Wi-Fi is already up. APPLY's stale-tap guard still requires
+//     OTA_AVAILABLE, and its progress commits drive nav_policy's takeover
+//     screen exactly as in steady state. Both are blocking (a check is one
+//     HTTPS round trip, an apply is the whole download + reboot); the
+//     countdown simply resumes afterwards. CHECK reads dial_time_valid()
+//     directly, not app_state_t.clock_valid -- see its handler.
+//   CMD_TZ_CHANGED -- dial_time_set_iana_tz() on THIS task, the same task the
+//     steady-state dial_time_now() readers run on; none of them are running
+//     yet, so this is the safe side of dial_time.h's threading rule.
+//   CMD_PAD_SETTINGS_CHANGED -- NOT passed to handle_immediate_cmd: its
+//     handler re-probes the pad with dial_somnus_connect(), which is exactly
+//     what the loop around this function is already doing. Running both
+//     would double the probes and let a handler-side success go unnoticed
+//     by the loop. Instead the backoff is cut short and this returns true,
+//     so the loop's next attempt -- which re-reads the persisted URL
+//     (f2a954b) and, after it succeeds, the zone mode (REVIEW F6) -- runs
+//     immediately with the new settings.
+//   CMD_SET_TEMP / CMD_TOGGLE_ON -- discarded: there is no pad to write to,
+//     and applying a minutes-old knob position after a connect would be
+//     worse than dropping it. The face's optimistic value is reconciled by
+//     the first poll as usual. Reachable only via the one-tick dial face
+//     REVIEW F9 describes, so a debug log is enough.
+// Returns true if cut short by a pad-settings change, false after a full wait.
+static bool backoff_wait(int seconds)
 {
-    for (int s = seconds; s > 0; s--) {
+    bool retry_now = false;
+    for (int s = seconds; s > 0 && !retry_now; s--) {
         dial_state_commit(mut_retry_in, &s);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        int64_t until_us = esp_timer_get_time() + 1000000;
+        int64_t left_us;
+        while (!retry_now && (left_us = until_us - esp_timer_get_time()) > 0) {
+            app_cmd_t cmd;
+            // Wait out the rest of this second on the queue itself, so a
+            // command is picked up the moment it lands rather than at the
+            // next 1s boundary. A timeout means the second is up.
+            if (!dial_cmd_receive(&cmd, (int)(left_us / 1000) + 1)) break;
+            switch (cmd.kind) {
+            case CMD_SET_TEMP:
+            case CMD_TOGGLE_ON:
+                ESP_LOGD(TAG, "pre-connect: discarding cmd kind %d (no pad yet)", (int)cmd.kind);
+                break;
+            case CMD_PAD_SETTINGS_CHANGED:
+                retry_now = true;
+                break;
+            default:
+                handle_immediate_cmd(&cmd);
+                break;
+            }
+        }
     }
     int zero = 0;
     dial_state_commit(mut_retry_in, &zero);
+    return retry_now;
 }
 
 // dial_ota_download_and_apply's progress callback: fires on every
@@ -685,7 +843,14 @@ static void handle_immediate_cmd(const app_cmd_t *cmd)
         // restarts the idle clock so the result is readable even on a 5s
         // timeout.
         dial_power_inhibit(DPWR_INHIBIT_TASK, true);
-        if (st.clock_valid) {
+        // dial_time_valid() directly, not st.clock_valid: the store's mirror
+        // is published only by the steady-state loop's edge tracker
+        // (s_ui_clock_valid), so during the initial connect loop -- where
+        // backoff_wait() now services this command (REVIEW F3) -- it is
+        // always false even after SNTP has synced. Same task either way, so
+        // the direct read is exactly what the mirror would have said once
+        // it caught up.
+        if (dial_time_valid()) {
             // Show "Checking..." for the duration of the call instead of
             // flicking straight to the answer -- a tap with no visible
             // response reads as a dead button (owner feedback).
@@ -829,14 +994,16 @@ static void worker_task(void *arg)
     // so this reads whatever the user last saved, or the compiled
     // DIAL_PAD_DEFAULT_* fallback on a fresh device). Re-read inside the loop
     // on every attempt, not once before it: handle_immediate_cmd's
-    // CMD_PAD_SETTINGS_CHANGED path only runs in the steady-state loop below,
-    // which isn't reached until dial_somnus_connect() succeeds -- it cannot
-    // fix a bad address here. dial_state_set_pad_url() commits to NVS
-    // synchronously, so re-reading here is what actually makes a settings
-    // change made during the retry loop take effect, instead of the address
-    // being stuck until a successful connect that can never happen.
+    // CMD_PAD_SETTINGS_CHANGED path (the re-probe) only runs in the
+    // steady-state loop below, which isn't reached until dial_somnus_connect()
+    // succeeds -- it cannot fix a bad address here. dial_state_set_pad_url()
+    // commits to NVS synchronously, so re-reading here is what actually makes
+    // a settings change made during the retry loop take effect, instead of
+    // the address being stuck until a successful connect that can never
+    // happen. backoff_wait() (REVIEW F3) turns that same command into an
+    // immediate retry, so the re-read happens right away rather than at the
+    // end of the current backoff.
     char pad_url[DIAL_PAD_URL_MAX_LEN + 1];
-    bool pad_single_zone = dial_state_get_zone_mode();
     for (;;) {
         dial_state_get_pad_url(pad_url, sizeof(pad_url));
         dial_state_set_phase(PH_SOMNUS_CONNECTING, NULL);
@@ -866,11 +1033,22 @@ static void worker_task(void *arg)
         }
 
         dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
-        backoff_wait(backoff_s);
+        if (backoff_wait(backoff_s)) {
+            // Pad Address / Bed Mode changed mid-backoff: a fresh address
+            // deserves an immediate retry and a fresh backoff, same as a
+            // discovery hit above.
+            backoff_s = BACKOFF_MIN_S;
+            continue;
+        }
         backoff_s = (backoff_s * 2 > BACKOFF_MAX_S) ? BACKOFF_MAX_S : backoff_s * 2;
     }
     backoff_s = BACKOFF_MIN_S;
-    dial_somnus_set_zone_mode(pad_single_zone);
+    // Re-read NOW, not a capture taken before the loop (docs/REVIEW-2026-09-02.md
+    // F6): Settings is reachable throughout the loop, and a Bed Mode change
+    // made during a long retry would otherwise be persisted but applied with
+    // the stale value here, so the first poll below classified present[]
+    // with the wrong mode until the queued CMD_PAD_SETTINGS_CHANGED drained.
+    dial_somnus_set_zone_mode(dial_state_get_zone_mode());
     ESP_LOGI(TAG, "pad connected at %s", pad_url);
 
     // Fixed pad range (local_api spec, dial_somnus.h) — no discovery call to

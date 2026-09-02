@@ -43,5 +43,19 @@ bool dial_time_set_iana_tz(const char *iana);
 // one either.
 bool dial_time_get_iana_tz(char *out, size_t sz);
 
+// Copy out the POSIX TZ rule string currently applied (whatever
+// apply_posix_tz() last ran with -- restored from NVS "time"/"posix_tz" at
+// dial_time_start(), or resolved by dial_time_set_iana_tz()). Returns false
+// (leaving *out untouched) if no TZ has ever been applied this boot. This
+// is TRUE on a device that has a zone but no IANA name for it -- one
+// provisioned by the Orion-era dial-v1.4.x firmware, which persisted only
+// the POSIX string (docs/REVIEW-2026-09-02.md F2) -- so "has a timezone at
+// all" must test this, not dial_time_get_iana_tz(); the IANA getter is for
+// naming the zone, not for deciding whether one exists. An IANA name set
+// implies this is set (dial_time_set_iana_tz applies the POSIX rule before
+// recording the name), never the reverse. Same no-mutex, plain-copy risk
+// profile as dial_time_get_iana_tz() above.
+bool dial_time_get_posix_tz(char *out, size_t sz);
+
 // Current local time, or false if not yet valid.
 bool dial_time_now(struct tm *out);

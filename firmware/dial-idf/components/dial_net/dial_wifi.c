@@ -531,11 +531,16 @@ static esp_err_t root_get(httpd_req_t *req)
         // it (docs/SPEC-timezone-source.md) and Settings has no zone picker
         // (scrolling ~400 IANA names with a knob has the same input-model
         // problem as the Pad Address row). Hidden, filled by script, not by
-        // the person filling out the form. On a browser with JS off or
-        // without Intl (there's already a <noscript> fallback elsewhere on
-        // this page for exactly that case), the field just submits empty —
-        // save_post() treats empty the same as "not present", the safe no-op
-        // dial_time_set_iana_tz() already guarantees.
+        // the person filling out the form. There is NO fallback for a
+        // browser with JS off or without Intl — the <noscript> above this
+        // block only reveals the "other network" box, nothing to do with
+        // timezone. On such a browser this field just submits empty, and
+        // that's a clean no-op, not a graceful degradation: save_post()
+        // treats empty the same as "not present", the safe no-op
+        // dial_time_set_iana_tz() already guarantees. (See docs/SPEC-
+        // timezone-source.md's "Comment correction owed" and, for the actual
+        // backstop when this silently doesn't fire, its Fix 1 setup gate in
+        // main.c's nav_policy().)
         "<input type=hidden id=tz name=tz>"
         "<script>try{document.getElementById('tz').value="
         "Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}</script>"

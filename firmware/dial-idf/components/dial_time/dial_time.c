@@ -37,10 +37,18 @@ static volatile bool s_tz_set = false;
 static char s_iana_tz[48];
 static volatile bool s_iana_set = false;
 
+// The POSIX rule string currently applied, kept for dial_time_get_posix_tz()
+// (the REVIEW-2026-09-02 F2 upgrade case: a device flashed over from the
+// dial-v1.4.x line has "posix_tz" in NVS but no "iana_tz" -- its clock is
+// right, it just can't name the zone). Written only by apply_posix_tz(),
+// i.e. by the same two writers as s_tz_set above, same no-mutex caveat.
+static char s_posix_tz[64];
+
 static void apply_posix_tz(const char *posix)
 {
     setenv("TZ", posix, 1);
     tzset();
+    strlcpy(s_posix_tz, posix, sizeof(s_posix_tz));
     s_tz_set = true;
 }
 
@@ -148,6 +156,13 @@ bool dial_time_get_iana_tz(char *out, size_t sz)
 {
     if (!s_iana_set) return false;
     strlcpy(out, s_iana_tz, sz);
+    return true;
+}
+
+bool dial_time_get_posix_tz(char *out, size_t sz)
+{
+    if (!s_tz_set) return false;
+    strlcpy(out, s_posix_tz, sz);
     return true;
 }
 

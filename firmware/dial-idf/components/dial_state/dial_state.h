@@ -434,6 +434,14 @@ typedef struct {
     // before this flag existed. Restored from that key's *existence* in
     // dial_state_restore_prefs, not its value.
     bool side_picked;
+    // SCR_TIMEZONE's setup-gate prompt dismissed this session (docs/SPEC-
+    // timezone-source.md's "Fix 1"). Session-only, deliberately NOT
+    // persisted, same reasoning as `welcomed` above -- but here the reason
+    // cuts the other way: if the user skips and reboots, asking again is
+    // CORRECT, because the clock is still genuinely wrong. Persisting a
+    // "don't ask again" here would silently strand a device on UTC forever
+    // after one dismissal.
+    bool tz_prompted;
 
     // --- Settings (M4) ---
     // Display units: false = °F (canonical/internal — the store's temp_c is
@@ -701,6 +709,11 @@ void dial_state_set_welcomed(void);
 // Mark that a default side is known (see app_state_t.side_picked). Callers
 // that pick a side also call dial_state_set_ui_zone() to persist it.
 void dial_state_set_side_picked(void);
+// Dismiss SCR_TIMEZONE's setup-gate prompt for this session. Not persisted
+// (see app_state_t.tz_prompted) -- call whenever the user leaves that screen,
+// whichever way, so nav_policy's gate stops re-forcing it but asks again
+// next boot if the zone is still unset.
+void dial_state_set_tz_prompted(void);
 // Set the display-units preference; persists to NVS "ui"/"units".
 void dial_state_set_units_c(bool units_c);
 // Set the temperature-scale preference (relative vs absolute); persists to NVS

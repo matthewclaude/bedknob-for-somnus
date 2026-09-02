@@ -461,17 +461,23 @@ static void on_state(const app_state_t *st)
     // Priority order (docs/SPEC-timezone-source.md's "Displaying the
     // current value"): the curated label if the persisted IANA string
     // matches one of the 11 rows scr_timezone.c offers; the raw IANA string
-    // itself if a zone WAS set but isn't one of those 12 (e.g. the Wi-Fi
+    // itself if a zone WAS set but isn't one of those 11 (e.g. the Wi-Fi
     // portal applied a browser-detected zone outside this list) — never
-    // silently hidden or mapped to the wrong row; "Not set" only when
-    // dial_time_get_iana_tz() reports nothing has ever been persisted,
-    // which is this device's actual, current, honest state.
+    // silently hidden or mapped to the wrong row; the raw POSIX rule string
+    // if a TZ is applied but has no IANA name behind it (a device flashed
+    // over from the dial-v1.4.x line, which persisted only "posix_tz" --
+    // docs/REVIEW-2026-09-02.md F2: its clock is right, so "Not set" would
+    // be a lie); "Not set" only when neither getter reports anything, which
+    // is this device's actual, current, honest state.
     char tz_iana[48];
+    char tz_posix[64];
     if (dial_time_get_iana_tz(tz_iana, sizeof tz_iana)) {
         const char *label = NULL;
         for (int i = 0; i < DIAL_TZ_COUNT; i++)
             if (strcmp(tz_iana, DIAL_TZ_IANA[i]) == 0) { label = DIAL_TZ_LABEL[i]; break; }
         lv_label_set_text(s_val_timezone, label ? label : tz_iana);
+    } else if (dial_time_get_posix_tz(tz_posix, sizeof tz_posix)) {
+        lv_label_set_text(s_val_timezone, tz_posix);
     } else {
         lv_label_set_text(s_val_timezone, "Not set");
     }

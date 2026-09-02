@@ -343,6 +343,14 @@ void dial_state_set_welcomed(void)
     xSemaphoreGive(s_mux);
 }
 
+void dial_state_set_tz_prompted(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.tz_prompted = true;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+}
+
 void dial_state_set_side_picked(void)
 {
     xSemaphoreTake(s_mux, portMAX_DELAY);

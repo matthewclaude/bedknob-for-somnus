@@ -33,6 +33,17 @@
  * LVGL task here. So the tapped row's index rides in CMD_TZ_CHANGED's `a`
  * field, and only main.c's handle_immediate_cmd (running on worker_task)
  * ever actually calls dial_time_set_iana_tz().
+ *
+ * Two entry points, one packed `arg` (scr_adjust_mode.c's s_origin idiom,
+ * itself citing scr_brightness.c's): 0 = scr_settings.c's Timezone row,
+ * a deliberate visit that should return to Settings; 1 + zone
+ * (docs/SPEC-timezone-source.md's Fix 1 setup gate) = main.c's nav_policy
+ * force-routing here because no zone has ever been set, which should NOT
+ * return to Settings — the user never opened it and has no reason to be
+ * there. s_origin stores it as-is, same reason scr_adjust_mode.c's does
+ * (one value for go_back() to switch on). All three exits (Back, either
+ * zone_row_cb branch, swipe-right) funnel through go_back(), same
+ * "can't disagree about where back means" reasoning as that file's.
  */
 #include "ui_screens_internal.h"
 #include "dial_haptics.h"
@@ -45,6 +56,10 @@
 static lv_obj_t *s_list;
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_val_row[DIAL_TZ_COUNT];   // checkmark cell, one per zone row
+
+// Packed entry origin (see header comment): 0 = Settings, 1+zone = nav_policy's
+// setup gate. Captured once in create(), read only by go_back().
+static uintptr_t s_origin;
 
 /* ---- row factory (scr_settings.c's/scr_brightness_menu.c's idiom) ------- */
 
@@ -78,11 +93,34 @@ static lv_obj_t *make_row(lv_obj_t *parent, const char *label_txt, lv_event_cb_t
 
 /* ---- row actions ----------------------------------------------------------*/
 
+// The one place that decodes s_origin (see header comment) — every exit
+// funnels through this instead of each hardcoding a destination, so they
+// can never disagree about where "back" means. arg 0 -> Settings, arrived
+// at by a lateral menu swipe, so leaves the same way (MOVE_RIGHT); arg
+// 1+zone -> the dial face for that zone, arrived at by nav_policy's own
+// forced navigation rather than a swipe, so leaves the same modal-ish way
+// (LV_SCR_LOAD_ANIM_NONE), matching scr_update_prompt.c's own
+// nav_policy-raised-screen dismissal.
+static void go_back(void)
+{
+    if (s_origin == 0) {
+        ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+    } else {
+        zone_idx_t zone = (zone_idx_t)(s_origin - 1);
+        ui_router_go(SCR_DIAL, (void *)(uintptr_t)zone, LV_SCR_LOAD_ANIM_NONE);
+    }
+}
+
 static void back_row_cb(lv_event_t *e)
 {
     (void)e;
     dial_haptics_play(HAPTIC_TICK);
-    ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+    // Leaving without picking a zone still dismisses the setup gate (docs/
+    // SPEC-timezone-source.md's "Fix 1") -- without this, nav_policy would
+    // just route straight back here on the next state commit, since the
+    // zone is still unset. Session-only: asking again next boot is correct.
+    dial_state_set_tz_prompted();
+    go_back();
 }
 
 // One callback for every zone row; which one rides in user_data as an index
@@ -96,13 +134,18 @@ static void zone_row_cb(lv_event_t *e)
 
     char cur[48];
     bool have = dial_time_get_iana_tz(cur, sizeof cur);
+    // Either branch below leaves the screen, so either branch dismisses the
+    // setup gate too (docs/SPEC-timezone-source.md's "Fix 1") -- see
+    // back_row_cb's comment for why this call has to be here at all.
+    dial_state_set_tz_prompted();
+
     if (have && strcmp(cur, DIAL_TZ_IANA[i]) == 0) {
         // Already the current zone — leave without a redundant command or
         // NVS write (same "no-op a reselect of the already-current choice"
         // precedent as scr_adjust_mode.c's select_mode()), but the tap still
         // has to DO something: this row is also the exit, so still go back.
         dial_haptics_play(HAPTIC_TICK);
-        ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+        go_back();
         return;
     }
 
@@ -112,7 +155,7 @@ static void zone_row_cb(lv_event_t *e)
     // worker_task applies it in main.c's handle_immediate_cmd.
     app_cmd_t cmd = { .kind = CMD_TZ_CHANGED, .a = i };
     dial_cmd_post(&cmd);
-    ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+    go_back();
 }
 
 /* ---- palette ---------------------------------------------------------------*/
@@ -140,7 +183,7 @@ static void apply_palette(void)
 
 static void create(lv_obj_t *scr, void *arg)
 {
-    (void)arg;
+    s_origin = (uintptr_t)arg;   // 0 = Settings, 1+zone = nav_policy's setup gate (see header comment)
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
 
@@ -198,7 +241,10 @@ static bool on_knob(int detents)
 static bool on_gesture(lv_dir_t dir)
 {
     if (dir != LV_DIR_RIGHT) return false;
-    ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+    // Swipe-back is also a way to leave without picking a zone -- see
+    // back_row_cb's comment.
+    dial_state_set_tz_prompted();
+    go_back();
     return true;
 }
 
