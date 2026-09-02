@@ -21,6 +21,27 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.1 — 2026-09-01
+
+No firmware behavior change. This release fixes wording on the flasher page
+and corrects the project's third-party attribution.
+
+### Changed
+
+- **Flasher page copy cleaned up.** The install page and its README no
+  longer say "dual-zone bed" — the pitch and after-flashing instructions
+  now describe setting Bed Mode (One Bed or Dual Sides) to match your
+  setup, matching what the dial actually asks you to configure.
+- **`THIRD_PARTY_LICENSES.md` corrected.** Credits this fork's own
+  original work (the Somnus pad client, pad auto-discovery, on-device
+  timezone handling, the temperature-scale rework, and connect-flow
+  navigation fixes) alongside the upstream project it's built on; notes
+  that the boost-icon fonts are shipped as source but currently unused;
+  and updates the CA bundle entry to its current name, location, and
+  purpose (`dial_ota`'s TLS verification), reflecting that the upstream
+  cloud-auth pipeline it originally also served no longer exists in this
+  fork.
+
 ## 0.1.0 — 2026-09-01
 
 First Somnus-numbered version. No behavior change — this release exists to
