@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Bedknob">
+  <title>Bedknob — day</title>
+  <!-- Colors are dial_palette.c day tokens. Every value satisfies design-spec.md
+       §2 Rule 1: R,B = 0 mod 8; G = 0 mod 4 (exact RGB565). -->
+  <!-- detent ring: ink-secondary #888C88 -->
+  <g stroke="#888C88" stroke-width="5" stroke-linecap="round" fill="none">
+    <line x1="60.40" y1="123.60" x2="53.33" y2="130.67"/>
+    <line x1="46.74" y1="101.30" x2="37.23" y2="104.39"/>
+    <line x1="44.69" y1="75.24"  x2="34.81" y2="73.68"/>
+    <line x1="54.70" y1="51.08"  x2="46.61" y2="45.20"/>
+    <line x1="74.58" y1="34.10"  x2="70.04" y2="25.19"/>
+    <line x1="125.42" y1="34.10" x2="129.96" y2="25.19"/>
+    <line x1="145.30" y1="51.08" x2="153.39" y2="45.20"/>
+    <line x1="155.31" y1="75.24" x2="165.19" y2="73.68"/>
+    <line x1="153.26" y1="101.30" x2="162.77" y2="104.39"/>
+    <line x1="139.60" y1="123.60" x2="146.67" y2="130.67"/>
+  </g>
+  <!-- index mark: ink-primary #F0F0E8 -->
+  <line x1="100" y1="30" x2="100" y2="16" stroke="#F0F0E8" stroke-width="6" stroke-linecap="round"/>
+  <!-- post: ink-secondary -->
+  <rect x="84" y="128" width="32" height="55" rx="3" fill="#888C88"/>
+  <!-- collar: brass, identity-home #C8A050 -->
+  <rect x="64" y="136" width="72" height="15" rx="7.5" fill="#C8A050"/>
+  <!-- the knob: brass -->
+  <circle cx="100" cy="84" r="42" fill="#C8A050"/>
+  <!-- indicator: knocked out to bg #101418, machined rather than painted -->
+  <line x1="100" y1="76" x2="100" y2="54" stroke="#101418" stroke-width="9" stroke-linecap="round"/>
+</svg>
