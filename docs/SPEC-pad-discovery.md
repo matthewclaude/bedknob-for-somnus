@@ -49,7 +49,7 @@ placeholder it was always meant to be.
 
 ## Reference implementation — behavior yes, concurrency no
 
-`~/Projects/SomnusDialPreview/Sources/SomnusDialPreview/PadDiscovery.swift`
+`~/Projects/SomnusDialPreview/Sources/BedknobMac/PadDiscovery.swift` (Bedknob for Mac)
 (+ `PadClient.swift`) is a real, working implementation against the actual
 pad. Its **behavior** is the reference:
 

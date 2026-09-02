@@ -96,10 +96,25 @@ at 420 stays strictly inside it, which is intentional headroom, not a bug).
 
 ## Out of scope / not changed by this spec
 
-- **`dial_state.c:107` (`rel_mode` default = `true`).** Whether relative mode
-  should still be the default, now that its scale is a real 1:1 match for the
-  Somnus app instead of a silently-wrong Orion transcription, is an open
-  product decision for the owner — not implied by this fix. Left as-is.
+- **`dial_state.c:107` (`rel_mode` default = `true`).** **Decided 2026-09-02:
+  relative stays the default. No code change.** The scale is now a verified
+  1:1 match for the Somnus app (1.0 C per level, level 0 = 27.0 C, rails at
+  -15/+15), so a new user's dial and their app show the same number out of
+  the box; a dial that disagreed with the app on first boot would read as
+  broken before it read as a design choice.
+
+  Scope of the decision: **fresh devices only.** `dial_state.c:199-200`
+  already handles the other two paths and is not affected — an explicitly
+  persisted `relmode` is honored, and a device set up before this release
+  (a "zone" key with no "relmode") stays on ABSOLUTE so an unattended OTA
+  never changes what the big number means for someone who has read F every
+  night.
+
+  The argument for absolute is real and was weighed: a temperature is
+  meaningful with no app open, and `design-spec.md`'s "the one big number is
+  a fact" thesis was written around a 55-110 F numeral. It loses to the
+  app-agreement argument for a first-boot default, and the Settings row makes
+  it one tap away for anyone who prefers it.
 - The absolute-mode temperature path, the Pad Address row / input model, the
   connect-loop phase behavior, and the °F/°C units toggle — none of these are
   touched by this spec.

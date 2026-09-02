@@ -3,10 +3,12 @@
 **Status:** Draft. Findings from a read of the firmware tree on 2026-09-01. **No firmware
 code has been written or changed** — this closes two of `SPEC-rolling-differential.md`'s
 open questions from source, and raises one the earlier specs did not anticipate.
-**Date:** 2026-09-01
+**Date:** 2026-09-01 (§4.3 and the §5 color correction added 2026-09-02)
 **Scope:** the v2 firmware port. Companion to `SPEC-rolling-differential.md` (referred to
 as `RD§`) and `SPEC-differential-beta-fixes.md` (`BF§`), both of which are implemented and
-green in SomnusDialPreview.
+green in Bedknob for Mac (renamed from SomnusDialPreview on 2026-09-02; its own repo,
+where `SPEC-rolling-differential.md` and `SPEC-differential-beta-fixes.md` also live —
+they are **not** in this repo).
 
 Everything below is from reading `dial_somnus.c`, `dial_state.c/.h` and `main.c`. Nothing
 here has been compiled, flashed, or measured. The board had not arrived at time of writing.
@@ -194,16 +196,68 @@ the 2s confirm bursts. Provisionally: compute `gapThreshold` against `POLL_INTER
 (30s), and revisit with real failure-rate data per RD§7. This must not be tuned by
 reasoning; it is listed in §6 below.
 
+### 4.3 A cold boot starts with an empty window — and boots are routine
+
+Added 2026-09-02.
+
+The buffer is RAM-only and file-static in the worker's translation unit (§3). **Every power
+cycle starts it empty**, and the ten-minute window then takes ten minutes to fill.
+
+This matters more here than it would on the Mac beta, because of a hardware fact the earlier
+specs did not account for: **the dial has a physical power switch, and the owner's board is
+the battery-equipped SKU** (`SPEC-power-sensing.md` §5). Powering the dial off is a normal
+user action on this device, not an exceptional one. A Mac app runs for days; this thing gets
+switched off and on.
+
+**Consequences:**
+
+- For roughly the first ten minutes after every power-on, coverage is partial. With RD§7's
+  50% placeholder minimum, that is ~5 minutes of placeholder on **every** boot — and the
+  first thing a user does after switching the dial on is look at it.
+- Filling-after-boot and dropout-riddled look **identical** to a coverage percentage, and
+  they mean completely different things. "Still gathering, back shortly" is fine;
+  "unreliable readings" is alarming. RD§6's coverage line cannot distinguish them on its
+  own.
+
+**Decision — do not persist the buffer to NVS.** Three reasons, in order of weight: a dial
+that was switched off observed nothing, so bridging across the off period would be exactly
+the fabrication RD§5 exists to prevent; the off period is arbitrary and unknowable in
+advance, so stale samples could be hours or weeks old; and it would put a write-heavy
+workload on flash for a cosmetic gain.
+
+**Requirement instead:** the readout must distinguish *warming up* from *degraded*. The
+worker knows its own uptime, so a window that has never been full since boot is
+distinguishable from one that has lost samples — track it explicitly rather than inferring
+it from coverage alone. Wording and placement fall under RD§8, to be decided against the
+real display.
+
 ---
 
 ## 5. Carried forward from the beta
 
 Three things the Swift beta established that the port inherits:
 
-- **BF§2, one meaning per color.** Coral = below setpoint, cyan = above, violet = in-band —
-  everywhere. `scr_dial.c`'s status pill computes `target − current` while the differential
-  is `current − target` (RD§1); both signs are correct, and the colors must still agree.
-  This is a live collision on a screen where both are visible.
+- **BF§2, one meaning per color — the principle carries, the hues do not.** Corrected
+  2026-09-02. BF§2 states the rule as *"coral = below setpoint, cyan = above, violet =
+  in-band, everywhere."* Those are **Bedknob for Mac's** Swift colors and **none of them
+  exist in the firmware.** The dial's equivalents come from `dial_palette.c`:
+  `accent-heat` `#E86018` (below setpoint, warming), `accent-cool` `#3888C8` (above
+  setpoint, cooling), `neutral-holding` `#587868` (in band). Porting the beta's hues
+  literally would inject cyan — blue channel 219 — into a firmware whose night palette caps
+  blue at `0x18`, and none of the four Swift values quantize to RGB565. See
+  `docs/SPEC-brand-palette.md` §1 and `firmware/dial-idf/docs/design-spec.md` §2.
+
+  The collision the rule exists to prevent is real and unchanged: `scr_dial.c`'s status
+  pill computes `target − current` while the differential is `current − target` (RD§1);
+  both signs are correct, and the colors must still agree on a screen showing both.
+
+  **New requirement the beta could not have known:** the firmware carries every state in a
+  **parallel shape channel** — `LV_SYMBOL_UP` ▲, `DOWN` ▼, `MINUS` ▬, `STOP` ○, `CLOSE` ×
+  (design-spec.md §2) — so that hue never works alone, and specifically so night cooling
+  reads without blue. The differential readout must adopt a glyph on the same grammar
+  rather than relying on color. A differential that is color-only is a night-mode
+  regression, not a style choice.
+
 - **BF§5, the setpoint-change marker.** The tracker stores `target_t` per sample and flags
   a window spanning more than one distinct value. On the dial this matters far more than it
   did on the Mac: the pad's 3-stage overnight schedule moves the setpoint unprompted, so a
@@ -213,7 +267,9 @@ Three things the Swift beta established that the port inherits:
   canonical unit is already `dc` per `dial_state.h`, and `dial_f_to_c()` was deliberately
   deleted rather than renamed. A differential converts for display as `×1.8` with **no +32**
   — and there is currently no `dial_dc_to_f`-style helper for deltas, so one must be added
-  rather than reusing `dial_dc_to_f()`, which carries the offset.
+  rather than reusing `dial_dc_to_f()`, which carries the offset. Note the **face displays
+  °F** (`DIAL_TEMP_MIN_F` 55, `DIAL_TEMP_MAX_F` 110) while the API and every spec here are
+  °C; the differential inherits that split.
 
 ---
 
@@ -225,9 +281,10 @@ RD§7's list stands, with §4 sharpening two entries. Do not tune by reasoning:
 - Whether `gapThreshold` computes against the idle or confirm interval (§4.2).
 - Whether `3 ×` is the right multiplier at all.
 - Minimum coverage threshold. Still the beta's 50% placeholder; the dial's suppression
-  behavior (§4.2) may argue for a lower one.
+  behavior (§4.2) and its empty-at-boot window (§4.3) may both argue for a lower one.
 - Actual pad round-trip latency.
-- RD§8's placement decision, against the real 1.8" display in a dark bedroom.
+- RD§8's placement decision, against the real 1.8" display in a dark bedroom — including
+  §4.3's warming-up wording and §5's state glyph.
 
 ---
 
@@ -240,3 +297,5 @@ RD§7's list stands, with §4 sharpening two entries. Do not tune by reasoning:
 | RD§4 validity conditions | **Amended** — a fourth condition, `target_t` present this response (§2). |
 | RD§3 buffer capacity | **Amended** — size on the fastest cadence, not the idle one (§4.1). |
 | RD§6 gap threshold | **Provisional** — exclusion behavior confirmed correct; the interval it derives from is now an open question (§4.2). |
+| Cold-boot behavior | **New** — buffer is RAM-only and power cycling is routine on this hardware; do not persist, but distinguish warming-up from degraded (§4.3). |
+| BF§2 color rule | **Corrected** — the beta's coral/cyan/violet do not exist in the firmware and violate its RGB565 and night-blue rules; use `dial_palette.c` tokens, and add a state glyph (§5). |
