@@ -45,11 +45,13 @@ favicon, and the splash while `dial_palette_is_night()` is false.
 | Element | Token | Hex | Why |
 |---|---|---|---|
 | Ball | `identity-home` | `#C8A050` | Brass. The token already means "your side" — a brass finial is not an addition to the system. |
-| Collar | `identity-home` | `#C8A050` | Echoes the ball, binds the object together. |
-| Post | `ink-secondary` | `#888C88` | Neutral. Structure, not subject. |
-| Detent ring | `ink-secondary` | `#888C88` | Same weight as the post; the ring is chassis, not state. |
-| Index mark | `ink-primary` | `#F0F0E8` | The one bright element. Marks the reference detent. |
-| Indicator | `bg` | `#101418` | Knocked out, not painted — reads machined. |
+| Stem + bead | `identity-home` | `#C8A050` | The waist is what separates a bedpost from a flagpole. Drawn from a photograph of a real one. |
+| Collar + base step | `identity-home` | `#C8A050` | Flared bell, not a flat slab. The flare is the other half of reading as turned brass. |
+| Post | `ink-secondary` | `#888C88` | Runs off the bottom edge, so it reads as a post that continues into a bed. |
+| Pointer | `bg` | `#101418` | Knocked out, not painted — reads machined. The one thing a real finial does not have, and the only signal that this is a control. **Always points up.** |
+
+Note the day mark uses **three** values, not four: there is no `ink-primary` element since the
+index mark was removed with the detent ring (§6).
 
 ## 3. Night palette
 
@@ -59,11 +61,10 @@ tables wholesale at the night transition; anything on screen swaps with it.
 | Element | Token | Hex |
 |---|---|---|
 | Ball | `identity` (night, both sides) | `#906818` |
-| Collar | `identity` | `#906818` |
+| Stem + bead | `identity` | `#906818` |
+| Collar + base step | `identity` | `#906818` |
 | Post | `ink-secondary` | `#785018` |
-| Detent ring | `ink-secondary` | `#785018` |
-| Index mark | `ink-primary` | `#C87818` |
-| Indicator | `bg` | `#100C08` |
+| Pointer | `bg` | `#100C08` |
 
 Brass survives the night cap at `#906818` (B = `0x18`), which is the reason the identity
 works at all — it is the one distinctive color in the system that does not have to be
@@ -98,7 +99,15 @@ font to the firmware for the name.
 
 ## 6. Provenance — read this before "correcting" anything
 
-An early draft of the mark used **Bedknob for Mac's** coral/cyan/violet duotone
+**The first published mark was a lightbulb.** It had a ring of ten detents radiating out
+from the brass ball, which was reasoned about carefully — correct tokens, RGB565 clean, night
+cap satisfied — and never once rendered before publishing. Gold ball plus radiating lines plus
+a base reads as a bulb, or a sun, at every size. It was replaced by a mark drawn from a
+photograph of a real brass bedpost finial: waisted stem, flared bell collar, stepped base,
+post running off the edge. **Render a mark before shipping it.** Verifying the inputs is not
+verifying the output.
+
+An earlier draft still used **Bedknob for Mac's** coral/cyan/violet duotone
 (`#FF6B54` / `#35C9DB` / `#8B7BE8`). That was wrong on four counts, and the mistake is
 worth recording because it is easy to repeat:
 

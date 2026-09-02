@@ -8,8 +8,11 @@ including the boot splash and the Settings header, where the full name does not 
 The "for" is deliberate: it marks the project as third-party rather than implying an
 endorsement by Somnus Lab.
 
-The mark is a turned bedpost finial that is also a control knob — ball, collar, post, ten
-detents and an index mark at top.
+The mark is a turned bedpost finial that is also a control knob — ball, waisted stem with a
+bead, flared bell collar, stepped base, and a post running off the bottom edge. Drawn from a
+photograph of a real one; the waist and the flare are what stop it reading as a flagpole. The
+pointer is the only part a real finial does not have, and the only thing saying this is a
+control. It always points up.
 
 ## Which file
 
@@ -17,7 +20,7 @@ detents and an index mark at top.
 |---|---|
 | `bedknob-mark.svg` | Default. Day palette. 40px and above. |
 | `bedknob-mark-night.svg` | On-device only, whenever `dial_palette_is_night()` is true. |
-| `bedknob-mark-small.svg` | 32px and below — favicon, GitHub avatar, menu bar. Detents dropped. |
+| `bedknob-mark-small.svg` | 32px and below — favicon, GitHub avatar, menu bar. Stem bead and base step dropped, mass increased. |
 
 Between 32 and 40px either the full or the small variant works. Above 40px use the full mark.
 
@@ -41,3 +44,15 @@ separate reimplementation, is easier to find, and reads like a design system —
 exactly the trap. An early draft of this mark used its coral/cyan/violet; the cyan alone
 (#35C9DB, B=219) violated the night blue cap by an order of magnitude. See
 `docs/SPEC-brand-palette.md` §6.
+
+## The app icon
+
+`Resources/Bedknob.iconset/` in the Bedknob for Mac repo is rendered from these SVGs — the
+full mark at 64px and above, the small variant below — on a #101418 squircle at Apple's grid
+proportions (content ~80% of the canvas, corner radius ~22.37% of the tile). The dark ground
+is not decoration: the pointer is a knockout, so it needs something solid behind it.
+
+The committed artifact is the `.iconset`, not the `.icns`, because `iconutil` is macOS-only —
+a cloud session can render the PNGs but cannot pack them. `build.sh` runs `iconutil` on the
+Mac. To regenerate the PNGs, re-render these SVGs at 16/32/64/128/256/512/1024 into the
+iconset's Apple-mandated filenames.
