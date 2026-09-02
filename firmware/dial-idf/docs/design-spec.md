@@ -1,3 +1,15 @@
+> **Provenance note (added 2026-09-02).** This is the upstream Orion Dial design spec
+> and design-competition record, inherited unchanged. It remains the source of the
+> palette rules (§2: RGB565 quantization, night blue ≤ 0x18) and the parallel shape
+> channel, which `docs/SPEC-brand-palette.md` builds on. **Parts that no longer
+> describe this firmware:** the 55–110 °F numeral, arc math and range stops (the
+> Somnus dial defaults to the relative LEVEL scale, −15..+15, `SPEC-somnus-relative-scale.md`);
+> the MCP-derived sleep/night window (now fixed 21:00–07:00); per-side first names,
+> `zone_a`/`zone_b` presence dots, partner underline and Home↔Partner swipe (the
+> Somnus API has no per-side names; the label is BOTH SIDES / LEFT SIDE / RIGHT SIDE);
+> the WATER/boost captions and `device_online` (Orion fields). The JUDGING table at
+> the top is the competition scorecard, not spec.
+
 # JUDGING
 
 ## Scores

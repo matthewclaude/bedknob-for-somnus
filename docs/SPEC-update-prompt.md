@@ -1,6 +1,13 @@
 # Spec: update prompt + auto-update
 
-Status: **APPROVED AND IN BUILD (2026-07-29).** Owner approved implementation
+Status: **INHERITED FROM UPSTREAM ORION DIAL, SHIPPED.** Written 2026-07-29 for the
+Orion firmware and carried into the Somnus port unchanged. Two mechanisms it cites no
+longer exist here: the sleep-schedule-derived idle window (§3) and "thermal relief" —
+the Somnus port uses a fixed 09:00–11:00 window (`SPEC-ota-readiness.md` §2). The
+whole prompt path is gated on `dial_time_valid()`, which is why `V1-scope.md`
+item 11 matters. The prompt sheet's own test plan (§steps 2–5) has not been
+recorded as run on Somnus hardware; the OTA *install* has (`HARDWARE-bringup-log.md`
+§14.4). Original status line: APPROVED AND IN BUILD (2026-07-29). Owner approved implementation
 after v1.2.0-beta.2 was verified on hardware; targets the next beta.
 (Earlier status line said "not built" — that was written while v1.2.0 was
 still being cut and is superseded.)

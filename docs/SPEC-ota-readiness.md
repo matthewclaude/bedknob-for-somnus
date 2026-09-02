@@ -1,5 +1,22 @@
 # OTA readiness — investigation and plan
 
+> **Reader's guide (added 2026-09-02, evening).** Roughly two-thirds of this file is
+> a dated investigation whose recommendations have since all been applied. Ground
+> truth today: tag prefix `somnus-v*`, `PROJECT_VER` tracks the tag, releases and the
+> flasher publish to the public `matthewclaude/somnus-dial-releases` via
+> `SOMNUS_RELEASES_TOKEN`, `somnus-v0.1.3` is current, and a real OTA
+> (0.1.2, `ota_1` slot, `ESP_OTA_IMG_VALID`) is proven on hardware —
+> `HARDWARE-bringup-log.md` §14.4. **Still current:** §1.1 (a pre-repoint dial can
+> never be repointed over the air), §7.3's list of the four load-bearing prefix
+> spots, §7.5's reason for the changelog split, §8's "no home IP in a tag" rule,
+> §9 (beta channel; note §9.3's `per_page=5` cap means a beta scrolls out of
+> view after five stable releases), and §9.4/§9.6 on the rollback test, which is
+> **out of v1**. Everything else below — the `dial-v` prefix in §4, the 404 diagnosis
+> in §1, the "UNREACHABLE-TODAY" rows in §3, §5–§6's plan, §7's options — is history
+> and should be read as such. `dial_ota.h`'s doc comments still say `dial-v`;
+> cosmetic, untracked elsewhere.
+
+
 Status: **INVESTIGATION, 2026-09-01.** No code changed. Written to answer one
 question: what in the OTA path is proven to work, versus what has only ever
 compiled, ahead of the v1 release.
@@ -157,7 +174,12 @@ housekeeping:
 - §6 gives an ordered test plan, ending with a way to force the rollback
   path deliberately by building a trap image that crashes before it can
   confirm — I traced the exact ESP-IDF bootloader logic that fires (with
-  file:line citations) rather than assuming.
+  file:line citations) rather than assuming. **§9.6 walks that last step
+  back and closes it out**: on a closer read of upstream's field history the
+  revert path is better evidenced than §6 step 4 assumed, the step's own
+  premise doesn't survive the reading, and the one genuine unknown it named
+  (is rollback actually armed in *this* build?) was measured and passed.
+  The test left v1 scope on 2026-09-02.
 
 ---
 
@@ -335,8 +357,8 @@ Legend:
 | Redirect `esp_https_ota` follows to the asset host | **PROVEN (old identity)** | `CHANGELOG.md:389-391` (v1.0.3, 2026-07-16): *"Updates couldn't download at all. GitHub redirects release assets to a long signed URL that didn't fit in the dial's request buffer, so every install failed before downloading a byte."* That's a field failure and fix of exactly this step; `dial_ota.c:359-361`'s `buffer_size_tx = 4096` comment is the residue of that fix. |
 | Write to the inactive OTA slot | **PROVEN (old identity)** | Implied by every one of the 23 `dial-v*` releases in this repo's history (`dial-v1.0.0` through `dial-v1.4.2`) actually landing on hardware — `CHANGELOG.md` narrates hardware behavior at nearly every version. |
 | Reboot into it | **PROVEN (old identity)** | Same evidence — a released version becoming "what the dial runs" requires this step to have worked repeatedly. |
-| `ota_confirm_once()` cancelling the pending-verify timer | **PROVEN (old identity)** | `CHANGELOG.md:283-292` (v1.0.10, 2026-07-28): *"A good update could silently roll back. The new firmware marked itself valid only after a successful connection to Orion — 30-60s after reboot ... A power cycle inside that window reverted it. It now confirms itself once the system has demonstrably booted healthy."* This is the exact mechanism now in `main.c`'s `ota_confirm_once()`/30s timer — built in direct response to a real rollback happening on a real device. |
-| Rollback path if confirm never happens | **PROVEN (old identity), mechanism independently verified against ESP-IDF v6.0 source** | The v1.0.10 note above is itself proof a rollback fired for real once. I also read the actual bootloader logic (`~/esp/esp-idf` @ tag `v6.0`, matching `sdkconfig.defaults`' pinned toolchain) rather than trust my memory of it — see §6's rollback-test section for the exact mechanism and file:line citations. |
+| `ota_confirm_once()` cancelling the pending-verify timer | **PROVEN (old identity)**, and **PROVEN here** | `CHANGELOG.md:283-292` (v1.0.10, 2026-07-28): *"A good update could silently roll back. The new firmware marked itself valid only after a successful connection to Orion — 30-60s after reboot ... A power cycle inside that window reverted it. It now confirms itself once the system has demonstrably booted healthy."* This is the exact mechanism now in `main.c`'s `ota_confirm_once()`/30s timer — built in direct response to a real rollback happening on a real device. Re-proven in this configuration on 2026-09-02: `HARDWARE-bringup-log.md` §14.4, OTA state `2` (`ESP_OTA_IMG_VALID`). |
+| Rollback path if confirm never happens | **PROVEN (old identity), at scale** — armed in this build, mechanism independently verified against ESP-IDF v6.0 source | The v1.0.10 note above is itself proof a rollback fired for real once. I also read the actual bootloader logic (`~/esp/esp-idf` @ tag `v6.0`, matching `sdkconfig.defaults`' pinned toolchain) rather than trust my memory of it — see §6's rollback-test section for the exact mechanism and file:line citations. Armed here too — `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` measured in the committed `sdkconfig:695`, not merely inherited from `sdkconfig.defaults:36`. **See §9.6 for why this row is stronger than §6 step 4 assumed.** |
 
 **What has never run, in any form:** everything specific to the *current*
 configuration — `somnus-dial.bin` as an asset name, the
@@ -552,7 +574,11 @@ the 30s timer or a successful pad poll. This is the step that has a real
 field-incident history (v1.0.10) behind it, so it's worth explicitly
 watching rather than assuming it fired silently.
 
-**4. Deliberate rollback.** This is the one step nothing above exercises,
+**4. Deliberate rollback.** *(Written 2026-09-01. **Substantially walked
+back on 2026-09-02, and removed from v1 scope — read §9.6 before scheduling
+this.** The mechanics below are correct; the "I'd insist" conclusion at the
+end of this step is not, and §9.6 supersedes it.)* This is the one step
+nothing above exercises,
 and it's the one you specifically don't want discovered by accident on a
 nightstand. I read the actual mechanism in ESP-IDF v6.0 (the pinned
 toolchain, per `sdkconfig.defaults`) rather than go from memory, at
@@ -587,10 +613,13 @@ and `bootloader_common_loader.c:72-90`. The relevant behavior:
    immediately crashes/resets; the *next* boot after that should land back
    on the previous good firmware automatically, with no manual
    intervention. Confirm via `SCR_MENU → About` (or serial log) that the
-   running version reverted. This is the one test in this plan I'd insist
+   running version reverted. ~~This is the one test in this plan I'd insist
    on running before calling v1 done — an OTA whose rollback has never
    fired for real, in *this* configuration, is a claim, not a fact, right
-   up until you watch it happen.
+   up until you watch it happen.~~ **Struck 2026-09-02: the premise is
+   wrong. Rollback *has* fired for real on this codebase, many times, and
+   the bootloader cannot distinguish the case this test constructs from the
+   case that already fired. See §9.6.**
 
    One honest caveat: because the abort-scan is unconditional on state
    (not on *why* the previous boot ended), this also means a perfectly
@@ -1039,6 +1068,9 @@ toggle on. Between two betas of the same core, higher N wins.
 
 ### 9.4 The trap build for §6 step 4, ready to run
 
+*Kept as a recipe, no longer a v1 gate — see §9.6.* If the test is ever run,
+this is how.
+
 The deliberate rollback test **is** the first beta build. Same pipeline, one
 extra line of code.
 
@@ -1085,3 +1117,105 @@ beta channel is unsafe until you do.
 
 Neither hazard exists for the stable channel, which is why this test is
 beta-only rather than a plain version bump.
+
+### 9.6 Walking §6 step 4 back — closed out, and out of v1
+
+Added 2026-09-02, after reading `chris023/orion-waveshare-rotary-dial`
+directly (README, `CHANGELOG.md`, `docs/ARCHITECTURE.md`,
+`docs/SPEC-update-prompt.md`, `.github/workflows/release.yml`,
+`firmware/dial-idf/sdkconfig.defaults`, and the OTA component source), and
+then measuring the one thing that reading couldn't settle.
+
+**Status: closed. §6 step 4's "I'd insist on running it before calling v1
+done" is superseded by this section.** The deliberate rollback test moved
+from `V1-scope.md`'s *Remaining* (where it was item 10) to that document's
+*Explicitly NOT v1* on 2026-09-02, leaving item 4 — the fresh-install path
+end to end — as the sole remaining v1 item. §9.4's recipe stays; the
+priority does not. **If those two documents ever disagree about item 10,
+this section and `V1-scope.md` were changed together on this date; trust
+whichever has the later edit and re-sync the other.**
+
+**Finding 1 — upstream has no deliberate rollback test either.**
+`sdkconfig.defaults` sets `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` with a
+one-line comment, and that is the whole design record.
+`dial_ota_mark_valid_if_pending()` calls
+`esp_ota_mark_app_valid_cancel_rollback()` with **no debug hook, no
+forced-failure path, no test-only branch** — which independently confirms
+§9.4's trap-build approach is the only way in, not a workaround for
+something simpler that was missed. `docs/SPEC-update-prompt.md`'s test plan
+is five steps, all in the *prompt/availability* layer (publish a `-beta.N`,
+enable Beta builds on a test dial, discover; sleep-window suppression;
+"Later" persisting 23h across a reboot; "Skip this version"; unattended
+auto-update confirming itself). Every step exercises check → install →
+confirm. None exercises revert. `ARCHITECTURE.md` defers to that spec.
+
+**Finding 2 — and this is the one that breaks §6 step 4's premise: the
+revert path has already fired, correctly, at scale, on this codebase.**
+`CHANGELOG.md` 1.0.10 (2026-07-28), *"A good update could silently roll
+back... A power cycle inside that window reverted it."* Read literally,
+that is: the bootloader found a `PENDING_VERIFY` slot, marked it `ABORTED`,
+selected the other slot, and successfully booted the previous image. That is
+the **same code path** §9.4's trap build constructs — and it fired on this
+codebase, on this hardware family, across a user base substantially larger
+than this fork's (one board), often enough that users noticed they were back
+on the old version and reported it loudly enough to produce a release.
+
+**Why "but it rolled back a *good* image" is not the distinction it looks
+like.** §6 step 4's own caveat already says it: the abort-scan is
+**unconditional on state, not on why the previous boot ended** — crash,
+panic, watchdog, or a plain `esp_restart()` are indistinguishable to it. So
+"a bad image that crashes before confirming" and "a good image that got
+power-cycled before confirming" are not two paths, one tested and one not.
+They are one path, entered by two routes, and the bootloader cannot tell
+them apart by construction.
+
+**The user-base argument.** Upstream has far more units, more releases (23
+tags), more boots and more power cycles than this fork will have before v1.
+If the revert path were broken, a release that crashed or an install
+interrupted at the wrong moment would have left bricked dials and produced a
+bug report and a CHANGELOG entry. Neither exists, across that whole history,
+while the *adjacent* failure (1.0.10, confirm firing too late) did surface
+and did get fixed — which is what a working revert path plus attentive users
+looks like.
+
+**The one thing reading couldn't settle, now measured — PASSED.** Whether
+rollback is *armed in the build that runs on this board*. Upstream's `=y`
+lives in `sdkconfig.defaults`, which only **seeds** a new `sdkconfig`; this
+fork has a committed `sdkconfig`, audited against the board in
+`HARDWARE-bringup-log.md` §5, but that audit does not name this flag. Run on
+the Mac against the real checkout, 2026-09-02:
+
+```
+$ grep -n 'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE' \
+    firmware/dial-idf/sdkconfig firmware/dial-idf/sdkconfig.defaults
+firmware/dial-idf/sdkconfig:695:CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+firmware/dial-idf/sdkconfig.defaults:36:CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+```
+
+**Present in the file that actually governs the build, not merely inherited
+from the seed file.** Rollback is genuinely armed on this board. Had it been
+absent or `is not set` in `sdkconfig`, rollback would not have been untested
+but *off* — every OTA shipped so far running with no safety net — and this
+would have stopped being a scheduling question. It was worth one command
+precisely because it is the *entry point outlived the mechanism* shape this
+project has hit five times (`HARDWARE-bringup-log.md` §12): a `CONFIG_*`
+documented as enabled in `sdkconfig.defaults` while the committed
+`sdkconfig` quietly disagrees would have been invisible from every other
+angle.
+
+**Where that leaves the test:**
+
+1. ~~Run the grep.~~ **Done, passed** — see above.
+2. **The live trap test is not a v1 gate.** With rollback confirmed armed,
+   what remains untested here is ESP-IDF v6.0 bootloader code this fork does
+   not touch, exercised heavily upstream, with the app-side trigger
+   (`mark_valid`) already re-proven in this configuration on 2026-09-02
+   (`HARDWARE-bringup-log.md` §14.4). Against that sit §9.5's two real
+   hazards — the install/crash/rollback loop, and a trap image served to the
+   public by the flasher.
+3. **Revisit when a second unit exists somewhere it cannot be physically
+   reached.** Today the worst case if rollback silently fails is a
+   five-minute wire reflash against a verified 16MB factory backup
+   (`HARDWARE-bringup-log.md` §6). That is the whole reason the test is
+   cheap to skip *now* — and, by the same argument this document already
+   made in §7, it stops being cheap the moment that stops being true.

@@ -28,6 +28,13 @@ terms later, and `SPEC-pad-discovery.md` stays focused on subnet-scan
 mechanics rather than growing a second, unrelated design inside it.
 `SPEC-pad-discovery.md`'s own §9.2 is being replaced with a pointer here.
 
+> **One live gap this trace found, independent of the proposal (verified in
+> source 2026-09-02):** `main.c`'s `DIAL_NET_EV_LOST` handler only moves to
+> `PH_WIFI_LOST` from `PH_READY`/`PH_DEGRADED`, so a Wi-Fi drop during
+> `PH_SOMNUS_CONNECTING` or `PH_PAD_DISCOVERY` is never reflected as a Wi-Fi
+> problem — the connect loop just keeps failing. Benign in practice (the loop
+> retries), not v1, untracked anywhere else.
+
 ## 1. The mechanism, traced precisely
 
 ### How a phase change becomes a navigation
@@ -502,7 +509,7 @@ one `nav_policy` case-group entry, neither ever flapping.
   one-line fix — specified, not written.
 - Not building the "general nav yields to recent input" idea from §2 — named
   as a considered alternative, not recommended for this change.
-- Leaves the temporary `192.168.1.169` default, the `main.c` connect-loop
+- Leaves the temporary `192.168.1.169` default (since reverted to `192.168.1.100`), the `main.c` connect-loop
   fix, the relative-scale fix, and the timezone work untouched, per the
   standing constraints.
 
