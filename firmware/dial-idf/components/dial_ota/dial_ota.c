@@ -27,8 +27,12 @@ extern const char trust_roots_pem_start[] asm("_binary_trust_roots_pem_start");
 
 static const char *TAG = "ota";
 
+// Points at the public binaries-only release repo (docs/SPEC-ota-readiness.md
+// §5), not the private source repo this firmware is built from -- GitHub
+// 404s every endpoint under a private repo to an unauthenticated client
+// (§1), and both the dial and ESP Web Tools are unauthenticated by design.
 #define GITHUB_API_URL \
-    "https://api.github.com/repos/matthewclaude/somnus-waveshare-rotary-dial/releases/latest"
+    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/latest"
 // The LIST endpoint (beta channel only) -- unlike /releases/latest, this
 // includes prereleases. Same host/owner/repo, no trailing "/latest".
 // per_page is load-bearing: the unbounded list is ~70KB once a project has a
@@ -37,9 +41,17 @@ static const char *TAG = "ota";
 // newest-first, so the newest few are the only ones that can ever win the
 // is_newer comparison; 5 of them is ~27KB, comfortably inside the cap.
 #define GITHUB_API_URL_LIST \
-    "https://api.github.com/repos/matthewclaude/somnus-waveshare-rotary-dial/releases?per_page=5"
+    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases?per_page=5"
 #define ASSET_NAME     "somnus-dial.bin"
-#define TAG_PREFIX     "dial-v"
+// "somnus-v" since 2026-09-01 (docs/SPEC-ota-readiness.md §7) -- the repo's
+// own release history through "dial-v1.4.2" is inherited lineage from the
+// upstream fork, not a Somnus release; this prefix must match whatever
+// .github/workflows/release.yml's tag trigger + PROJECT_VER-verification
+// steps use, or release_version() below silently fails to strip it and
+// is_newer() rejects every release forever (an unparseable tag_name makes
+// sscanf match zero fields, which reads as "not newer" -- no error, no log
+// distinguishing it from "already current").
+#define TAG_PREFIX     "somnus-v"
 #define CHECK_BUF_CAP  (64 * 1024)   // release JSON is normally ~10-30KB
 // Beta channel only: how many of the list endpoint's (newest-first) entries
 // to inspect before giving up on finding a usable release. Bounds both the
@@ -215,7 +227,7 @@ bool dial_ota_check(bool beta)
 
     // GitHub 404s /releases/latest (never the list endpoint) when the repo
     // has zero published releases -- expected right now for the freshly
-    // renamed matthewclaude/somnus-waveshare-rotary-dial repo, not a check
+    // created matthewclaude/somnus-dial-releases repo, not a check
     // failure. Report it exactly like "checked, nothing newer" rather than
     // an error state, and don't fall back to any other repo.
     if (err == ESP_OK && status == 404) {
@@ -272,7 +284,7 @@ bool dial_ota_check(bool beta)
         int n = cJSON_GetArraySize(root);
         // Unlike /releases/latest, the list endpoint returns 200 with an
         // empty array for a repo with zero releases (expected right now for
-        // matthewclaude/somnus-waveshare-rotary-dial) -- report that as
+        // matthewclaude/somnus-dial-releases) -- report that as
         // "nothing to offer", not a failure.
         if (n == 0) {
             set_status(OTA_IDLE, NULL, NULL);
