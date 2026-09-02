@@ -32,6 +32,14 @@ typedef enum {
     PH_SOMNUS_CONNECTING,
     PH_READY,                // steady state: command + poll loop
     PH_DEGRADED,             // net up but the pad's calls failing; retrying w/ backoff
+    // Subnet scan running (docs/SPEC-pad-discovery.md), after the persisted
+    // address has failed at least once. worker_task blocks in
+    // dial_pad_discovery_scan() for the duration -- up to ~57.6s worst case
+    // (two passes, 300ms + 600ms probe timeouts) -- so this is a real,
+    // long-running phase, not a blip; it needs its own case in nav_policy
+    // (main.c), not the bare default (see docs/SPEC-connect-phases.md's
+    // trace of that exact bug for PH_SOMNUS_CONNECTING).
+    PH_PAD_DISCOVERY,
 } conn_phase_t;
 
 typedef enum { ZONE_A = 0, ZONE_B = 1, ZONE_COUNT = 2 } zone_idx_t;

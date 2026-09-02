@@ -8,6 +8,7 @@
 
 // Screen vtables defined one per file, gathered by ui_screens_register_all().
 extern const ui_screen_t scr_connecting;
+extern const ui_screen_t scr_pad_discovery;
 extern const ui_screen_t scr_wifi_portal;
 extern const ui_screen_t scr_netpick;
 extern const ui_screen_t scr_passkey;

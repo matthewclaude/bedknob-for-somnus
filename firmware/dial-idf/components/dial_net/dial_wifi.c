@@ -245,6 +245,20 @@ bool dial_net_ip(char *out, size_t sz)
     return true;
 }
 
+bool dial_net_subnet(uint32_t *ip_out, uint32_t *netmask_out)
+{
+    esp_netif_ip_info_t ip;
+    if (!s_connected || !s_sta_netif || esp_netif_get_ip_info(s_sta_netif, &ip) != ESP_OK)
+        return false;
+    // esp_netif_ip_info_t stores addresses in network (wire) byte order --
+    // ntohl() is what turns "192.168.1.5" into the numeric 0xC0A80105 that
+    // network/broadcast/± bitwise math (dial_pad_discovery) actually wants,
+    // the same conversion PadDiscovery.swift's own UInt32(bigEndian:) does.
+    if (ip_out)      *ip_out      = ntohl(ip.ip.addr);
+    if (netmask_out) *netmask_out = ntohl(ip.netmask.addr);
+    return true;
+}
+
 // Seed NVS from a dev secrets value if not already provisioned. Non-placeholder
 // only, and never when the user has asked for the setup portal (see
 // dial_net_request_setup) — otherwise "Change network" would just rejoin the

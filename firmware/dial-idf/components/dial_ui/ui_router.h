@@ -17,6 +17,7 @@
 
 typedef enum {
     SCR_CONNECTING = 0,   // boot/progress/status text
+    SCR_PAD_DISCOVERY,    // live subnet-scan progress (docs/SPEC-pad-discovery.md; arg: unused/NULL — phase-driven, nothing opens it on purpose)
     SCR_WIFI_PORTAL,      // how to hand the dial your Wi-Fi (SoftAP name + the on-device way in)
     SCR_NETPICK,          // pick the home network on the dial itself (arg: unused)
     SCR_PASSKEY,          // type its password with the knob (arg: network index)

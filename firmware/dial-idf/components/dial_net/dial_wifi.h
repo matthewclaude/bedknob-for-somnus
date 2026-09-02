@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /*
  * Wi-Fi for the Somnus dial: NVS-backed credentials + STA connect + a SoftAP
@@ -100,3 +101,11 @@ bool dial_wifi_is_connected(void);
 // Copy the current STA IPv4 address as a string (e.g. "192.168.0.48").
 // Returns false if not connected.
 bool dial_net_ip(char *out, size_t sz);
+
+// The STA IPv4 address and netmask, as raw host-byte-order integers (i.e.
+// 192.168.1.5 comes back as the numeric value 0xC0A80105, not the
+// on-the-wire byte order esp_netif_ip_info_t itself stores) -- ready for the
+// same bitwise subnet math dial_pad_discovery's scanner needs
+// (network = ip & netmask, broadcast = network | ~netmask). Returns false
+// if not connected, same contract as dial_net_ip().
+bool dial_net_subnet(uint32_t *ip_out, uint32_t *netmask_out);

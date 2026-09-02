@@ -34,6 +34,7 @@
 #include "ui_screens.h"
 #include "dial_wifi.h"
 #include "dial_somnus.h"
+#include "dial_pad_discovery.h"
 #include "dial_time.h"
 #include "dial_haptics.h"
 #include "dial_power.h"
@@ -220,6 +221,21 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
     case PH_READY:
     case PH_DEGRADED:
     case PH_WIFI_LOST:
+    // PH_SOMNUS_CONNECTING and PH_PAD_DISCOVERY join this group for the
+    // same reason PH_DEGRADED is already here (docs/SPEC-connect-phases.md,
+    // docs/SPEC-pad-discovery.md's §9.2): both are pre-PH_READY-only phases
+    // (have_state is architecturally false whenever either is set -- there
+    // is exactly one call site for PH_SOMNUS_CONNECTING, in the connect
+    // loop below, and it never runs again once PH_READY is reached), so
+    // this group's `if (st->have_state)` branch below can never actually
+    // trigger for them -- they always fall through to the same "never trap
+    // the user" block PH_DEGRADED already relies on. Without this,
+    // PH_SOMNUS_CONNECTING fell to the bare `default` below, which has no
+    // sticky-screen check at all: it forced SCR_CONNECTING on every single
+    // retry-loop iteration regardless of what the user was doing, undoing
+    // whatever escape a PH_DEGRADED window had allowed moments earlier.
+    case PH_SOMNUS_CONNECTING:
+    case PH_PAD_DISCOVERY:
         // Once we have device state, stay on the dial (with its staleness dot)
         // through transient outages rather than yanking the user to a status
         // screen mid-interaction.
@@ -296,15 +312,27 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
         // making Settings' Re-link, Wi-Fi change, and About's update —
         // the only tools that FIX a stuck dial — unreachable. A deliberately
         // opened menu face or sub-screen stays put; scr_connecting offers
-        // the swipe that gets there.
+        // the swipe that gets there. SCR_TIMEZONE and SCR_ADJUST_MODE added
+        // here alongside the fix above (owner audit, 2026-09-01):
+        // SCR_TIMEZONE was missing outright (added same day this list was
+        // last touched, never wired in); SCR_ADJUST_MODE was already sticky
+        // in the have_state==true set above but missing from this one —
+        // same deliberately-opened-Settings-sub-screen category as
+        // SCR_PAD_ADDRESS right next to it, so its absence here was the
+        // same class of gap, not a deliberate omission.
         {
             screen_id_t cur = ui_router_current();
             if (cur == SCR_MENU || cur == SCR_SETTINGS || cur == SCR_ABOUT ||
                 cur == SCR_WIFI || cur == SCR_BRIGHTNESS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_UPDATE ||
-                cur == SCR_PAD_ADDRESS)
+                cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
+                cur == SCR_ADJUST_MODE)
                 return cur;
         }
+        // PH_PAD_DISCOVERY gets its own screen (live scan progress); every
+        // other phase in this group falls to the plain connecting/error
+        // face, exactly as before this group grew to include it.
+        if (st->phase == PH_PAD_DISCOVERY) return SCR_PAD_DISCOVERY;
         return st->phase == PH_READY ? SCR_CONNECTING : SCR_ERROR;
     default:                    return SCR_CONNECTING;
     }
@@ -813,6 +841,30 @@ static void worker_task(void *arg)
         dial_state_get_pad_url(pad_url, sizeof(pad_url));
         dial_state_set_phase(PH_SOMNUS_CONNECTING, NULL);
         if (dial_somnus_connect(pad_url)) break;
+
+        // Pad auto-discovery (docs/SPEC-pad-discovery.md): the pad
+        // advertises no mDNS/SSDP, so a subnet scan is the only way to find
+        // a moved/never-configured address without the user typing one.
+        // Scan on FAILURE, not every retry -- dial_pad_discovery_should_
+        // attempt() is true on the first failure (fast recovery for the
+        // common "DHCP lease moved" case, and the path a fresh device's
+        // very first connection attempt takes) and gated behind a 5-minute
+        // cooldown after that, so an unreachable pad does not get the
+        // subnet swept every BACKOFF_MIN_S seconds. A found address is
+        // persisted and picked up on the very next loop iteration by the
+        // dial_state_get_pad_url() re-read above (the Sep 1 self-healing
+        // fix) -- no restructuring of this loop needed for that part.
+        if (dial_pad_discovery_should_attempt()) {
+            dial_state_set_phase(PH_PAD_DISCOVERY, NULL);
+            char found_url[DIAL_PAD_URL_MAX_LEN + 1];
+            bool found = dial_pad_discovery_scan(pad_url, found_url, sizeof(found_url));
+            dial_pad_discovery_mark_attempted();
+            if (found) {
+                dial_state_set_pad_url(found_url);
+                continue;   // skip the backoff below -- a fresh address deserves an immediate retry
+            }
+        }
+
         dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());
         backoff_wait(backoff_s);
         backoff_s = (backoff_s * 2 > BACKOFF_MAX_S) ? BACKOFF_MAX_S : backoff_s * 2;
