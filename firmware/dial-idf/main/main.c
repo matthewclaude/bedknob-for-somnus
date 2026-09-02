@@ -784,14 +784,18 @@ static void worker_task(void *arg)
     // single reachability probe against the PERSISTED base URL (Settings'
     // "Pad Address" row; dial_state_restore_prefs() already ran in app_main,
     // so this reads whatever the user last saved, or the compiled
-    // DIAL_PAD_DEFAULT_* fallback on a fresh device). Read once here, not
-    // re-read on every retry: a settings change mid-retry-loop reaches
-    // dial_somnus through CMD_PAD_SETTINGS_CHANGED instead (handle_immediate_
-    // cmd below), not by this loop noticing a moving target.
+    // DIAL_PAD_DEFAULT_* fallback on a fresh device). Re-read inside the loop
+    // on every attempt, not once before it: handle_immediate_cmd's
+    // CMD_PAD_SETTINGS_CHANGED path only runs in the steady-state loop below,
+    // which isn't reached until dial_somnus_connect() succeeds -- it cannot
+    // fix a bad address here. dial_state_set_pad_url() commits to NVS
+    // synchronously, so re-reading here is what actually makes a settings
+    // change made during the retry loop take effect, instead of the address
+    // being stuck until a successful connect that can never happen.
     char pad_url[DIAL_PAD_URL_MAX_LEN + 1];
-    dial_state_get_pad_url(pad_url, sizeof(pad_url));
     bool pad_single_zone = dial_state_get_zone_mode();
     for (;;) {
+        dial_state_get_pad_url(pad_url, sizeof(pad_url));
         dial_state_set_phase(PH_SOMNUS_CONNECTING, NULL);
         if (dial_somnus_connect(pad_url)) break;
         dial_state_set_phase(PH_DEGRADED, dial_somnus_last_error());

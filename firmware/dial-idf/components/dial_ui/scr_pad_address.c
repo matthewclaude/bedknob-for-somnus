@@ -167,10 +167,14 @@ static void done_event_cb(lv_event_t *e)
     }
     dial_haptics_play(HAPTIC_CONFIRM);
     dial_state_set_pad_url(s_buf);
-    // Apply it live (dial_somnus_connect() must run on the worker task, never
-    // here — see dial_somnus.h's threading contract), rather than waiting
-    // for a reboot. main.c's handle_immediate_cmd re-reads the address we
-    // just persisted and re-probes it.
+    // Apply it live rather than waiting for a reboot. Once the device has
+    // reached the steady-state loop, main.c's handle_immediate_cmd sees this
+    // CMD_PAD_SETTINGS_CHANGED, re-reads the address we just persisted, and
+    // re-probes it (dial_somnus_connect() must run on the worker task, never
+    // here — see dial_somnus.h's threading contract). If the device is still
+    // in the initial connect retry loop, handle_immediate_cmd isn't running
+    // yet — that loop re-reads the persisted address on every attempt
+    // instead, so the change takes effect on the next retry either way.
     app_cmd_t cmd = { .kind = CMD_PAD_SETTINGS_CHANGED };
     dial_cmd_post(&cmd);
     ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
