@@ -21,6 +21,25 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.2 — 2026-09-01
+
+### Changed
+
+- **Update checks now report what they found, in the device log.** Checking
+  for an update previously logged nothing at all when the answer was "up to
+  date" or "update available" — only failures showed up in the log. Now
+  every outcome logs the latest version seen, the version you're running,
+  and the verdict (e.g. `latest 0.1.2, running 0.1.1 -- update available`),
+  so an OTA problem can actually be diagnosed from a serial log instead of
+  guessing whether the check ran at all.
+
+### Fixed
+
+- **The monthly cert-sentinel check, which had been failing since the
+  Somnus port.** It was still looking for the trust-anchor bundle at its old
+  pre-port location and checking a cloud host this fork no longer contacts;
+  both are corrected, and it no longer fires on release tags.
+
 ## 0.1.1 — 2026-09-01
 
 No firmware behavior change. This release fixes wording on the flasher page

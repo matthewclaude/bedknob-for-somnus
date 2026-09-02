@@ -287,6 +287,7 @@ bool dial_ota_check(bool beta)
         // matthewclaude/somnus-dial-releases) -- report that as
         // "nothing to offer", not a failure.
         if (n == 0) {
+            ESP_LOGI(TAG, "no releases in list, running %s -- up to date", desc->version);
             set_status(OTA_IDLE, NULL, NULL);
             ok = true;
             goto done;
@@ -328,9 +329,11 @@ bool dial_ota_check(bool beta)
             taskENTER_CRITICAL(&s_mux);
             strlcpy(s_asset_url, asset_url, sizeof(s_asset_url));
             taskEXIT_CRITICAL(&s_mux);
+            ESP_LOGI(TAG, "latest %s, running %s -- update available", latest, desc->version);
             set_status(OTA_AVAILABLE, latest, NULL);
             ok = true;
         } else {
+            ESP_LOGI(TAG, "latest %s, running %s -- up to date", latest, desc->version);
             set_status(OTA_IDLE, latest, NULL);
             ok = true;
         }

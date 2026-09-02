@@ -233,6 +233,37 @@ unauthenticated. This is the practical proof that §5 (repointing at
 something public) isn't optional polish; it's required before OTA can ever
 leave `OTA_IDLE` on a real device pointed at this repo name.
 
+### 1.1 Seen for real: a pre-repoint dial can never self-heal over the air
+
+This ambiguity stopped being theoretical on 2026-09-01, cutting
+`somnus-v0.1.1`: the bring-up board was still running a build made before
+`dial_ota.c` was repointed from the private source repo to the public
+`matthewclaude/somnus-dial-releases` binaries-only repo. That board queried
+the private repo, got the 404 described above, and reported `OTA_IDLE` —
+"no releases published yet" — even with `0.1.0` and then `0.1.1` genuinely
+published and public at the new location. It had no way to tell the
+difference, for exactly the reason in §1: the 404 is indistinguishable from
+"not repointed yet" from the device's side.
+
+**The deployment constraint this proves: OTA cannot deliver the repoint
+that would let OTA work.** Any dial flashed before the repoint is
+permanently stuck querying the wrong repo — no release published anywhere
+it's reachable, however many `somnus-v*` tags accumulate at the new
+location, will move it out of `OTA_IDLE`. There is no over-the-air fix for
+a device that doesn't know where to look. The one-time fix is a single wire
+flash of any post-repoint build (`0.1.1` or later) over USB via
+`idf.py flash` — a **plain flash, no `erase-flash`**, since NVS (Wi-Fi
+credentials, timezone, the pad address discovery already wrote back) must
+survive it. From that build onward, the dial is pointed at the public repo
+and every later release reaches it over the air normally.
+
+Practically: **every dial that shipped or was hand-flashed before the
+repoint needs this one-time USB flash before its first real OTA update can
+ever succeed.** This is a real fact about the fleet, not just about
+tonight's bring-up board — worth checking for on any device whose flash
+history predates the repoint commit, not something the on-device UI can
+detect or route around.
+
 ## 2. What `docs/SPEC-update-prompt.md` already specifies, and what's stale
 
 Read it in full before touching this feature — it is detailed and current

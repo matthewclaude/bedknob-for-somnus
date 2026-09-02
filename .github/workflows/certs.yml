@@ -1,7 +1,10 @@
 # Trust-anchor sentinel: catches TLS breakage a year before the dials feel it.
 #
-# The firmware verifies every connection against the embedded anchors in
-# firmware/dial-idf/components/dial_oauth/orion_root_ca.pem. Two things can
+# Only dial_ota makes TLS connections (to api.github.com and
+# objects.githubusercontent.com, for the release check and binary download);
+# dial_somnus talks plain local HTTP with no TLS at all. dial_ota verifies
+# those connections against the embedded anchors in
+# firmware/dial-idf/components/dial_ota/trust_roots.pem. Two things can
 # silently rot that: a server migrating to a root we don't embed, and a
 # load-bearing anchor approaching its own expiry. Both only surface on the
 # devices, months or years later, as "my dial stopped working" — this job
@@ -19,9 +22,10 @@ on:
     - cron: '17 6 1 * *'   # monthly, 1st at 06:17 UTC
   workflow_dispatch:
   push:
-    paths: ['firmware/dial-idf/components/dial_oauth/orion_root_ca.pem']
+    branches: ['**']
+    paths: ['firmware/dial-idf/components/dial_ota/trust_roots.pem']
   pull_request:
-    paths: ['firmware/dial-idf/components/dial_oauth/orion_root_ca.pem']
+    paths: ['firmware/dial-idf/components/dial_ota/trust_roots.pem']
 
 jobs:
   verify-trust-anchors:
@@ -32,7 +36,7 @@ jobs:
       - name: Live chains verify against embedded anchors, with a year of runway
         run: |
           set -uo pipefail
-          PEM="$GITHUB_WORKSPACE/firmware/dial-idf/components/dial_oauth/orion_root_ca.pem"
+          PEM="$GITHUB_WORKSPACE/firmware/dial-idf/components/dial_ota/trust_roots.pem"
           FAIL=0
           mkdir -p /tmp/sentinel && cd /tmp/sentinel
 
@@ -42,9 +46,10 @@ jobs:
           # which would otherwise become a bogus anchor-00.pem.
           awk '/BEGIN CERT/{n++} n>=1 {print > ("anchor-" sprintf("%02d",n) ".pem")}' "$PEM"
 
-          # Every host the firmware contacts: Orion MCP (control), GitHub API
-          # (OTA release check), GitHub objects CDN (OTA binary download).
-          for h in mcp.orionsleep.com api.github.com objects.githubusercontent.com; do
+          # Every host the firmware makes TLS connections to: GitHub API
+          # (OTA release check) and GitHub objects CDN (OTA binary
+          # download). dial_somnus is plain local HTTP, no TLS involved.
+          for h in api.github.com objects.githubusercontent.com; do
             rm -f chain.pem cert-*.pem ints.pem
             echo | openssl s_client -showcerts -connect "$h:443" -servername "$h" 2>/dev/null \
               | awk '/BEGIN CERT/,/END CERT/' > chain.pem
