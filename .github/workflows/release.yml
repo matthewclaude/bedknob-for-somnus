@@ -1,4 +1,4 @@
-# A tag "dial-vX.Y.Z" builds firmware/dial-idf and publishes build/somnus-dial.bin
+# A tag "somnus-vX.Y.Z" builds firmware/dial-idf and publishes build/somnus-dial.bin
 # to a GitHub Release; dial_ota.c polls that release's tag_name/asset to decide
 # whether a device should update, so the tag must match CMakeLists.txt's PROJECT_VER.
 # The same build also produces a merged single-file image (bootloader + partition
@@ -11,7 +11,7 @@ name: release
 on:
   push:
     tags:
-      - 'dial-v*'
+      - 'somnus-v*'
 
 permissions:
   contents: write
@@ -29,7 +29,7 @@ jobs:
 
       - name: Verify tag matches PROJECT_VER
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#dial-v}"
+          TAG_VERSION="${GITHUB_REF_NAME#somnus-v}"
           PROJECT_VER="$(grep -oP 'set\(PROJECT_VER\s+"\K[^"]+' firmware/dial-idf/CMakeLists.txt)"
           if [ -z "$PROJECT_VER" ]; then
             echo "::error::Could not find PROJECT_VER in firmware/dial-idf/CMakeLists.txt"
@@ -49,7 +49,7 @@ jobs:
       - name: Extract release notes from CHANGELOG.md
         id: notes
         run: |
-          VER="${GITHUB_REF_NAME#dial-v}"
+          VER="${GITHUB_REF_NAME#somnus-v}"
           # Section runs from "## <version>" (exact — 1.2.0 must not match
           # 1.2.0-beta.1) to the next "## " heading.
           BODY="$(awk -v ver="$VER" '
@@ -79,7 +79,7 @@ jobs:
           echo "Release notes for $VER:"
           printf '%s\n' "$BODY"
 
-      # Beta channel: a tag like dial-v1.1.0-beta.1 publishes as a GitHub
+      # Beta channel: a tag like somnus-v1.1.0-beta.1 publishes as a GitHub
       # PRERELEASE. That single flag is what keeps the two channels apart —
       # /releases/latest (what a stable dial polls, and what the flasher's
       # default manifest serves) excludes prereleases by definition, so only
