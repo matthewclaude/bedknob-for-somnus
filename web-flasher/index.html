@@ -14,7 +14,7 @@
     --text-dim: #888C88;
     --accent: #C8A050;
     --accent-text: #D8B868;
-    --accent-tint: rgba(232, 89, 12, 0.14);
+    --accent-tint: rgba(200, 160, 80, 0.14);
   }
 
   * { box-sizing: border-box; }
@@ -91,7 +91,7 @@
     font: inherit;
     font-size: 1.05rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--bg);
     background: var(--accent);
     border: none;
     border-radius: 10px;
@@ -235,13 +235,18 @@
 
   <h2>Before you click</h2>
   <ul>
-    <li>Use a USB-C <strong>data</strong> cable (not a charge-only cable),
-      plugged straight into your computer — not through a hub.</li>
+    <li>Use a <strong>USB-A to USB-C</strong> <strong>data</strong> cable
+      (not a charge-only cable), plugged straight into your computer — not
+      through a hub. A C-to-C cable will not work: it negotiates plug
+      orientation itself, which defeats the board's orientation trick
+      described in the callout below.</li>
     <li>When the picker asks you to choose a port, pick it, then hit
       <strong>Connect</strong>.</li>
-    <li>If this is a brand-new dial, choose the option to
-      <strong>erase</strong> the device before installing, for a clean
-      slate.</li>
+    <li>Flashing from this page always <strong>erases everything</strong>
+      on the dial, including Wi-Fi credentials, timezone and pad address,
+      so a dial that is already set up will need to go through setup again.
+      Over-the-air updates from the dial's own Update menu keep your
+      settings and are the normal way to update.</li>
   </ul>
 
   <div class="callout">
@@ -280,9 +285,14 @@
       Firmware &copy; 2026 Chris Meyer, licensed
       <a href="https://polyformproject.org/licenses/noncommercial/1.0.0">PolyForm
       Noncommercial 1.0.0</a> — free for personal, noncommercial use; see
-      <a href="https://github.com/matthewclaude/somnus-dial-releases/blob/main/THIRD_PARTY_LICENSES.md">third-party
+      <a href="https://github.com/matthewclaude/somnus-dial-releases/blob/main/THIRD_PARTY_LICENSES">third-party
       notices</a>. Flashing powered by
       <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
+      The firmware is provided as-is, with no warranty, and you use it at
+      your own risk.
+    </p>
+    <p style="margin-top:.4rem;font-size:.75rem;opacity:.65">
+      Required Notice: Copyright © 2026 Chris Meyer (<a href="https://github.com/chris023/orion-waveshare-rotary-dial">https://github.com/chris023/orion-waveshare-rotary-dial</a>)
     </p>
   </footer>
 </main>

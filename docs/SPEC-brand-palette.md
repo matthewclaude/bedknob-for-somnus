@@ -144,6 +144,7 @@ because nothing looks wrong. Now:
 | `--accent` | `#e8590c` | `#C8A050` | `identity-home` |
 | `--accent-text` | `#ff8a4c` | `#D8B868` | brass tint, §7.1 |
 | button active | `#d14e0a` | `#A88038` | brass shade, §7.1 |
+| `--accent-tint` | `rgba(232, 89, 12, 0.14)` | `rgba(200, 160, 80, 0.14)` | `accent` |
 
 **Bedknob for Mac** (`Sources/BedknobMac/Theme.swift`) — state accents now
 `accent-heat` / `accent-cool` / `neutral-holding`. Two further corrections beyond a hue
