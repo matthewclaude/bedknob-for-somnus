@@ -154,11 +154,12 @@ static lv_timer_t *s_alt_timer;
 static bool        s_alt_water;
 // Last on_knob detent or handle-release tick (lv_tick_get()) -- "the knob
 // wins": alternation is locked to the setpoint for ALT_KNOB_LOCK_MS after
-// either, on top of the whole of s_dragging. Not touched by handle
-// PRESSED/PRESSING (only §3a's own two recording points), so a fresh drag
-// or tap started mid-water-phase is corrected within one alternation tick
-// by apply_palette_and_state/alt_timer_cb rather than on that same event --
-// only a knob turn (on_knob) gets the immediate snap.
+// either, on top of the whole of s_dragging. Not touched by handle PRESSED
+// (only §3a's own two recording points) -- starting the 3s lock on PRESSED
+// would let it lapse mid-drag on a long press-and-hold instead of counting
+// from the actual release. PRESSED does still get its own immediate
+// same-event correction (revision 3): see handle_event_cb, which snaps the
+// DISPLAY straight to the setpoint phase without touching this tick.
 static uint32_t s_last_interact_ms;
 
 /* ---- motion helpers (design-spec.md §6) -------------------------------- */
@@ -613,15 +614,6 @@ static void apply_palette_and_state(const app_state_t *st)
         lv_obj_set_style_text_font(s_temp_lbl, &dial_font_num_140, 0);
         lv_obj_set_size(s_num_box, 340, 160);
         lv_obj_align(s_num_box, LV_ALIGN_CENTER, 0, 0);
-        // s_water_word (§3a) tracks s_num_box's OWN geometry, not the
-        // parent's -- lv_obj_align_to (unlike lv_obj_align/lv_obj_center,
-        // which store a style-level alignment the layout system re-derives
-        // on its own) computes a fixed position once, so it has to be
-        // re-issued here every time the box the label is derived from
-        // moves. Harmless to (re)run even on a render where s_water_word
-        // stays hidden — it's cheap, and keeps position and visibility from
-        // ever having to be kept in sync by hand.
-        lv_obj_align_to(s_water_word, s_num_box, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
     } else {
         lv_obj_set_style_text_font(s_temp_lbl, &dial_font_num_88, 0);
         lv_obj_set_size(s_num_box, 210, 92);
@@ -729,12 +721,18 @@ static void apply_palette_and_state(const app_state_t *st)
     // Night face (§3): page dots hidden under minimal. Applied AFTER
     // dial_dots_layout so it overrides that call's own HIDDEN choice; when
     // minimal goes false again, the next dial_dots_layout call above already
-    // restores whichever dots belong (single- vs dual-zone) with no extra
-    // code needed here.
+    // restores s_dot_a/s_dot_b (whichever belongs, single- vs dual-zone) —
+    // but NOT s_dot_menu: dial_dots_layout only ever repositions it, never
+    // touches its HIDDEN flag (see that function), so left to itself here
+    // the menu dot hidden at night would never come back at dawn (revision
+    // 3 fix). s_dot_a/s_dot_b need no such else: dial_dots_layout's own
+    // clear/add pair above already re-decides both every render.
     if (minimal) {
         lv_obj_add_flag(s_dot_a, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_dot_b, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_dot_menu, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(s_dot_menu, LV_OBJ_FLAG_HIDDEN);
     }
 
     // Away badge (design-spec.md §7 extension) — dormant: st->away is
@@ -823,6 +821,15 @@ static void handle_event_cb(lv_event_t *e)
         }
         s_dragging = true;
         s_press_dc = s_shown_dc;
+        // "The knob wins" (§3a, revision 3 fix): a drag that starts during
+        // a water phase must not render the live drag value in the water's
+        // accent color until the alternation timer's next tick catches up
+        // -- snap right here, same event, the way on_knob already does.
+        // s_last_interact_ms is NOT set here: RELEASED already records it
+        // (this file's own §3a header comment), and PRESSED starting a
+        // fresh 3s lock window before the drag has even moved would just
+        // let the lock lapse mid-drag on a long press-and-hold.
+        if (s_alt_water) alt_show_setpoint();
         dial_state_stamp_input();
         return;
     }
@@ -1070,16 +1077,26 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_transform_pivot_y(s_temp_lbl, LV_PCT(50), 0);
     lv_obj_center(s_temp_lbl);
 
-    // Water alternation's "WATER" caption (docs/SPEC-night-face.md §3a) —
-    // a sibling of s_num_box, not a child of it: it sits BELOW the box
-    // (lv_obj_align_to, apply_palette_and_state), not inside it. Hidden
-    // until the first water phase; position is set (and kept current) from
-    // apply_palette_and_state, since it's derived from s_num_box's own
-    // per-render geometry.
+    // Water alternation's "WATER" caption (docs/SPEC-night-face.md §3a,
+    // revision 3) — ABOVE the numeral, in the day face's own WATER-caption
+    // slot (y=98, same as s_water_lbl below): free at night since s_name_lbl
+    // and s_water_lbl are both hidden under minimal. Revision 3 correction:
+    // the first build put it BELOW the box, where it landed on the power
+    // button (72px square centered at y=280; the 160px box already ends at
+    // y=260). 92-CY, not 98-CY: montserrat_28's line_height (30) centered at
+    // 98 puts the label's box 13px into the numeral box's own top (y=100);
+    // at 92 the overlap that survives is within the font's own descender
+    // (base_line 5px) and "WATER" has none in play (no descending glyphs),
+    // so nothing actually visible collides with the numeral itself (whose
+    // own ink doesn't start until ~y=129 -- see REPORT-night-face.md's key
+    // values). A fixed slot, not tracked off s_num_box like the reverted
+    // revision-2 placement was — plain lv_obj_align, set once here; no
+    // per-render re-align needed. Hidden until the first water phase.
     s_water_word = lv_label_create(scr);
     lv_obj_set_style_text_font(s_water_word, &lv_font_montserrat_28, 0);
     lv_label_set_text(s_water_word, "WATER");
     lv_obj_clear_flag(s_water_word, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(s_water_word, LV_ALIGN_CENTER, 0, 92 - CY);
     lv_obj_add_flag(s_water_word, LV_OBJ_FLAG_HIDDEN);
 
     // #9 Unit.
