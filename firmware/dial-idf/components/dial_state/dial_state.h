@@ -725,7 +725,7 @@ static inline int dial_state_temp_max_dc(const app_state_t *st)
 #define DIAL_NIGHT_PRESETS_N 2
 static const uint16_t DIAL_NIGHT_PRESET_START[DIAL_NIGHT_PRESETS_N] = { 21 * 60, 22 * 60 };
 static const uint16_t DIAL_NIGHT_PRESET_END  [DIAL_NIGHT_PRESETS_N] = {  7 * 60,  6 * 60 };
-static const char *const DIAL_NIGHT_PRESET_LABEL[DIAL_NIGHT_PRESETS_N] = { "9 pm \xE2\x80\x93 7 am", "10 pm \xE2\x80\x93 6 am" };
+static const char *const DIAL_NIGHT_PRESET_LABEL[DIAL_NIGHT_PRESETS_N] = { "9 pm - 7 am", "10 pm - 6 am" };
 
 // True while night mode is actually engaged right now (docs/SPEC-night-
 // window.md §4) -- takes the whole app_state_t, not just the two times,

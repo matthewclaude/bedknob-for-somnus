@@ -228,11 +228,13 @@ static void on_state(const app_state_t *st)
         lv_label_set_text(s_val_preset[i], match ? LV_SYMBOL_OK : "");
     }
 
+    // No leading dash here (unlike the Settings row's " - reason" suffix,
+    // ui_screens_internal.h) -- this line has no preceding value to
+    // separate from, and the compiled fonts have no dash glyph to spend on
+    // pure punctuation.
     const char *reason = dial_night_clock_reason();
     if (reason[0]) {
-        char buf[24];
-        snprintf(buf, sizeof buf, "\xE2\x80\x94 %s", reason);
-        lv_label_set_text(s_note_lbl, buf);
+        lv_label_set_text(s_note_lbl, reason);
     } else {
         lv_label_set_text(s_note_lbl, "");
     }

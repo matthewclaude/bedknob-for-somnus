@@ -136,33 +136,37 @@ static inline void dial_fmt12(int min, int *h12, int *mm, bool *pm)
 }
 
 // §5's fallback rendering for a stored pair that matches neither preset —
-// "h:mm am – h:mm pm", both sides spelled out. Unreachable with today's two
-// presets (dial_state's clamp-on-read always resolves a bad pair to exactly
-// preset 0), kept for the custom-editor follow-up (§8) and as the belt-and-
-// braces default a corrupt read can never actually reach.
+// "h:mm am - h:mm pm", both sides spelled out. ASCII hyphen, not an en
+// dash: the compiled Montserrat fonts this UI renders with have no dash
+// glyph at all (a box, not a hyphen), so every string here stays plain
+// ASCII. Unreachable with today's two presets (dial_state's clamp-on-read
+// always resolves a bad pair to exactly preset 0), kept for the
+// custom-editor follow-up (§8) and as the belt-and-braces default a
+// corrupt read can never actually reach.
 static inline void dial_night_range_str(uint16_t start, uint16_t end, char *buf, size_t sz)
 {
     int sh, sm, eh, em; bool spm, epm;
     dial_fmt12(start, &sh, &sm, &spm);
     dial_fmt12(end,   &eh, &em, &epm);
-    snprintf(buf, sz, "%d:%02d %s \xE2\x80\x93 %d:%02d %s",
+    snprintf(buf, sz, "%d:%02d %s - %d:%02d %s",
              sh, sm, spm ? "pm" : "am", eh, em, epm ? "pm" : "am");
 }
 
 // §6's Update-screen rendering for a derived (or fixed-fallback) window —
 // one shared meridiem suffix when both ends fall on the same side of noon
-// (today's presets always do: "9:00–11:00 am"), the full h:mm-am/pm-each
+// (today's presets always do: "9:00-11:00 am"), the full h:mm-am/pm-each
 // form otherwise (a future custom editor could derive a window spanning
-// noon or midnight).
+// noon or midnight). ASCII hyphen throughout -- see dial_night_range_str's
+// comment on why.
 static inline void dial_wake_window_str(int start, int end, char *buf, size_t sz)
 {
     int sh, sm, eh, em; bool spm, epm;
     dial_fmt12(start, &sh, &sm, &spm);
     dial_fmt12(end,   &eh, &em, &epm);
     if (spm == epm)
-        snprintf(buf, sz, "%d:%02d\xE2\x80\x93%d:%02d %s", sh, sm, eh, em, spm ? "pm" : "am");
+        snprintf(buf, sz, "%d:%02d-%d:%02d %s", sh, sm, eh, em, spm ? "pm" : "am");
     else
-        snprintf(buf, sz, "%d:%02d %s \xE2\x80\x93 %d:%02d %s",
+        snprintf(buf, sz, "%d:%02d %s - %d:%02d %s",
                  sh, sm, spm ? "pm" : "am", eh, em, epm ? "pm" : "am");
 }
 
@@ -172,7 +176,9 @@ static inline void dial_wake_window_str(int start, int end, char *buf, size_t sz
 // proxy for it), else "set timezone" (no zone ever persisted) or "no clock"
 // (a zone IS persisted, SNTP hasn't synced -- Wi-Fi up, internet down, the
 // state a bedside device sits in during an outage; there is no user action
-// to name there). Callers place the em-dash themselves.
+// to name there). Callers place a plain ASCII hyphen themselves (see
+// dial_night_range_str's comment) — the picker (scr_night_mode.c) shows the
+// reason bare, with no leading punctuation at all.
 static inline const char *dial_night_clock_reason(void)
 {
     if (dial_time_valid()) return "";
@@ -197,7 +203,7 @@ static inline void dial_night_row_value(const app_state_t *st, char *buf, size_t
     }
     const char *reason = dial_night_clock_reason();
     if (reason[0]) {
-        strlcat(buf, " \xE2\x80\x94 ", sz);
+        strlcat(buf, " - ", sz);
         strlcat(buf, reason, sz);
     }
 }

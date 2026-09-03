@@ -30,17 +30,17 @@ point of this release as the feature it carries.
 ### Added
 
 - **Settings → Night mode.** Pick when the dial switches to its dim, warm
-  night look: Off, 9 pm – 7 am, or 10 pm – 6 am. Off runs the dial on day
+  night look: Off, 9 pm - 7 am, or 10 pm - 6 am. Off runs the dial on day
   brightness and haptics around the clock, and the update-available prompt —
   which night mode used to keep off the screen entirely — can now appear at
-  night too. Defaults to 9 pm – 7 am, the fixed window this firmware has
+  night too. Defaults to 9 pm - 7 am, the fixed window this firmware has
   always used, so nothing changes for anyone until this row is actually
   opened.
 - **Turning Night mode off also hides the two night brightness rows**
   (Brightness → Night (in use) / Night (clock)) — with night mode off
   there's no night look for them to set. Their values are kept and reappear
   once night mode is turned back on.
-- **The overnight auto-update window now follows Night mode's end time** —
+- **The auto-update window now follows Night mode's end time** —
   two hours after, two hours wide — instead of a fixed 9–11 am, so it tracks
   the same wake time set on the Night mode row. The Update screen's
   Auto-update row now shows that window directly (e.g. "9:00–11:00 am")
