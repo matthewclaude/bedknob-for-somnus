@@ -33,7 +33,7 @@ static const char *TAG = "ota";
 // (§1), and both the dial and ESP Web Tools are unauthenticated by design.
 #define GITHUB_API_URL \
     "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/latest"
-// Beta channel only (docs/REPORT-beta-fix.md, 2026-09-03 finding): GitHub's
+// Beta channel only (docs/SPEC-ota-readiness.md §9.7, 2026-09-03 finding): GitHub's
 // /releases list is ordered by created_at, which here is the date of the
 // one commit every release/tag points at, so every entry ties and a
 // per_page cap cannot be trusted to contain the newest one -- the first
@@ -254,7 +254,7 @@ static int ota_http_get(const char *url, const char *user_agent, check_resp_t *r
 // object check_beta() picked below: pull the ASSET_NAME download URL from
 // assets[], compare `latest` against the running version, and set the
 // final status. Verbatim from the pre-fix single-request version of this
-// function (docs/REPORT-beta-fix.md) -- factored out so the beta channel's
+// function (docs/SPEC-ota-readiness.md §9.7) -- factored out so the beta channel's
 // extra HTTP round trip changes nothing about how a chosen release is
 // actually consumed.
 static bool finish_from_release(cJSON *chosen, const char *latest, const esp_app_desc_t *desc)
@@ -288,7 +288,7 @@ static bool finish_from_release(cJSON *chosen, const char *latest, const esp_app
 }
 
 // Stable channel: the one /releases/latest object. Unchanged from before
-// the beta-channel fix (docs/REPORT-beta-fix.md) apart from the HTTP-client
+// the beta-channel fix (docs/SPEC-ota-readiness.md §9.7) apart from the HTTP-client
 // setup moving into ota_http_get, shared with the beta channel below.
 static bool check_stable(const esp_app_desc_t *desc, const char *user_agent)
 {
@@ -342,7 +342,7 @@ static bool check_stable(const esp_app_desc_t *desc, const char *user_agent)
     return ok;
 }
 
-// Beta channel (docs/REPORT-beta-fix.md, 2026-09-03 finding -- see
+// Beta channel (docs/SPEC-ota-readiness.md §9.7, 2026-09-03 finding -- see
 // GITHUB_API_URL_TAGS's own comment for why the list endpoint can't be
 // trusted). Two requests, bounded and order-independent:
 //  1. GET the tags list (one page, per_page=50) and find the single
@@ -425,6 +425,7 @@ static bool check_beta(const esp_app_desc_t *desc, const char *user_agent)
     char candidate[16];
     strlcpy(candidate, highest, sizeof(candidate));
     bool ok = false;
+    bool called_finish = false;   // see the final set_status below
 
     for (int attempt = 0; attempt < OTA_BETA_CANDIDATE_CAP; attempt++) {
         strlcpy(tried[n_tried++], candidate, sizeof(tried[0]));
@@ -461,6 +462,7 @@ static bool check_beta(const esp_app_desc_t *desc, const char *user_agent)
         free(rr.buf);
 
         if (usable) {
+            called_finish = true;
             ok = finish_from_release(rel, candidate, desc);
             cJSON_Delete(rel);
             break;
@@ -491,7 +493,11 @@ static bool check_beta(const esp_app_desc_t *desc, const char *user_agent)
     }
 
     cJSON_Delete(root);
-    if (!ok) set_status(OTA_FAILED, NULL, "no usable release for newest tags");
+    // Only the exhausted-candidates case gets this generic status -- if
+    // finish_from_release() ran, it already set a specific status (asset
+    // missing, or the AVAILABLE/IDLE verdict) and that must stand, not be
+    // overwritten by a bare "no usable release" that would hide why.
+    if (!called_finish) set_status(OTA_FAILED, NULL, "no usable release for newest tags");
     return ok;
 }
 

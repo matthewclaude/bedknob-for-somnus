@@ -17,8 +17,8 @@
  * Beta channel: dial_ota_check(beta) takes the caller's current
  * dial_state.beta preference (SCR_UPDATE's "Beta builds" toggle). Off, this
  * is exactly today's behavior against /releases/latest (which by
- * definition excludes prereleases). On (docs/REPORT-beta-fix.md, 2026-09-03
- * finding), it queries the tags endpoint instead of a releases LIST --
+ * definition excludes prereleases). On (docs/SPEC-ota-readiness.md §9.7,
+ * 2026-09-03 finding), it queries the tags endpoint instead of a releases LIST --
  * GitHub orders that list by created_at, which every release in this repo
  * ties on, so no per_page cap of it can be trusted to contain the newest
  * one. The tags endpoint is scanned in full for the highest version (tags
