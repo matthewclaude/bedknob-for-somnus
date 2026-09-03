@@ -17,6 +17,7 @@
 #include <time.h>
 
 LV_FONT_DECLARE(dial_font_num_88)
+LV_FONT_DECLARE(dial_font_num_140)
 
 #define CX 180   // screen center — every position in design-spec.md §4 is
 #define CY 180   // given as an absolute (x,y); we align everything to the
@@ -367,6 +368,10 @@ static void apply_palette_and_state(const app_state_t *st)
 {
     const dial_palette_t *pal = PAL();
     bool night = dial_palette_is_night();
+    // Night face (docs/SPEC-night-face.md §3): number-only layout while
+    // night is active. Commit 1 ties it straight to night; commit 2 adds
+    // the Settings toggle (minimal = night && st->night_face_min).
+    bool minimal = night;
     s_units_c = st->units_c;
     s_rel     = st->rel_mode;
     configure_arc_range(st);     // point the arc at this scale's rails
@@ -412,6 +417,16 @@ static void apply_palette_and_state(const app_state_t *st)
                           : "BOTH SIDES");
     lv_obj_set_style_text_color(s_name_lbl, pal->ink_secondary, 0);
     apply_identity(pal, night);
+    // Night face (§3): side label + identity underline hidden under minimal
+    // — applied after apply_identity so it overrides whichever underline
+    // variant that just picked.
+    if (minimal) {
+        lv_obj_add_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_underline_solid, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_underline_dash, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
 
     // Water caption — display-only °C conversion when units_c (M4); the
     // store keeps actual_c as-is either way.
@@ -425,6 +440,10 @@ static void apply_palette_and_state(const app_state_t *st)
     else if (st->units_c) snprintf(water, sizeof(water), "WATER %.1f\xC2\xB0", z->actual_c);
     else snprintf(water, sizeof(water), "WATER %d\xC2\xB0", dial_c_to_f(z->actual_c));
     lv_label_set_text(s_water_lbl, water);
+    // Night face (§3): WATER caption hidden under minimal — a second number
+    // competing with the one that matters (§7).
+    if (minimal) lv_obj_add_flag(s_water_lbl, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_clear_flag(s_water_lbl, LV_OBJ_FLAG_HIDDEN);
 
     // Setpoint numeral — ink_primary always (never state-tinted); dimmed for
     // OFFLINE (design-spec.md's "numeral whose color never lies") and, more
@@ -435,6 +454,20 @@ static void apply_palette_and_state(const app_state_t *st)
     lv_obj_set_style_text_opa(s_temp_lbl,
                               !z->on          ? NUM_STANDBY_OPA :
                               kind == ZK_OFFLINE ? 115 : LV_OPA_COVER, 0);
+    // Night face (§3): font swap + box resize/recenter for the numeral.
+    // s_temp_lbl is lv_obj_center()-ed inside s_num_box at create() — LVGL's
+    // CENTER align re-derives on every layout pass, so resizing the box here
+    // is enough to keep the label centered in it; no separate reposition of
+    // s_temp_lbl itself is needed.
+    if (minimal) {
+        lv_obj_set_style_text_font(s_temp_lbl, &dial_font_num_140, 0);
+        lv_obj_set_size(s_num_box, 340, 160);
+        lv_obj_align(s_num_box, LV_ALIGN_CENTER, 0, 0);
+    } else {
+        lv_obj_set_style_text_font(s_temp_lbl, &dial_font_num_88, 0);
+        lv_obj_set_size(s_num_box, 210, 92);
+        lv_obj_align(s_num_box, LV_ALIGN_CENTER, 0, 150 - CY);
+    }
     lv_obj_set_style_text_color(s_unit_lbl, pal->ink_secondary, 0);
     lv_obj_set_style_text_opa(s_unit_lbl, z->on ? LV_OPA_COVER : NUM_STANDBY_OPA, 0);
     // Relative mode has no unit — the suffix names the quantity instead. The
@@ -442,6 +475,9 @@ static void apply_palette_and_state(const app_state_t *st)
     // reference stays on the face in every mode.
     if (st->rel_mode) lv_label_set_text(s_unit_lbl, "LEVEL");
     else              lv_label_set_text(s_unit_lbl, st->units_c ? "\xC2\xB0" "C" : "\xC2\xB0" "F");
+    // Night face (§3): unit / LEVEL label hidden under minimal.
+    if (minimal) lv_obj_add_flag(s_unit_lbl, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_clear_flag(s_unit_lbl, LV_OBJ_FLAG_HIDDEN);
 
     // Neutral landmark: a tick at 12 o'clock (level 0's center) shown only in
     // relative mode — it turns the ring from a plain bar into a bipolar
@@ -479,12 +515,18 @@ static void apply_palette_and_state(const app_state_t *st)
     }
     lv_label_set_text(s_pill_glyph, glyph);
     lv_label_set_text(s_pill_word, word);
-    if (z->on) lv_obj_clear_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
-    else       lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+    // Night face (§3): status pill hidden under minimal too — z->on alone no
+    // longer decides visibility here.
+    if (z->on && !minimal) lv_obj_clear_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+    else                   lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
 
     // Chevron pulse tracks the underlying thermal kind: pulses while
-    // actively heating/cooling, static once holding.
-    bool pulsing = (kind == ZK_HEATING || kind == ZK_COOLING);
+    // actively heating/cooling, static once holding. Never pulses under
+    // minimal — a pulse on a hidden glyph is wasted work (§3); the existing
+    // `!pulsing && s_chevron_active` branch below already calls
+    // chevron_stop() the moment minimal makes this false, no separate call
+    // needed.
+    bool pulsing = (kind == ZK_HEATING || kind == ZK_COOLING) && !minimal;
     if (pulsing && (!s_chevron_active || night != s_chevron_night)) chevron_start(night);
     else if (!pulsing && s_chevron_active) chevron_stop();
     s_chevron_active = pulsing;
@@ -525,6 +567,16 @@ static void apply_palette_and_state(const app_state_t *st)
     lv_obj_set_style_bg_color(s_dot_b, s_zone == ZONE_B ? pal->ink_secondary : pal->track, 0);
     lv_obj_set_style_bg_color(s_dot_a, s_zone == ZONE_A ? pal->ink_secondary : pal->track, 0);
     lv_obj_set_style_bg_color(s_dot_menu, pal->track, 0);
+    // Night face (§3): page dots hidden under minimal. Applied AFTER
+    // dial_dots_layout so it overrides that call's own HIDDEN choice; when
+    // minimal goes false again, the next dial_dots_layout call above already
+    // restores whichever dots belong (single- vs dual-zone) with no extra
+    // code needed here.
+    if (minimal) {
+        lv_obj_add_flag(s_dot_a, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_dot_b, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_dot_menu, LV_OBJ_FLAG_HIDDEN);
+    }
 
     // Away badge (design-spec.md §7 extension) — dormant: st->away is
     // permanently false until the pad grows an away concept (see that
@@ -532,8 +584,11 @@ static void apply_palette_and_state(const app_state_t *st)
     // Somnus dial today. Kept rendering so it needs no further work the day
     // that changes.
     lv_obj_set_style_text_color(s_away_lbl, pal->ink_secondary, 0);
-    if (st->away) lv_obj_clear_flag(s_away_lbl, LV_OBJ_FLAG_HIDDEN);
-    else          lv_obj_add_flag(s_away_lbl, LV_OBJ_FLAG_HIDDEN);
+    // Night face (§3): AWAY badge hidden under minimal too — dormant today
+    // (st->away is permanently false, see the field's own comment), but
+    // this keeps the rule honest against the day it isn't.
+    if (st->away && !minimal) lv_obj_clear_flag(s_away_lbl, LV_OBJ_FLAG_HIDDEN);
+    else                      lv_obj_add_flag(s_away_lbl, LV_OBJ_FLAG_HIDDEN);
 
     // OTA notice — one shared label, two mutually-exclusive states (see
     // create() for why both live in this exact slot):
