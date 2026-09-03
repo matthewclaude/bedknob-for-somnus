@@ -171,10 +171,12 @@ static void row_ota_cb(lv_event_t *e)
     }
 }
 
-// Auto-update (docs/SPEC-update-prompt.md): Off/Overnight, a plain binary
-// preference flip -- unlike "Dial adjusts" (which got its own explanation
-// screen because the consequence lands hours later and needs prose), this
-// is a simple standing choice with an obvious meaning, so a single tap
+// Auto-update (docs/SPEC-update-prompt.md): Off/After wake (renamed from
+// "Overnight" -- docs/SPEC-night-window.md §6, the window was always a
+// morning one), a plain binary preference flip -- unlike "Dial adjusts"
+// (which got its own explanation screen because the consequence lands hours
+// later and needs prose), this is a simple standing choice with an obvious
+// meaning, so a single tap
 // cycling it is enough (same shape as Beta builds below). The worker
 // (main.c's idle loop) reads it out of its own app_state_t snapshot the
 // same way it already reads beta/sched_follow -- nothing else to kick off
@@ -438,7 +440,10 @@ static void on_state(const app_state_t *st)
     if (!s_list) return;
     apply_palette(lv_obj_get_parent(s_list));
     render_ota_row(st);
-    if (s_val_auto) lv_label_set_text(s_val_auto, st->ota_auto ? "Overnight" : "Off");
+    // "After wake" for now (docs/SPEC-night-window.md §6 rename, was
+    // "Overnight" -- the window has always been a morning one); commit 2
+    // replaces this literal word with the actual derived window.
+    if (s_val_auto) lv_label_set_text(s_val_auto, st->ota_auto ? "After wake" : "Off");
 
     // A check that lands WHILE this screen is open flips availability under
     // the user, so the row has to appear/disappear live rather than only on

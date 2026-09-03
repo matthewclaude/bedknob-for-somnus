@@ -1179,7 +1179,7 @@ static void worker_task(void *arg)
             app_state_t st;
             dial_state_get(&st);
 
-            bool night = (lt.tm_hour >= 21 || lt.tm_hour < 7);
+            bool night = dial_night_active(&st, now_min);
             dial_power_set_night(night);
             // Swap the UI palette too, and force a re-render — screens read
             // PAL() from on_state, so a bare palette swap without a commit
@@ -1252,7 +1252,7 @@ static void worker_task(void *arg)
                 dial_state_commit(mut_ota_prompt_due, &s_ota_prompt_live);
             }
 
-            // ---- Auto-update overnight install (docs/SPEC-update-prompt.md) -
+            // ---- Auto-update post-wake install (docs/SPEC-update-prompt.md) -
             // Reuses dial_ota_download_and_apply() directly — the exact same
             // install path SCR_UPDATE's confirmed manual tap uses (CMD_OTA_APPLY
             // in handle_immediate_cmd above), including the takeover screen if
@@ -1261,11 +1261,17 @@ static void worker_task(void *arg)
             // started the download) and the v1.0.10 confirm-on-stable-boot
             // behavior (ota_confirm_once, unchanged by this).
             if (st.ota_auto == 1 && st.ota.status == OTA_AVAILABLE) {
-                // Fixed 09:00-11:00 fallback (spec) -- Somnus has no sleep
+                // docs/SPEC-night-window.md §6: the window used to be the
+                // fixed 09:00-11:00 pair open-coded here (Somnus has no sleep
                 // schedule to derive a real post-wake window from, unlike
-                // Orion's have_sched branch before it.
-                int auto_start = 9 * 60, auto_end = 11 * 60;
-                bool in_window = (now_min >= auto_start && now_min < auto_end);
+                // Orion's have_sched branch before it); dial_auto_update_window
+                // now derives it from the night-window setting, falling back to
+                // that same fixed pair when night is off -- byte-identical on
+                // an unchanged device (TODO(commit 2): still hardcoded to
+                // 09:00-11:00 until the night-window state fields exist).
+                int auto_start, auto_end;
+                dial_auto_update_window(&st, &auto_start, &auto_end);
+                bool in_window = dial_in_window((uint16_t)auto_start, (uint16_t)auto_end, now_min);
 
                 // NOT gated on the zones being off. The dial is a remote
                 // control, not the bed's controller — heating/cooling is
@@ -1291,7 +1297,7 @@ static void worker_task(void *arg)
                         ESP_LOGI(TAG, "auto-update: v%s blocked after 2 failed attempts -- skipping",
                                  st.ota.latest);
                     } else {
-                        ESP_LOGI(TAG, "auto-update: attempting v%s in the overnight window",
+                        ESP_LOGI(TAG, "auto-update: attempting v%s in the post-wake window",
                                  st.ota.latest);
                         s_ota_last_committed_pct = -100;   // guarantee the first progress commit fires
                         // Hands the socket back, same as the manual

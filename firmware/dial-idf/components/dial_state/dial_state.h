@@ -236,6 +236,27 @@ static inline uint16_t dial_scr_timeout_next(uint16_t cur)
 }
 
 /*
+ * User-settable night window (docs/SPEC-night-window.md). True when
+ * now_min (minutes from local midnight) falls inside [start, end). Windows
+ * wrap midnight -- 21:00-07:00 is start > end, the normal case -- so both
+ * orders are handled here rather than at each call site. A pure function of
+ * its arguments: the same "what should it be at 3:14am" discipline
+ * SPEC-dial-side-scheduling.md §5 argues for, so a reboot mid-night resolves
+ * correctly with no sequence state to restart. Also reused by §6's
+ * auto-update window (dial_auto_update_window, below app_state_t) -- a
+ * second hand-written wrap comparison is how the two would drift apart.
+ * dial_night_active/dial_auto_update_window live further down this file,
+ * next to dial_state_is_dual — both take a `const app_state_t *`, which
+ * isn't defined yet at this point in the file.
+ */
+static inline bool dial_in_window(uint16_t start, uint16_t end, int now_min)
+{
+    if (start == end) return false;   // unreachable after the clamp-on-read below; belt-and-braces
+    return (start < end) ? (now_min >= start && now_min <  end)
+                         : (now_min >= start || now_min <  end);
+}
+
+/*
  * Curated timezone list for Settings' "Timezone" row (docs/SPEC-timezone-
  * source.md's "A curated list, not the full table" section) — NOT the
  * ~400-zone posix_tz_db table dial_time.c embeds; dial_list.h walks one row
@@ -498,7 +519,7 @@ typedef struct {
     // display to DPWR_STANDBY (its "STANDBY" threshold — see dial_power.c's
     // power_task, which reads this live every 100ms tick, same as the
     // brightness prefs above). Settings' "Screen timeout" row offers exactly
-    // DIAL_SCR_TIMEOUT_CHOICES above (30s/1m/2m/5m/10m — deliberately no
+    // DIAL_SCR_TIMEOUT_CHOICES above (5s/15s/30s/1m — deliberately no
     // "Never", see that table's comment). Default 90 is deliberately NOT one
     // of those five: it's the exact value this firmware hardcoded as
     // STANDBY_AFTER_US before this preference existed, so introducing it
@@ -670,6 +691,34 @@ static inline int dial_state_temp_min_dc(const app_state_t *st)
 static inline int dial_state_temp_max_dc(const app_state_t *st)
 {
     return st->temp_max_dc >= 0 ? st->temp_max_dc : DIAL_TEMP_MAX_DC;
+}
+
+// True while night mode is actually engaged right now (docs/SPEC-night-
+// window.md §4) -- takes the whole app_state_t, not just the two times,
+// because it also has to consult the night_on flag. TODO(SPEC-night-
+// window.md commit 2): read st->night_on/night_start_min/night_end_min once
+// those fields exist. Hardcoded to the exact 21:00-07:00 window main.c
+// open-coded before this function existed, so this commit is byte-identical
+// behavior.
+static inline bool dial_night_active(const app_state_t *st, int now_min)
+{
+    (void)st;
+    return dial_in_window(21 * 60, 7 * 60, now_min);
+}
+
+// Post-wake install window (docs/SPEC-night-window.md §6): two hours after
+// night ends, two hours wide. This is what Orion derived from the account's
+// sleep schedule; the Somnus port lost the schedule and froze the result at
+// 09:00-11:00, which is right only for a 07:00 riser. Falls back to that
+// same fixed pair when night is off, since there is no wake time to derive
+// from -- TODO(SPEC-night-window.md commit 2): derive from st->night_on/
+// night_end_min once those fields exist. Hardcoded to 09:00-11:00 for now,
+// so this commit is byte-identical behavior.
+static inline void dial_auto_update_window(const app_state_t *st, int *start, int *end)
+{
+    (void)st;
+    *start = 9 * 60;
+    *end   = 11 * 60;
 }
 
 // Initialize the store (mutex + defaults). Call once before any other call.
