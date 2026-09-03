@@ -69,6 +69,21 @@ static lv_obj_t *s_handle;       // setpoint drag handle — the ONLY temp touch
 #define LEVEL_OPA_UNDER  77     // ~30%: `bg` wash deepening the fill  (heating)
 #define LEVEL_OPA_OVER   82     // ~32%: accent ghost over the track   (cooling)
 
+// Water alternation (docs/SPEC-night-face.md §3a): the night face's setpoint
+// swaps with the water reading every ALT_SETPOINT_MS/ALT_WATER_MS while
+// heating/cooling. Named separately (not one shared constant) because the
+// spec expects them to diverge later ("if the bench says the setpoint
+// should hold longer... change the two constants; do not add a setting for
+// it") -- alt_timer_cb re-arms itself with whichever one applies next, so
+// they don't have to stay equal for the cadence to work.
+#define ALT_SETPOINT_MS 2000
+#define ALT_WATER_MS    2000
+// "The knob wins" (§3a): how long after the last detent or handle release
+// the face stays locked to the setpoint before alternation is allowed to
+// resume. Same idiom as scr_settings.c's CONFIRM_WINDOW_MS -- lv_tick_get()
+// at the interaction, lv_tick_elaps() at the check.
+#define ALT_KNOB_LOCK_MS 3000
+
 static lv_obj_t  *s_level;              // the value-step overlay arc
 static lv_color_t s_level_accent;       // cached: the drag path has no state snapshot
 static int        s_actual_dc = -1;     // measured water temp, tenths of °C; <0 = unknown
@@ -77,6 +92,7 @@ static lv_obj_t *s_name_lbl;
 static lv_obj_t *s_underline_solid, *s_underline_dash;
 static lv_obj_t *s_water_lbl;
 static lv_obj_t *s_num_box, *s_temp_lbl;
+static lv_obj_t *s_water_word;   // "WATER" caption under the numeral (§3a) -- water phase only
 static lv_obj_t *s_unit_lbl;
 static lv_obj_t *s_pill, *s_pill_glyph, *s_pill_word;
 static lv_obj_t *s_power_btn, *s_power_glyph;
@@ -126,6 +142,24 @@ static bool s_chevron_night;
 
 // Only fade the staleness dot on an actual transition, not every on_state.
 static bool s_stale_shown;
+
+// Water alternation (docs/SPEC-night-face.md §3a). s_alt_timer exists only
+// while alternating (created/deleted idempotently from
+// apply_palette_and_state, and in destroy()); s_alt_water is which phase it
+// last put on screen (false = setpoint, the phase it always starts on).
+// Invariant maintained everywhere this is touched: s_water_word is visible
+// iff s_alt_water is true -- the two are only ever set together, by
+// alt_show_setpoint()/alt_show_water() below.
+static lv_timer_t *s_alt_timer;
+static bool        s_alt_water;
+// Last on_knob detent or handle-release tick (lv_tick_get()) -- "the knob
+// wins": alternation is locked to the setpoint for ALT_KNOB_LOCK_MS after
+// either, on top of the whole of s_dragging. Not touched by handle
+// PRESSED/PRESSING (only §3a's own two recording points), so a fresh drag
+// or tap started mid-water-phase is corrected within one alternation tick
+// by apply_palette_and_state/alt_timer_cb rather than on that same event --
+// only a knob turn (on_knob) gets the immediate snap.
+static uint32_t s_last_interact_ms;
 
 /* ---- motion helpers (design-spec.md §6) -------------------------------- */
 
@@ -361,6 +395,99 @@ static void apply_identity(const dial_palette_t *pal, bool night)
     }
 }
 
+/* ---- numeral formatting (setpoint AND water, §3a) ----------------------- */
+// The value passed in is always tenths of °C (dc) — the internal, canonical
+// representation (see dial_state.h). Relative mode shows the nearest
+// −10…+10 level ("+3" / "0" / "-3"); the '+' is the glyph spliced into
+// dial_font_num_88 (level 0 is a bare "0", no sign) and present outright in
+// dial_font_num_140 (docs/SPEC-night-face.md §5). Absolute mode shows the
+// dc value directly (a trivial /10 split, exact — no rounding, since it IS
+// the canonical unit) when s_units_c, or dial_dc_to_f() when not (M4 units
+// toggle). °F is display-only math with no bearing on what gets stored or
+// posted: after the Q1 units fix, absolute mode steps in exact whole 1.0°C
+// increments, so the °F numeral now steps IRREGULARLY (e.g. 68, 70, 72, 73,
+// 75 — each is the nearest whole °F to a clean whole-°C value). That
+// irregularity is the correct, expected result of the setpoint actually
+// landing on the pad's own grid every time — do not smooth or interpolate
+// it away here.
+//
+// Shared by the setpoint (s_shown_dc) and the water reading (s_actual_dc,
+// §3a: "the same unit rules as the setpoint... a raw °C next to a level is
+// not [comparable]") — which value a caller means is the caller's business,
+// not this function's, since every branch below applies identically either
+// way. render_numeral is the setpoint-only convenience every pre-existing
+// call site already used and keeps using; alt_show_water (below) is the
+// only other caller, and goes through render_value directly since it
+// targets a value render_numeral was never written to accept.
+static void render_value(int temp_dc, char *out, size_t out_sz)
+{
+    if (s_rel) {
+        int lvl = dial_rel_from_dc(temp_dc);
+        if (lvl == 0) snprintf(out, out_sz, "0");
+        else          snprintf(out, out_sz, "%+d", lvl);   // "+3" / "-3"
+    } else if (s_units_c) {
+        snprintf(out, out_sz, "%d.%d", temp_dc / 10, temp_dc % 10);
+    } else {
+        snprintf(out, out_sz, "%d", dial_dc_to_f(temp_dc));
+    }
+}
+
+static void render_numeral(int temp_dc)
+{
+    char t[8];
+    render_value(temp_dc, t, sizeof t);
+    lv_label_set_text(s_temp_lbl, t);
+}
+
+/* ---- water alternation (docs/SPEC-night-face.md §3a) -------------------- */
+// The two on-face states s_temp_lbl/s_water_word can be in. Factored out so
+// the timer callback, apply_palette_and_state's lock/leaving-minimal
+// handling, and on_knob's immediate snap all reach the same place instead
+// of three copies of "which color, which text, is the word shown" drifting
+// apart. Each sets s_alt_water and s_water_word's visibility together,
+// maintaining the invariant that the word is shown exactly while
+// s_alt_water is true (see that static's own comment).
+static void alt_show_setpoint(void)
+{
+    s_alt_water = false;
+    render_numeral(s_shown_dc);
+    lv_obj_set_style_text_color(s_temp_lbl, PAL()->ink_primary, 0);
+    lv_obj_add_flag(s_water_word, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void alt_show_water(void)
+{
+    s_alt_water = true;
+    char t[8];
+    render_value(s_actual_dc, t, sizeof t);
+    lv_label_set_text(s_temp_lbl, t);
+    lv_obj_set_style_text_color(s_temp_lbl, s_level_accent, 0);
+    lv_label_set_text(s_water_word, "WATER");
+    lv_obj_set_style_text_color(s_water_word, s_level_accent, 0);
+    lv_obj_clear_flag(s_water_word, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Fires every ALT_SETPOINT_MS/ALT_WATER_MS while s_alt_timer exists,
+// flipping the phase — then re-arms itself for whichever period the NEW
+// phase calls for, so the two constants don't have to stay equal (§3a's own
+// note: "if the bench says the setpoint should hold longer... change the
+// two constants"). "The knob wins": while locked, stays on (or returns to)
+// the setpoint phase without advancing — the passive backstop for the lock
+// window; on_knob's own call to alt_show_setpoint() is what makes a knob
+// turn correct the SAME event rather than waiting for this tick.
+static void alt_timer_cb(lv_timer_t *t)
+{
+    bool locked = s_dragging || lv_tick_elaps(s_last_interact_ms) < ALT_KNOB_LOCK_MS;
+    if (locked) {
+        if (s_alt_water) alt_show_setpoint();
+        lv_timer_set_period(t, ALT_SETPOINT_MS);
+        return;
+    }
+    if (s_alt_water) alt_show_setpoint();
+    else             alt_show_water();
+    lv_timer_set_period(t, s_alt_water ? ALT_WATER_MS : ALT_SETPOINT_MS);
+}
+
 /* ---- palette + state application --------------------------------------- */
 // Re-applied from on_state every render (cheap): both device telemetry and a
 // palette swap (day/night) land here, so neither needs its own code path.
@@ -396,6 +523,26 @@ static void apply_palette_and_state(const app_state_t *st)
     s_actual_dc = (z->actual_c >= 0) ? (int)lroundf(z->actual_c * 10.0f) : -1;
     s_level_accent = accent;
     level_render(s_shown_dc);
+
+    // Water alternation (§3a). Idempotent create/delete, exactly like the
+    // chevron pulse above/below handles its own on/off — a night flip, a
+    // side toggle, reaching HOLDING, or losing the water reading all clean
+    // up the same way "leaving minimal" does elsewhere in this function.
+    bool alt_want = minimal && z->on && (kind == ZK_HEATING || kind == ZK_COOLING) && s_actual_dc >= 0;
+    if (alt_want && !s_alt_timer) {
+        s_alt_timer = lv_timer_create(alt_timer_cb, ALT_SETPOINT_MS, NULL);
+    } else if (!alt_want && s_alt_timer) {
+        lv_timer_del(s_alt_timer);
+        s_alt_timer = NULL;
+    }
+    // "The knob wins" (§3a): a state commit (a poll, a night flip) landing
+    // inside the lock window, or one that just made alt_want false, must
+    // not leave a stale water value on screen either — this is the second
+    // of the two enforcement points the spec names (the timer callback is
+    // the other); on_knob's own call is what makes a live knob turn correct
+    // immediately rather than waiting for this function's next run.
+    bool alt_locked = s_dragging || lv_tick_elaps(s_last_interact_ms) < ALT_KNOB_LOCK_MS;
+    if ((!alt_want || alt_locked) && s_alt_water) alt_show_setpoint();
 
     // Side name + identity underline.
     //
@@ -449,7 +596,11 @@ static void apply_palette_and_state(const app_state_t *st)
     // deeply, while the side is off. Off wins over offline: NUM_STANDBY_OPA is
     // quieter than the offline tier, and a zone the user just switched off has
     // less claim on attention than one that merely lost its pad.
-    lv_obj_set_style_text_color(s_temp_lbl, pal->ink_primary, 0);
+    // Color follows whichever phase §3a's alternation is legitimately
+    // showing right now (s_alt_water is only ever true when unlocked and
+    // alt_want held as of the check above) — everything else here is
+    // unchanged from before §3a.
+    lv_obj_set_style_text_color(s_temp_lbl, s_alt_water ? s_level_accent : pal->ink_primary, 0);
     lv_obj_set_style_text_opa(s_temp_lbl,
                               !z->on          ? NUM_STANDBY_OPA :
                               kind == ZK_OFFLINE ? 115 : LV_OPA_COVER, 0);
@@ -462,6 +613,15 @@ static void apply_palette_and_state(const app_state_t *st)
         lv_obj_set_style_text_font(s_temp_lbl, &dial_font_num_140, 0);
         lv_obj_set_size(s_num_box, 340, 160);
         lv_obj_align(s_num_box, LV_ALIGN_CENTER, 0, 0);
+        // s_water_word (§3a) tracks s_num_box's OWN geometry, not the
+        // parent's -- lv_obj_align_to (unlike lv_obj_align/lv_obj_center,
+        // which store a style-level alignment the layout system re-derives
+        // on its own) computes a fixed position once, so it has to be
+        // re-issued here every time the box the label is derived from
+        // moves. Harmless to (re)run even on a render where s_water_word
+        // stays hidden — it's cheap, and keeps position and visibility from
+        // ever having to be kept in sync by hand.
+        lv_obj_align_to(s_water_word, s_num_box, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
     } else {
         lv_obj_set_style_text_font(s_temp_lbl, &dial_font_num_88, 0);
         lv_obj_set_size(s_num_box, 210, 92);
@@ -625,34 +785,6 @@ static void apply_palette_and_state(const app_state_t *st)
     }
 }
 
-// The value passed in is always tenths of °C (dc) — the internal, canonical
-// representation (see dial_state.h). Relative mode shows the nearest
-// −10…+10 level ("+3" / "0" / "-3"); the '+' is the glyph spliced into
-// dial_font_num_88 (level 0 is a bare "0", no sign). Absolute mode shows the
-// dc value directly (a trivial /10 split, exact — no rounding, since it IS
-// the canonical unit) when s_units_c, or dial_dc_to_f() when not (M4 units
-// toggle). °F is display-only math with no bearing on what gets stored or
-// posted: after the Q1 units fix, absolute mode steps in exact whole 1.0°C
-// increments, so the °F numeral now steps IRREGULARLY (e.g. 68, 70, 72, 73,
-// 75 — each is the nearest whole °F to a clean whole-°C value). That
-// irregularity is the correct, expected result of the setpoint actually
-// landing on the pad's own grid every time — do not smooth or interpolate
-// it away here.
-static void render_numeral(int temp_dc)
-{
-    char t[8];
-    if (s_rel) {
-        int lvl = dial_rel_from_dc(temp_dc);
-        if (lvl == 0) snprintf(t, sizeof(t), "0");
-        else          snprintf(t, sizeof(t), "%+d", lvl);   // "+3" / "-3"
-    } else if (s_units_c) {
-        snprintf(t, sizeof(t), "%d.%d", temp_dc / 10, temp_dc % 10);
-    } else {
-        snprintf(t, sizeof(t), "%d", dial_dc_to_f(temp_dc));
-    }
-    lv_label_set_text(s_temp_lbl, t);
-}
-
 static void post_temp_for(zone_idx_t zone, int temp_dc)
 {
     if (zone == s_zone) s_shown_dc = temp_dc;
@@ -714,8 +846,11 @@ static void handle_event_cb(lv_event_t *e)
         return;
     }
 
-    // LV_EVENT_RELEASED / LV_EVENT_PRESS_LOST — end of the drag.
+    // LV_EVENT_RELEASED / LV_EVENT_PRESS_LOST — end of the drag. "The knob
+    // wins" (§3a): starts the post-release lock window here; s_dragging
+    // itself already covered the drag proper.
     s_dragging = false;
+    s_last_interact_ms = lv_tick_get();
     int dc = s_shown_dc;
     if (s_rel) {                          // commit exactly on the relative-level grid
         dc = dial_rel_to_dc(dial_rel_from_dc(dc));
@@ -804,6 +939,9 @@ static void create(lv_obj_t *scr, void *arg)
     s_rel = false;
     s_dragging = false;
     s_arc_min = s_arc_max = -1;   // force configure_arc_range() on this arc
+    s_alt_timer = NULL;           // (re)created by apply_palette_and_state, §3a
+    s_alt_water = false;
+    s_last_interact_ms = 0;       // lv_tick_elaps() of this is huge -> unlocked
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
 
@@ -931,6 +1069,18 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_transform_pivot_x(s_temp_lbl, LV_PCT(50), 0);
     lv_obj_set_style_transform_pivot_y(s_temp_lbl, LV_PCT(50), 0);
     lv_obj_center(s_temp_lbl);
+
+    // Water alternation's "WATER" caption (docs/SPEC-night-face.md §3a) —
+    // a sibling of s_num_box, not a child of it: it sits BELOW the box
+    // (lv_obj_align_to, apply_palette_and_state), not inside it. Hidden
+    // until the first water phase; position is set (and kept current) from
+    // apply_palette_and_state, since it's derived from s_num_box's own
+    // per-render geometry.
+    s_water_word = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_water_word, &lv_font_montserrat_28, 0);
+    lv_label_set_text(s_water_word, "WATER");
+    lv_obj_clear_flag(s_water_word, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_water_word, LV_OBJ_FLAG_HIDDEN);
 
     // #9 Unit.
     s_unit_lbl = lv_label_create(scr);
@@ -1079,6 +1229,13 @@ static void destroy(void)
     if (s_power_btn)  lv_anim_del(s_power_btn, NULL);
     if (s_stale_dot)  lv_anim_del(s_stale_dot, NULL);
 
+    // Water alternation (§3a): delete the timer directly, not via
+    // apply_palette_and_state's own idempotent path — the router is tearing
+    // down this screen's widgets, so there's no s_temp_lbl/s_water_word left
+    // to render into by the time anything would next call that function.
+    if (s_alt_timer) { lv_timer_del(s_alt_timer); s_alt_timer = NULL; }
+    s_alt_water = false;
+
     s_actual_dc = -1;
 
     s_level = NULL;
@@ -1087,7 +1244,7 @@ static void destroy(void)
     s_dragging = false;
     s_arc = s_stale_dot = s_name_lbl = NULL;
     s_underline_solid = s_underline_dash = s_water_lbl = NULL;
-    s_num_box = s_temp_lbl = s_unit_lbl = NULL;
+    s_num_box = s_temp_lbl = s_unit_lbl = s_water_word = NULL;
     s_pill = s_pill_glyph = s_pill_word = NULL;
     s_power_btn = s_power_glyph = NULL;
     s_dot_a = s_dot_b = s_dot_menu = NULL;
@@ -1128,7 +1285,13 @@ static void on_state(const app_state_t *st)
 
     if (!s_dragging) {
         lv_arc_set_value(s_arc, s_shown_dc);
-        render_numeral(s_shown_dc);
+        // Skip while a legitimate (unlocked) water phase (§3a) is actually
+        // on screen — apply_palette_and_state above already forced the
+        // setpoint back up if this render invalidated that phase, so
+        // s_alt_water reaching here true means it's still genuinely showing
+        // water and this call would otherwise stomp it with the setpoint
+        // text until the alternation timer's next tick undid it again.
+        if (!s_alt_water) render_numeral(s_shown_dc);
     }
     // Side name is refreshed in apply_palette_and_state() above, since it
     // depends on zone mode and that is user-settable at runtime. Somnus's
@@ -1141,6 +1304,16 @@ static void on_state(const app_state_t *st)
 static bool on_knob(int detents)
 {
     if (!s_arc || s_shown_dc < 0) return false;
+
+    // "The knob wins" (§3a): every detent restarts the lock window and, if
+    // a water phase happened to be on screen, snaps it back to the setpoint
+    // on THIS event — not the timer's next tick, and not waiting for
+    // apply_palette_and_state to run again. Recorded before the zone-off/
+    // range-stop branches below so it applies even when neither posts a new
+    // setpoint (a turn against a range stop, or against an off zone, still
+    // counts as "the user is acting on this control right now").
+    s_last_interact_ms = lv_tick_get();
+    if (s_alt_water) alt_show_setpoint();
 
     // Powered off: the temperature is not adjustable, so nothing here moves
     // the wedge or posts a setpoint. Turning used to do both against a zone
