@@ -1,27 +1,32 @@
-# orion-dial (ESP-IDF firmware)
+# somnus-dial (ESP-IDF firmware)
 
-Native **ESP-IDF (C)** firmware for the Waveshare ESP32-S3 rotary knob dial.
-This is the product: a standalone device that joins your Wi-Fi, links your
-Orion Sleep account, and drives an Orion dual-zone mattress topper directly —
-no hub, no phone app, no server of ours in between. Everything (Wi-Fi
-provisioning, OAuth 2.1 + Dynamic Client Registration, and MCP-over-HTTPS to
-Orion's servers) runs on the dial itself.
+Native **ESP-IDF (C)** firmware for the Waveshare ESP32-S3 round touch-LCD
+knob — the dial in **Bedknob for Somnus**. It drives a **Somnus Pad** directly
+over the pad's own local HTTP API: three endpoints on your LAN (`GET
+/api/state`, `POST /api/power`, `POST /api/target_t`), no account, no cloud,
+nothing in between. Wi-Fi setup, finding the pad, the whole UI and
+over-the-air updates all run on the dial itself.
 
 ## Just want to use the dial?
 
 Flash it from your browser at
-[https://chris023.github.io/orion-waveshare-rotary-dial/](https://chris023.github.io/orion-waveshare-rotary-dial/)
-— no toolchain needed. After that first flash, every future update arrives
-over the air (Menu → About → Software update), so you shouldn't need
-anything below this point again. The rest of this README covers building
-and modifying the firmware yourself.
+[https://matthewclaude.github.io/somnus-dial-releases/](https://matthewclaude.github.io/somnus-dial-releases/)
+— Chrome or Edge, a **USB-A to USB-C data cable**, click Install. No
+toolchain needed. That flash writes the whole chip and so **always erases** a
+dial's settings; after it, every future update arrives over the air
+(Menu → Update) and keeps your settings. The rest of this README covers
+building and modifying the firmware yourself.
 
 ## Hardware
 
-- **Board:** Waveshare `ESP32-S3-Knob-Touch-LCD-1.8` — round touch LCD +
-  rotary encoder knob, ESP32-S3.
-- **Cable:** USB-C, connected straight to your computer for flashing and
-  serial monitoring. No adapter or extra wiring needed.
+- **Board:** Waveshare `ESP32-S3-Knob-Touch-LCD-1.8` — round 1.8" touch LCD
+  + rotary encoder knob, ESP32-S3, 16 MB flash, 8 MB PSRAM. Parts table in
+  [`../README.md`](../README.md).
+- **Cable:** a **USB-A to USB-C data cable**, straight into your computer,
+  for flashing and serial monitoring. A **C-to-C cable will not work** with
+  this board: it negotiates plug orientation itself, which defeats the
+  orientation trick below. A charge-only cable powers the board and
+  enumerates nothing.
 - **Port:** the board enumerates as a USB-serial device — e.g.
   `/dev/cu.usbmodem2101` on macOS, `/dev/ttyUSB0` or `/dev/ttyACM0` on Linux,
   `COM<N>` on Windows. Pass it to `idf.py` with `-p <PORT>`; if you omit `-p`,
@@ -59,18 +64,25 @@ troubleshooting.
 
 ## Build & flash
 
-With ESP-IDF installed from above, this produces your own build and puts it
-on a dial over USB:
+With ESP-IDF v6.0 installed from above, this produces your own build and
+puts it on a dial over USB:
 
 ```bash
 cd firmware/dial-idf
-idf.py set-target esp32s3     # first time only
 idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-No configuration or secrets file is required — a freshly flashed dial boots
-straight into on-device first-run setup (see below). `build/`,
+**Do not run `idf.py set-target`.** The board configuration (quad flash,
+octal PSRAM, 16 MB, custom partition table) is already in place —
+`sdkconfig.defaults` is tracked and `sdkconfig` is generated from it on the
+first build — and `set-target` regenerates `sdkconfig` from scratch and
+discards that configuration.
+
+A wire flash writes only the bootloader, partition table, OTA data and the
+app (see `build/flash_args`), so unlike the browser flasher it **preserves**
+settings. No configuration or secrets file is required — a freshly flashed
+dial boots straight into on-device setup (see below). `build/`,
 `managed_components/`, and `sdkconfig` are generated (git-ignored); `idf.py`
 recreates them.
 
@@ -80,25 +92,44 @@ fill in your network. `secrets.h` is git-ignored and only pre-seeds NVS the
 first time there are no stored credentials — it changes nothing for anyone
 who doesn't create it.
 
-### Advanced/reference: manual esptool flashing
+### Partition table
 
-Not needed for normal `idf.py flash` development — this is for scripting a
-production flash or understanding what `idf.py flash` does under the hood.
+From [`partitions.csv`](partitions.csv) (16 MB flash, two OTA slots so
+updates ship over the air with rollback). Offsets are the ones the build
+assigns; the CSV leaves them blank.
 
-Each GitHub Release publishes two images: `orion-dial.bin`, the OTA app
-image (what the dial fetches for itself over the air), and
-`orion-dial-merged.bin`, a full-flash image with bootloader + partition
-table + app already combined at their real offsets, meant to be written
-starting at `0x0`. That's the image the browser flasher writes, and you can
-write it yourself the same way with a release download in hand:
+| Name | Type | SubType | Offset | Size |
+|---|---|---|---|---|
+| `nvs` | data | nvs | `0x9000` | 64K |
+| `otadata` | data | ota | `0x19000` | 8K |
+| `phy_init` | data | phy | `0x1b000` | 4K |
+| `ota_0` | app | ota_0 | `0x20000` | 4M |
+| `ota_1` | app | ota_1 | `0x420000` | 4M |
+| `assets` | data | spiffs | `0x820000` | 7936K |
+
+`assets` reserves the tail for future fonts/images without repartitioning
+(repartitioning wipes NVS and forces every flashed unit through setup again).
+
+### Release images and manual esptool flashing
+
+Each GitHub Release (tag `somnus-vX.Y.Z`, published to
+[matthewclaude/somnus-dial-releases](https://github.com/matthewclaude/somnus-dial-releases))
+carries two images:
+
+- **`somnus-dial.bin`** — the OTA app image, what the dial downloads for
+  itself over the air.
+- **`somnus-dial-merged.bin`** — a full-flash image with bootloader +
+  partition table + OTA data + app already combined at their real offsets,
+  written starting at **`0x0`**. That's the image the browser flasher
+  writes, and you can write it yourself the same way:
 
 ```bash
-python -m esptool --chip esp32s3 -p <PORT> -b 921600 write-flash 0x0 orion-dial-merged.bin
+python -m esptool --chip esp32s3 -p <PORT> -b 921600 write-flash 0x0 somnus-dial-merged.bin
 ```
 
 If you're building locally and want to reproduce what `idf.py flash` does
-with a manual `esptool` invocation instead, the individual offsets come from
-[`partitions.csv`](partitions.csv) and `build/flash_args` after a build:
+with a manual `esptool` invocation, the offsets come from the table above
+and `build/flash_args`:
 
 ```bash
 python -m esptool --chip esp32s3 -p <PORT> -b 921600 \
@@ -107,108 +138,65 @@ python -m esptool --chip esp32s3 -p <PORT> -b 921600 \
   0x0     build/bootloader/bootloader.bin \
   0x8000  build/partition_table/partition-table.bin \
   0x19000 build/ota_data_initial.bin \
-  0x20000 build/orion-dial.bin
+  0x20000 build/somnus-dial.bin
 ```
 
 Prefer `idf.py -p <PORT> flash` for everyday development — it derives these
 offsets itself and is far less likely to go stale if the partition table
 ever changes.
 
+## Components
+
+One line each, as they exist in [`components/`](components/):
+
+- `dial_display` — QSPI panel (SH8601) + touch + LVGL bring-up; owns the LVGL task and lock.
+- `dial_haptics` — DRV2605 LRA effects from a small dedicated task, with the Off / Low / High / Auto strength clamp and NVS-cached autocal.
+- `dial_knob` — rotary encoder decoding (`bidi_switch_knob`, Espressif `iot_knob` lineage).
+- `dial_net` — Wi-Fi bring-up, NVS-backed credentials, the SoftAP captive portal and network scan.
+- `dial_ota` — GitHub Releases version check + `esp_https_ota` download/apply/rollback.
+- `dial_pad_discovery` — subnet scan that finds the pad when its address is unknown or has moved.
+- `dial_power` — idle-driven backlight dimming/standby, day/night/night-clock duty tables, wake-consumes-first-input.
+- `dial_somnus` — the pad client: the three local HTTP API calls, zone-mode write guard, last-error text.
+- `dial_state` — the single mutex-protected app-state snapshot, the UI→worker command queue, NVS-backed preferences.
+- `dial_time` — SNTP plus an embedded IANA→POSIX timezone table, persisted so the clock survives reboots.
+- `dial_ui` — screen router (`ui_router`) and one `scr_*.c` per screen.
+- `i2c_bsp` — the shared I²C bus (touch controller and haptics driver).
+- `lcd_bl_pwm_bsp` — backlight PWM.
+- `lcd_touch_bsp` — CST816 touch controller.
+
+How they fit together is in [`../../docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md).
+
 ## First boot
 
-A freshly flashed (or factory-reset) dial walks through setup on the device
-itself:
+The full walkthrough is in the [root README](../../README.md#first-boot-on-the-dial).
+In short, a freshly flashed (or factory-reset) dial does setup on the
+device itself:
 
-1. **Welcome.** A splash screen ("ORION DIAL — Turn the knob or tap to
-   begin"). Any tap dismisses it; the dial is already working in the
-   background from this point on.
-2. **Wi-Fi.** The dial can't reach anything until it has your network, and it
-   offers two ways to give it that — pick whichever is easier:
-   - **From your phone:** the dial's screen names a temporary network (something
-     like `OrionDial-XXXX`). Join it from your phone's Wi-Fi settings, and a
-     setup page opens on its own (it hijacks DNS so most phones pop the page
-     automatically); if it doesn't, open any page in a browser. Pick your home
-     network from the list and enter its password.
-   - **On the dial:** tap "Set up on the dial" to skip the phone entirely.
-     Turn the knob to pick your network from a scanned list, then use the
-     on-screen character wheel to type the password: spin the knob to a
-     letter/digit/symbol, tap the checkmark to add it to the password, and tap
-     the Wi-Fi glyph to connect. There's a backspace disc too. A wrong
-     password sends you right back to this screen for the same network with
-     a message, not back to square one.
+1. **Welcome.** A splash screen; any tap dismisses it.
+2. **Wi-Fi.** The dial can't reach anything until it has your network, and
+   offers two ways to give it that:
+   - **From your phone:** the dial names a temporary network (`SomnusDial-XXXX`).
+     Join it from your phone's Wi-Fi settings and a setup page opens on its
+     own (it hijacks DNS so most phones pop the page automatically); if it
+     doesn't, open any page in a browser. Pick your home network and enter
+     its password. The page also passes your phone's timezone to the dial.
+   - **On the dial:** tap "Set up on the dial" to skip the phone. Turn the
+     knob to pick your network from a scanned list, then type the password
+     with the on-screen character wheel. A wrong password sends you back to
+     this screen for the same network with a message, not to square one.
 
    2.4 GHz only — this hardware doesn't support 5 GHz networks.
-3. **Link your Orion account.** Once Wi-Fi is up, the dial shows a QR code —
-   scan it **with your phone on the same Wi-Fi network** as the dial. That
-   opens Orion's own consent page in your phone's browser; approve it there.
-   The dial is watching for the callback on your LAN and picks up the link
-   automatically — nothing to type back in on the dial itself. If your phone
-   is on a different network (e.g. still on cellular), the dial can't receive
-   that callback and the QR will effectively hang; switch your phone to the
-   same Wi-Fi and rescan.
-4. **Pick a side.** On a dual-zone topper, the dial asks "Which side of the
-   bed?" once, right after linking — tap the half of the screen for your
-   side. (Skipped entirely on a single-zone topper — there's only one side to
-   show.)
-5. **The dial screen.** From here on the dial shows the live temperature
-   dial for your side, with a swipe to the partner's side and to the menu.
-
-## Everyday use
-
-- **Knob:** turn to adjust the target temperature on the dial screen; turn on
-  other screens (menus, network/password pickers) to move focus or dial in a
-  value. Turning is deliberately silent — the encoder's own mechanical
-  detents are the feedback — but hitting the end of a range gives a distinct
-  stop pulse.
-- **Touch:** tap the power button on the dial screen to turn that side on/off;
-  long-press it to open the Schedule/Hold picker. Tap the snowflake or flame
-  icon sitting at either end of the temperature arc to start a timed boost
-  (cool or heat). Tap the status pill above the power button — it reads
-  "Holding" or "Until H:MM" depending on whether your last change rides until
-  you touch it again or only until the schedule's next step — to jump straight
-  to that same Schedule/Hold picker; while a boost is running it instead shows
-  that boost's end time and an ✕ that cancels it. Swipe left/right to move
-  between your side, your partner's side, and the menu. Swipe right on any
-  menu sub-screen (or tap its "Back" row) returns to the menu.
-- **Menu → Settings:** adjustment mode (Schedule/Hold — the default for what a
-  dial-side change does), **Brightness** (its own sub-screen: separate Day,
-  Night (in use), and Night (clock) levels, each a full-screen 0–100% picker
-  you can drag or turn — Night (clock) at 0 reads "Off", and off means off:
-  the standby clock goes fully dark, and a touch or a knob turn still wakes
-  the dial), screen timeout (5s/15s/30s/1m before the standby clock takes over),
-  temperature scale (Absolute °F/°C, or Orion's −10…+10 relative levels), units
-  (°C/°F, used for the absolute readouts), haptics (Off / Low / High / Auto —
-  Auto is High by day and Low at night), screen rotation, Away mode, and two
-  destructive actions guarded by a tap-twice-within-3-seconds confirm
-  ("Tap again to confirm"): **Re-link Orion** (forgets the stored Orion
-  tokens and restarts into the link step) and **Factory reset** (erases all
-  stored state and restarts as a fresh device).
-- **Menu → Wi-Fi:** current network, IP, and signal strength, plus **Change
-  network** — a full confirmation screen (not tap-twice) since it reboots the
-  dial straight into Wi-Fi setup, dropping the current network in the
-  process.
-- **Menu → Update:** the one place update behavior lives — the installed
-  version, **Check for updates** (tap to check, tap-twice to install),
-  **Auto-update** (Off / Overnight), **Skip this version** while one is
-  pending, and **Beta builds**. The menu row itself carries a dot and the
-  pending version number whenever an update is waiting.
-- **Menu → About:** firmware version, IDF version, and device serial.
-- **OTA updates:** however the dial got its first flash — browser or
-  USB — everything after that arrives OTA. The dial checks this repo's GitHub
-  releases every 6 hours for a newer firmware build (a `dial-vX.Y.Z` tag with
-  an `orion-dial.bin` asset — releases also carry an `orion-dial-merged.bin`
-  full-flash image, but that's for reflashing from scratch, not for OTA; see
-  Build & flash above). Turning on **Beta builds** makes it consider
-  prereleases too.
-
-  When one is found you get an "Update available" line on the dial and
-  standby faces, and — at most once a day, only when you wake the screen, and
-  never during your sleep window — a sheet offering to install it right then.
-  Nothing installs without a tap unless you turn **Auto-update** on, in which
-  case it runs unattended in a quiet window after your scheduled wake time and
-  leaves the screen dark while it does. Every install path is rollback-guarded:
-  if the new firmware doesn't come up and confirm itself, the bootloader
-  reverts to the one that worked.
+3. **Timezone.** If the setup page couldn't supply one (some phone browsers
+   don't), the dial shows a short picker the first time it reaches the pad.
+4. **Finding the pad.** The dial probes the last known address, then scans
+   your subnet for anything answering `/api/state` on port 8080. No IP to
+   type. If it finds nothing, Settings → Pad Address takes one by hand.
+5. **Bed Mode.** Settings → Bed Mode: **One Bed** or **Dual Sides**, matching
+   the toggle in the Somnus app. The pad's API cannot report this, so the
+   dial trusts you and names the mode on the face. In Dual Sides mode a
+   fresh dial also asks "Which side of the bed?" once.
+6. **The dial screen.** From here on: the live temperature dial, with a
+   swipe to the other side (Dual Sides) and to the menu.
 
 ## Troubleshooting / FAQ
 
@@ -219,73 +207,41 @@ itself:
   **2.4 GHz only** — it cannot join 5 GHz-only networks. If your router
   broadcasts both bands under one SSID, make sure the 2.4 GHz radio is
   actually enabled.
-- **The Orion QR code doesn't seem to do anything after I scan it.** Your
-  phone almost certainly isn't on the same Wi-Fi network as the dial — the
-  dial listens for the OAuth callback on its own LAN, so a phone on cellular
-  data or a different network can approve the consent page but the dial will
-  never see it land. Put your phone on the same network as the dial and scan
-  again.
-- **The dial is stuck on "Connecting to Wi-Fi..." / "Orion unreachable."**
-  These screens show the actual error and a retry countdown; the dial keeps
-  retrying with backoff on its own. If it's stuck for more than a few
-  minutes, double-check the network/password, then consider a factory reset
-  (below).
+- **The dial is stuck on "Connecting…" / "Pad unreachable".** Those screens
+  show the actual error and a retry countdown; the dial keeps retrying with
+  backoff and rescans the subnet every few minutes. Menu → Wi-Fi → Change
+  network, Menu → Update → Check for updates and Settings → Factory reset
+  all work while the dial is in this state. If the pad never answers,
+  confirm its local API is enabled and that it is on the same 2.4 GHz
+  network; `curl http://<pad-ip>:8080/api/state` from a laptop is the quick
+  test.
 - **Factory reset (from the dial):** Menu → Settings → Factory reset, tap
   twice within 3 seconds to confirm. This erases all stored Wi-Fi
-  credentials, Orion tokens, and preferences, and restarts the dial as if
-  freshly flashed.
+  credentials, the pad address, timezone and preferences, and restarts the
+  dial as if freshly flashed.
 - **Recovering a bricked/misbehaving unit:** if the dial won't boot cleanly
   or a factory reset from Settings isn't reachable, the easy path is the
-  [browser flasher](https://chris023.github.io/orion-waveshare-rotary-dial/)
-  again — choose the option to erase the device before installing, for a
-  clean slate. No toolchain needed, and it works the same whether or not
-  you built this yourself. The developer equivalent, from a checkout with
-  ESP-IDF set up:
+  [browser flasher](https://matthewclaude.github.io/somnus-dial-releases/)
+  again — it always erases the whole chip, which is exactly what you want
+  here. The developer equivalent, from a checkout with ESP-IDF set up:
   ```bash
   idf.py -p <PORT> erase-flash flash
   ```
   This repository *is* the factory image for the dial's own ESP32-S3 — there
   is no separate stock firmware to restore it to. (`firmware/backups/` holds
   local flash backups made during hardware bring-up, but that backup is of
-  the companion probe chip used during development, not the dial's own
-  flash — it isn't a path back to a "factory" dial image.) If you want to
-  return the board to Waveshare's own stock demo instead of this project,
-  see Waveshare's wiki for the `ESP32-S3-Knob-Touch-LCD-1.8` product.
+  the companion chip, not the dial's own flash — it isn't a path back to a
+  "factory" dial image.) If you want to return the board to Waveshare's own
+  stock demo instead of this project, see Waveshare's wiki for the
+  `ESP32-S3-Knob-Touch-LCD-1.8` product.
 - **Filing a bug report:** run `idf.py -p <PORT> monitor` while reproducing
-  the issue and include the log output — most failures (Wi-Fi, OAuth, MCP
-  calls) log a specific reason on this console.
-
-## Status
-
-Implemented and working end-to-end:
-
-- Display/touch/knob bring-up (SH8601 QSPI LCD + LVGL, CST816 touch, `iot_knob`
-  rotary encoder).
-- On-device Wi-Fi provisioning: phone captive portal *and* a fully on-device
-  network picker + character-wheel password entry, with rejected-password
-  recovery and reconnect-with-backoff.
-- OAuth 2.1 (Dynamic Client Registration, PKCE, QR-code interactive consent,
-  NVS token storage, 401-triggered refresh) against Orion's MCP server.
-- MCP-over-HTTPS device control: reading live zone state, setting
-  temperature/on-off, thermal-relief boost, away mode, and the sleep
-  schedule that times overnight temperature writes.
-- Onboarding flow (welcome splash → Wi-Fi → OAuth link → side pick → dial),
-  a menu face with Settings/Wi-Fi/About sub-screens, day/night
-  palette, haptics, screen rotation, and single- vs. dual-zone topper
-  support.
-- OTA updates from this repo's GitHub releases, with bootloader
-  rollback/rollback-confirm on a bad update.
-
-Open items / known gaps:
-- Access-token expiry is inferred from a 401 on the next call, not tracked
-  against `expires_in` — functional, but not the most efficient path.
-- No automated test suite for this firmware (unlike the archived TypeScript
-  hub); changes are verified by building, flashing, and exercising the
-  device.
+  the issue and include the log output — most failures (Wi-Fi, the pad
+  connection, update checks) log a specific reason on this console.
 
 ## Provenance
 
-The hardware bring-up (`components/`, `main/main.c`, `partitions.csv`,
+The hardware bring-up (`components/dial_display`, the three `*_bsp`
+components, `main/main.c`'s panel init, `partitions.csv`,
 `components/dial_display/user_config.h`) is derived from Waveshare's official
 `ESP32-S3-Knob-Touch-LCD-1.8` ESP-IDF demo (`08_LVGL_Test` for display + touch
 + LVGL, `04_Encoder_Test` for the knob). Modifications for ESP-IDF **v6.0**:
@@ -304,7 +260,9 @@ this panel via the SH8601 driver + a custom init sequence in `main.c`); touch
 is the CST816 on I2C (SDA=GPIO11/SCL=GPIO12); the knob is `iot_knob` on
 GPIO8/7.
 
-Everything above `components/` and `main/` — Wi-Fi provisioning, OAuth 2.1,
-MCP client, and the whole dial UI (`components/dial_ui/`) — was written for
-this project from that bring-up baseline; none of it comes from Waveshare's
-demo.
+Everything above that bring-up — Wi-Fi provisioning, the screen router and
+every screen, haptics, power management, the OTA pipeline, timekeeping — is
+inherited from Orion Dial, the project this firmware was forked from; none
+of it comes from Waveshare's demo. `dial_somnus` (the pad client),
+`dial_pad_discovery` (the subnet scan) and the Bed Mode / Pad Address /
+Timezone settings were written for this fork.

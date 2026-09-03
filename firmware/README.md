@@ -1,8 +1,10 @@
 # firmware/
 
 - **[`dial-idf/`](dial-idf/)** — the firmware. Native ESP-IDF (C) for the
-  Waveshare ESP32-S3-Knob-Touch-LCD-1.8 dial: Wi-Fi, OAuth 2.1, and MCP-over-HTTPS
-  all on-device. See [`dial-idf/README.md`](dial-idf/README.md) to build and flash.
+  Waveshare ESP32-S3-Knob-Touch-LCD-1.8 dial: Wi-Fi setup, a local HTTP
+  client for the Somnus Pad, subnet scan to find the pad, the UI and
+  over-the-air updates, all on-device. See
+  [`dial-idf/README.md`](dial-idf/README.md) to build and flash.
 - **[`backups/`](backups/)** — local-only flash dumps of specific physical
   units (companion-chip factory image, etc.), for restoring a unit to its
   out-of-box state. The `.bin` files are gitignored; only the README here is
@@ -21,6 +23,8 @@
 | Touch | **CST816** over I²C: SDA=11, SCL=12, INT=9, RST=10 |
 | Haptics | DRV2605 LRA driver @ I²C 0x5A |
 | Audio | PCM5100A I²S DAC + MEMS mic (not used by this firmware) |
+| Flashing cable | **USB-A to USB-C data cable.** A C-to-C cable will not work: it negotiates plug orientation itself, which defeats the board's two-chip USB switch. A charge-only cable powers the board and enumerates nothing. |
+| USB socket | One USB-C socket reaching two chips: the S3 in one orientation (`usbmodem*` / "USB JTAG/serial debug unit" — the one you flash), the companion in the other (`usbserial*`). Rotate the connector 180° in the dial's socket to switch. |
 
 The current firmware ([`dial-idf`](dial-idf/)) is built on Waveshare's own
 `ESP32-S3-Knob-Touch-LCD-1.8` ESP-IDF demo, whose display bring-up uses

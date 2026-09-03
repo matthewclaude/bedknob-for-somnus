@@ -1,162 +1,254 @@
 # Architecture
 
 The dial is a single ESP32-S3 firmware image ([`firmware/dial-idf`](../firmware/dial-idf)).
-There is no server, hub, or MQTT broker in the picture — the device does Wi-Fi
-provisioning, OAuth 2.1, and MCP-over-HTTPS itself, and talks straight to
-Orion's cloud:
+There is no server, hub, account or cloud in the picture — the device joins
+your Wi-Fi and talks plain HTTP to the Somnus Pad on the same LAN:
 
 ```
-knob dial (ESP32-S3)  ──Wi-Fi──►  Orion MCP server (cloud)  ──►  topper
+knob dial (ESP32-S3)  ──Wi-Fi──►  Somnus Pad, http://<pad-ip>:8080  (LAN)
+                                    GET  /api/state
+                                    POST /api/power
+                                    POST /api/target_t
 ```
+
+Those three endpoints are the pad's entire local API
+([`reference/local_api.yml`](../reference/local_api.yml), v0.2.0) and the
+only contract the firmware relies on. The dial's other two peers are
+`pool.ntp.org` for the clock and GitHub for updates.
 
 This doc is a contributor orientation to `main/main.c` and `components/`, not
 a spec — read the source (especially the comment block at the top of
-`main.c`) for the load-bearing details.
+`main.c` and each component's header) for the load-bearing details. The
+numbers below are the constants in the tree as of this writing.
 
-## Boot phases
+## Two tasks and a store
 
-`app_state_t.phase` (`components/dial_state/dial_state.h`) drives both the UI
-router and the worker's own state machine:
-
-1. **`PH_WIFI_CONNECTING`** — joining stored (or seeded) credentials.
-2. **`PH_WIFI_PORTAL`** — no usable credentials; SoftAP + captive portal is
-   up, waiting for the phone (or the on-device network picker + character-wheel
-   password entry) to supply them.
-3. **`PH_WIFI_LOST`** — had a connection, lost it; retrying with backoff.
-4. **`PH_OAUTH_DISCOVER`** — OAuth discovery + Dynamic Client Registration
-   against Orion's MCP server.
-5. **`PH_OAUTH_WAIT_CONSENT`** — a QR code is on screen; waiting for the user
-   to approve the dial in their phone's browser and for the LAN redirect to
-   land.
-6. **`PH_MCP_CONNECTING`** — token in hand; opening the MCP session and
-   discovering the paired Orion device (`list_devices`).
-7. **`PH_READY`** — steady state: the command/poll loop below.
-8. **`PH_DEGRADED`** — network is up but Orion calls are failing; retrying
-   with backoff, most recent error shown on screen.
-
-Every failure is a phase + backoff, never a dead end — there is no state that
-requires a reboot to escape.
-
-## Threading model
-
-Two tasks, deliberately kept from touching each other's data structures
-directly:
+Two tasks, deliberately kept from touching each other's data structures:
 
 - **The LVGL task** (`dial_display`, priority 5, core 1) owns the display,
   touch, and the screen router (`dial_ui`: `ui_router` + one `scr_*.c` per
   screen). It renders from `dial_state` snapshots and never blocks on the
   network.
 - **The worker task** (`worker_task` in `main.c`, priority 3, core 0 — below
-  the LVGL task and on the Wi-Fi/lwIP core, so a TLS handshake can never
-  stall the UI) is the single network task: Wi-Fi bring-up, then a
-  supervisor loop through OAuth and MCP, then the steady-state
+  the LVGL task and on the Wi-Fi/lwIP core) is the single network task:
+  Wi-Fi bring-up, then the pad connect loop, then the steady-state
   command/poll loop. It never touches LVGL.
 
-The two meet only through `dial_state`: the worker commits state (bumping a
-generation counter), the router's dispatcher timer notices the change and
-re-renders. Knob detents flow the other way — the encoder's `esp_timer`
-callback only feeds an atomic accumulator that the dispatcher drains into the
-active screen; it never calls into the router or LVGL directly, because it
-must stay fast enough not to stall `lv_tick_inc`.
+They meet only through **`dial_state`**, a single `app_state_t` snapshot
+behind a mutex. The worker commits changes with `dial_state_commit()`, which
+bumps a generation counter; the router's dispatcher timer notices the change
+and re-renders the active screen from a fresh copy. Knob detents flow the
+other way — the encoder's `esp_timer` callback only feeds an atomic
+accumulator that the dispatcher drains into the active screen, and every
+input (knob or touch) stamps `dial_state_stamp_input()`, which the worker's
+poll gate reads.
 
-In the steady state, the worker drains queued UI commands (coalescing
-same-zone writes), and separately polls the device back — gated so a poll can
-never land mid-interaction: it waits for a quiet period after the last input,
-then reads at a fast cadence right after a write (the bed takes a few seconds
-to actually respond) and falls back to an idle cadence otherwise.
+Screens talk to the worker through the **UI→worker command queue** in
+`dial_state`: `xQueueCreate(16, …)`, and when it is full `dial_cmd_post()`
+drops the **oldest** entry to make room for the newcomer (a knob spin must
+end on its last value, not its first). Command kinds (`cmd_kind_t`):
+`CMD_SET_TEMP` and `CMD_TOGGLE_ON` (the hot pair, coalesced per zone),
+`CMD_WIFI_RESET`, `CMD_FACTORY_RESET`, `CMD_OTA_CHECK`, `CMD_OTA_APPLY`,
+`CMD_OTA_CLEAR_FAILED`, `CMD_PAD_SETTINGS_CHANGED`, `CMD_TZ_CHANGED`.
 
-## Components
+Two smaller tasks exist off the hot paths: `dial_haptics` plays DRV2605
+effects from its own queue-fed task so nobody blocks on I²C, and
+`dial_pad_discovery` spawns and joins a few short-lived probe tasks while the
+worker waits.
 
-| Component | Role |
-|---|---|
-| `dial_display` | QSPI panel + touch + LVGL bring-up; owns the LVGL task and lock |
-| `dial_knob` | Rotary encoder decoding (`bidi_switch_knob`) |
-| `dial_state` | The single state snapshot, UI→worker command queue, NVS-backed prefs |
-| `dial_ui` | Screen router + all `scr_*` screens (connecting, Wi-Fi portal/picker/passkey, OAuth QR, dial, menu, settings, adjustment mode, brightness menu + picker, standby, boost, update, update prompt, updating, about, error, welcome, side-pick) |
-| `dial_net` | Wi-Fi bring-up, credential storage, SoftAP portal, network scan |
-| `dial_oauth` | OAuth 2.1 discovery, Dynamic Client Registration, PKCE authorize/token, refresh |
-| `dial_mcp` | Raw MCP-over-HTTP client (JSON-RPC `tools/call`, session id, SSE parsing) |
-| `dial_ota` | GitHub Releases version check + `esp_https_ota` download/apply/rollback |
-| `dial_haptics` | DRV2605 LRA effects (tick / stop / confirm / error), queued off the hot paths; per-play strength clamp (Off / Low / High / Auto) and a mute the router holds across knob dispatch |
-| `dial_power` | Idle-driven backlight dimming/standby + "first input after wake is consumed" rule; day/night/night-clock duty tables and the sleep inhibit sources (a screen the user is mid-task on, or a long operation in flight) |
-| `dial_time` | SNTP + IANA→POSIX timezone resolution, so the clock survives reboots |
-| `i2c_bsp`, `lcd_bl_pwm_bsp`, `lcd_touch_bsp` | Low-level board bring-up (I2C bus, backlight PWM, touch controller) shared by the above |
+## The pad client: `dial_somnus`
+
+`dial_somnus` is the **single, non-reentrant pad client**, called only from
+the worker task. It has no session to keep: every call is one
+`esp_http_client` request with a 5 s timeout against the persisted base URL
+(Settings → Pad Address; the compiled fallback is only the spec's example
+address and is never a real pad). `dial_somnus_connect()` is a real `GET
+/api/state` used as a reachability probe; `dial_somnus_get_state()` parses
+both sides plus the pad's `error` flag; `dial_somnus_set_temp()` and
+`dial_somnus_set_power()` POST one side each. A failed read leaves the
+last-known-good state untouched.
+
+**Zone mode is a user setting because the API cannot report it.** The Somnus
+app has a One Bed / Dual Sides toggle, but nothing in `/api/state` says which
+mode the pad is in, and in One Bed mode the spec declares writes to `side1`
+undefined (the pad mirrors `side0` to `side1` itself). So the dial keeps its
+own Bed Mode preference (Settings → Bed Mode, NVS-backed via
+`dial_state_get/set_zone_mode`), applies it with `dial_somnus_set_zone_mode()`,
+and **in single-zone mode never writes `side1`** — `set_temp` and `set_power`
+for `side1` return success without a network call, and that skip is not
+reported as an error. Reads always fetch both sides; in One Bed mode `side1`
+simply mirrors `side0`, which is harmless to read.
+
+## Finding the pad: `dial_pad_discovery`
+
+The pad advertises no mDNS or SSDP, so when the persisted address fails the
+worker runs a **subnet scan** (`docs/SPEC-pad-discovery.md`). This is a
+separate probe path, not `dial_somnus`: the client above is one instance and
+non-reentrant, and the scan needs several probes in flight. Each probe is its
+own short-lived `esp_http_client`, four at a time, against port 8080 on an
+ordered candidate list (the failed address's neighbourhood, the dial's own
+DHCP neighbourhood, the conventional static and DHCP ranges, then everything
+else); `/24` or tighter only, 256 hosts max. Pass 1 uses a 300 ms timeout;
+only if that finds nothing does pass 2 sweep again at 600 ms, so the worst
+case is about 57.6 s. A hit is validated by decoding the response as the
+pad's `/api/state` JSON, never by trusting a 200 alone. The first failure
+after boot always scans; after that a 5-minute cooldown keeps an unreachable
+pad from having its subnet swept on every retry. A found address is
+persisted, and the connect loop picks it up on its next iteration.
+
+## The worker's connect loop
+
+After `dial_net_bringup()` returns with an IP and `dial_time_start()` has
+kicked off SNTP, the worker loops until it can reach the pad:
+
+1. Re-read the persisted pad URL (so a Settings change during the loop takes
+   effect), set `PH_SOMNUS_CONNECTING`, and probe it with
+   `dial_somnus_connect()`. Success breaks the loop.
+2. On failure, if `dial_pad_discovery_should_attempt()` says so, set
+   `PH_PAD_DISCOVERY` and run the scan. A hit is persisted and the loop
+   retries immediately, skipping the backoff.
+3. Otherwise set `PH_DEGRADED` with the pad's last error and call
+   `backoff_wait()`: 5 s, doubling each round to a 60 s cap.
+
+`backoff_wait()` is not a sleep. It publishes a countdown for the error
+screen **and services the command queue** between attempts, which is what
+makes Change network, Factory reset and Check for updates work while a dial
+is stuck: `CMD_WIFI_RESET` and `CMD_FACTORY_RESET` write NVS and reboot;
+the OTA commands run against `dial_ota` (Wi-Fi is up; the download can never
+overlap the scan because both happen on this one task); `CMD_TZ_CHANGED`
+applies a zone; `CMD_PAD_SETTINGS_CHANGED` cuts the wait short and resets the
+backoff so the next probe uses the new address at once; `CMD_SET_TEMP` and
+`CMD_TOGGLE_ON` are discarded, since there is no pad to write to and a
+minutes-old knob position would be worse than nothing.
+
+Once the probe succeeds the worker re-reads Bed Mode from the store (not a
+capture taken before the loop), applies it to `dial_somnus`, seeds the pad's
+fixed setpoint range (12.0–42.3 °C, from the spec; there is no discovery
+call to report it), takes a first poll, and sets `PH_READY`.
+
+## The steady-state loop
+
+Each tick waits up to 300 ms on the command queue, then decides whether to
+poll.
+
+- **Commands.** A rare command (anything but the hot pair) is handled at
+  once by `handle_immediate_cmd()`, and the poll is marked due immediately
+  with the fast-confirm count re-armed. A burst of `CMD_SET_TEMP` /
+  `CMD_TOGGLE_ON` is coalesced per zone — at most one net power change and
+  the final temperature — before being written to the pad.
+- **Poll cadence.** `GET /api/state` runs at most every **10 s** when idle
+  (`POLL_INTERVAL_US`). Right after any write it runs every **2 s** for
+  **3** rounds (`POLL_CONFIRM_US`, `POLL_CONFIRM_N`), because the bed takes a
+  few seconds to actually start heating or cooling and a 10 s cadence would
+  insist nothing is happening. Both cadences sit behind a quiet gate: no
+  poll runs until there has been no user input for **2.5 s**
+  (`KNOB_SETTLE_US`), so a read can never land mid-spin.
+- **Failure handling.** Wi-Fi down sets `PH_WIFI_LOST` and waits for
+  `dial_net`'s own reconnect. Three consecutive failed polls set
+  `PH_DEGRADED`; the next good poll sets `PH_READY` again. Neither leaves
+  the steady-state loop, and no state requires a reboot to escape.
+- **Housekeeping on the same tick:** the 21:00–07:00 night-mode flip, the
+  standby/backlight level from `dial_power`, the 6-hourly automatic update
+  check, the auto-update window (below), and clearing a stale OTA failure
+  after about 25 s so the Update row never wedges.
+
+A poll result is committed through a snapshot that also remembers when the
+request started; a poll that predates the user's latest input is not allowed
+to overwrite the optimistic value the face is already showing.
+
+## Phases
+
+`app_state_t.phase` (`conn_phase_t` in `dial_state.h`) drives both the UI
+router and the worker's state machine: `PH_BOOT`, `PH_WIFI_CONNECTING`,
+`PH_WIFI_PORTAL` (SoftAP + captive portal up), `PH_WIFI_LOST`,
+`PH_SOMNUS_CONNECTING` (probing the persisted address), `PH_PAD_DISCOVERY`
+(the scan is running — a real, long phase, not a blip), `PH_READY`, and
+`PH_DEGRADED` (network up, pad calls failing, retrying with backoff). Every
+failure is a phase plus a backoff, never a dead end.
+
+## The UI task and `nav_policy`
+
+The router (`ui_router.h`) creates one LVGL screen per view on enter and
+destroys it on exit, driven by a small vtable per screen (`create`,
+`destroy`, `on_state`, `on_knob`, `on_gesture`). Every router entry point
+runs in the LVGL task; screens never take the LVGL lock themselves.
+
+`nav_policy()` in `main.c` is the one function that decides which screen the
+current state demands, consulted by the dispatcher on every state change. In
+outline: a fresh device shows the welcome splash before Wi-Fi is up;
+`PH_WIFI_PORTAL` shows the portal instructions (with the on-device network
+picker and password wheel reachable from it); `PH_PAD_DISCOVERY` has its own
+live-progress screen; the other pre-ready phases show the connecting or
+error screen with the retry countdown. An OTA download takes the whole
+screen over regardless of phase. Two setup gates fire only at `PH_READY`:
+the **timezone picker** when no zone has ever been applied (an iPhone-
+provisioned dial has none — `docs/SPEC-timezone-source.md`), and the
+**side pick** on a fresh Dual Sides dial. Once a user is on a screen they
+chose deliberately (Settings, the update sheet, a picker), a routine poll
+landing is not allowed to yank them off it.
+
+Screens in the tree: connecting, pad discovery, Wi-Fi portal, network pick,
+passkey, dial, menu, standby clock, error, welcome, side pick, settings,
+timezone, pad address, adjust mode, brightness menu and picker, Wi-Fi,
+about, update, updating, update prompt.
+
+## Updates: `dial_ota`
+
+`dial_ota` checks the **public releases repo**
+`matthewclaude/somnus-dial-releases` over the GitHub API —
+`/releases/latest` normally, the `/releases?per_page=5` list when **Beta
+builds** is on so prereleases count — compares the tag (prefix `somnus-v`)
+against the running `esp_app_get_description()->version` semver-aware, and
+on a newer release records the `somnus-dial.bin` asset URL. Applying is
+`esp_https_ota` into the inactive OTA slot, following GitHub's redirect to
+`objects.githubusercontent.com`; TLS on both hosts verifies against an
+embedded multi-root PEM. The bootloader's rollback is enabled
+(`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`): a freshly installed image stays
+provisional until the worker's first successful pad poll, or a 30 s
+stable-boot fallback timer, marks it valid; otherwise the next reset reverts.
+
+The automatic check runs every 6 hours. Discovery is deliberately split: an
+ambient "Update available" line on the dial and standby faces, and a one-tap
+prompt sheet raised at most once a day and only on a wake edge. **Auto-update**
+(off by default) installs unattended in a fixed 09:00–11:00 window, only at
+`PH_READY`, outside night mode, after 30 minutes without input, at most once
+per window, and backs off a version that has failed twice.
+`docs/SPEC-update-prompt.md` and `docs/SPEC-ota-readiness.md` are the design
+records.
+
+## Time: `dial_time`
+
+`dial_time_start()` starts `esp_netif_sntp` against `pool.ntp.org` and
+restores the persisted POSIX TZ rule. Zones are set by IANA name
+(`dial_time_set_iana_tz()`), resolved through an **embedded copy of the
+posix_tz_db zones table** (about 400 zones) to a POSIX rule that is applied
+with `setenv("TZ")`/`tzset()` and persisted in NVS namespace `time` as both
+`posix_tz` and `iana_tz`. The name arrives either from the Wi-Fi setup page
+(the phone's browser fills a hidden field) or from the dial's own picker,
+which offers a short curated list (`DIAL_TZ_IANA` in `dial_state.h`) because
+400 rows is not a knob-scrollable list. Because `setenv("TZ")` is global libc
+state that the worker reads on every tick, a zone picked on the LVGL task is
+routed through `CMD_TZ_CHANGED` and applied on the worker.
 
 ## Where state lives
 
-Everything persists to **NVS**, split by namespace so a factory reset or a
-single feature's bug can't corrupt unrelated state:
+Everything persists to **NVS**, split by namespace:
 
 | NVS namespace | Owner | Holds |
 |---|---|---|
-| `wifi` | `dial_net` | SSID/password |
-| `oauth` | `dial_oauth` | Registered client id, tokens, PKCE verifier |
-| `ui` | `dial_state` | Side (`zone`), °F/°C (`units`), temperature scale (`relmode`), screen rotation (`rot`), adjustment mode (`sched_follow`), haptics level, the three brightness levels (`bri_day2` / `bri_nite2` / `bri_nclk`), screen timeout (`scr_to`), and the update prefs (`beta`, `ota_auto`, `ota_defer`, `ota_skip`, `ota_shown`) |
-| `haptics` | `dial_haptics` | Calibrated LRA autocal results, so the driver skips recalibration on every boot |
-| `time` | `dial_time` | Resolved POSIX TZ string |
+| `wifi` | `dial_net` | SSID/password, the "setup requested" flag |
+| `ui` | `dial_state` | Pad address (`pad_url`), Bed Mode (`pad_1zone`), side (`zone`), °F/°C (`units`), temperature scale (`relmode`), rotation (`rot`), adjustment mode (`sched_follow`), haptics level, the three brightness levels (`bri_day2` / `bri_nite2` / `bri_nclk`), screen timeout (`scr_to`), and the update prefs (`beta`, `ota_auto`, `ota_defer`, `ota_skip`, `ota_shown`) |
+| `haptics` | `dial_haptics` | DRV2605 autocal results, so the driver skips recalibration on every boot |
+| `time` | `dial_time` | `posix_tz` and `iana_tz` |
 
-Factory reset clears these namespaces and reboots into `PH_WIFI_PORTAL` as a
-fresh device.
+Factory reset erases all of NVS and reboots into the Wi-Fi portal as a fresh
+device.
 
-## Temperature scale
+## Temperature units
 
-The setpoint is carried internally as whole **°F** everywhere (`ui_temp_f`,
-`CMD_SET_TEMP.temp_f`); Orion's wire is always **°C**, converted only at the
-`set_zone` boundary in the worker. Two display scales sit over that carrier:
-
-- **Absolute** — °F (or °C for display when the Units pref is set). Arc range
-  55–110 °F, one detent = 1 °F. Unchanged from earlier releases.
-- **Relative** — Orion's own **−10…+10 level** scale (its third
-  `temperature_scale` table). Arc range widens to the device's full 50–113 °F
-  so all 21 levels are reachable; one detent = one level. The 21 carrier °F and
-  their nearest-level boundaries are compiled constants in `dial_state.h`
-  (`DIAL_REL_F` / `DIAL_REL_LO_F`), each chosen so its °C lands strictly inside
-  that level's bracket — a device poll can therefore never move the displayed
-  level. `orion_discover_device` re-validates them against the live
-  `temperature_scale.relative` on every link-up and logs loudly on any drift.
-
-The scale is a per-device preference (`ui`/`relmode`): fresh dials default to
-relative, dials upgrading from ≤v1.0.6 stay absolute (the big number must not
-change meaning under an unattended OTA). Two invariants govern the dial face:
-
-1. **Snap on intent, never on observation.** The setpoint is written only from
-   a real input event (knob detent, arc release); rendering derives a level
-   from the device value and displays it, but never writes back — so the number
-   and the bed always move together, or not at all.
-2. **Setpoints render in the active scale; measurements render in absolute.**
-   The hero numeral and the sleep schedule are setpoints (levels in relative
-   mode). The measured **water** temperature is a continuum reading and stays a
-   real degree (°F/°C) in every mode, keeping an absolute reference on screen.
-
-## Orion MCP call surface
-
-The worker talks to Orion's MCP server (`dial_mcp_call_tool`) with these
-tools: `list_devices` (device discovery on link-up), `get_device_state`
-(poll), `set_zone` / `set_zones` (temperature + power writes), `start_thermal_relief`
-/ `cancel_thermal_relief` (boost), `get_sleep_schedules`,
-`override_sleep_schedule_tonight` / `revert_sleep_schedule_override`, and
-`set_away`. See [ORION_MCP.md](ORION_MCP.md) for how these were discovered
-and their auth model.
-
-## Updates
-
-`dial_ota` checks `chris023/orion-waveshare-rotary-dial`'s GitHub Releases for
-a tag matching the firmware's version scheme, and applies it over the air into
-the inactive OTA partition. The check runs every 6 hours, plus on demand from
-the Update screen (Menu > Update). The interval carries a per-device offset
-derived from the MAC so a few thousand dials don't all hit the API on the same
-tick. Enabling **Beta builds** widens the query from `/releases/latest` (which
-excludes prereleases) to the full release list.
-
-Discovery is deliberately split in two, because this is a bedside device:
-
-- An **ambient "Update available" line** on the dial and standby faces —
-  unconditional whenever an update exists and it is not night.
-- A **one-tap prompt sheet**, raised at most once a day and only on a wake
-  edge (a human is provably present), never inside the sleep window.
-
-**Auto-update** (off by default) installs unattended in a quiet window after
-the schedule's wake time, and keeps the display dark while it runs. In every
-path — manual, prompted, or unattended — the bootloader rolls the image back
-automatically unless the new firmware confirms itself after a stable boot.
-`docs/SPEC-update-prompt.md` is the design record for all of the above.
+The pad's wire is **°C** with fractional targets allowed (spec range
+12.0–42.3). The dial carries setpoints internally in **tenths of °C**
+(`temp_dc`), steps one whole degree per detent to match the Somnus app's
+levels, and renders either as a real temperature (°F or °C) or as the app's
+−15…+15 level scale (`docs/SPEC-somnus-relative-scale.md`). Conversion to
+°F, where shown, happens only at the display boundary.
