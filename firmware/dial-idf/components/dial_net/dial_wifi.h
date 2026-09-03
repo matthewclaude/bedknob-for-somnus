@@ -55,7 +55,7 @@ bool dial_net_setup_requested(void);
 // portal until the user submits working credentials. Blocks until connected.
 void dial_net_bringup(void);
 
-// The SoftAP SSID used during setup (e.g. "SomnusDial-A1B2"). Valid after init.
+// The SoftAP SSID used during setup (e.g. "Bedknob-A1B2"). Valid after init.
 const char *dial_net_ap_ssid(void);
 
 // The dial's own HOME network SSID (e.g. "Kestrel-5G") -- the network it is

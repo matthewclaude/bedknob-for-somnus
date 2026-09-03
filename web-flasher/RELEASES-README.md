@@ -1,9 +1,9 @@
 # somnus-dial-releases
 
-Firmware releases and the browser flasher for **Somnus Dial** — a bedside
+Firmware releases and the browser flasher for **Bedknob for Somnus** — a bedside
 dial that turns a Waveshare ESP32-S3 round touch-LCD knob into a standalone
 temperature control for a Somnus Pad. Not affiliated with, endorsed by, or
-supported by Somnus or Waveshare.
+supported by Somnus Lab or Waveshare.
 
 **This repo holds binaries, a manifest, and this flasher page only — it is
 not the firmware's source.** The source lives in a private repository.

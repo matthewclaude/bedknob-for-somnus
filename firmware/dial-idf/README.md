@@ -175,7 +175,7 @@ device itself:
 1. **Welcome.** A splash screen; any tap dismisses it.
 2. **Wi-Fi.** The dial can't reach anything until it has your network, and
    offers two ways to give it that:
-   - **From your phone:** the dial names a temporary network (`SomnusDial-XXXX`).
+   - **From your phone:** the dial names a temporary network (`Bedknob-XXXX`).
      Join it from your phone's Wi-Fi settings and a setup page opens on its
      own (it hijacks DNS so most phones pop the page automatically); if it
      doesn't, open any page in a browser. Pick your home network and enter

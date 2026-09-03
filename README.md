@@ -189,7 +189,7 @@ PNGs land in `docs/screens/`. See [simulator/README.md](simulator/README.md).
 
 ## Build from source
 
-Needs **ESP-IDF v6.0**. The committed `sdkconfig` already matches the board
+Needs **ESP-IDF v6.0**. The tracked `sdkconfig.defaults` already carries the board configuration
 (quad flash, octal PSRAM, 16 MB) — **do not run `idf.py set-target`**, it
 regenerates `sdkconfig` from defaults and discards that configuration.
 
@@ -231,7 +231,7 @@ fork inherited is done. Until then, 0.x.
 - [`docs/`](docs/) — design specs (`SPEC-*.md`), the architecture note, the
   screen renders. Specs are written before code and kept current with what
   actually shipped; each carries its status at the top.
-- [`local_api.yml`](local_api.yml) — Somnus's published local API spec
+- [`reference/local_api.yml`](reference/local_api.yml) — Somnus's published local API spec
   (v0.2.0), the only contract the firmware relies on.
 
 ## Related
