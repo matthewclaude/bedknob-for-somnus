@@ -21,6 +21,35 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.5-beta.1 — 2026-09-03 (beta)
+
+The first release on the beta channel (see the note above about what
+**(beta)** means) — proving the beta channel itself works is as much the
+point of this release as the feature it carries.
+
+### Added
+
+- **Settings → Night mode.** Pick when the dial switches to its dim, warm
+  night look: Off, 9 pm – 7 am, or 10 pm – 6 am. Off runs the dial on day
+  brightness and haptics around the clock, and the update-available prompt —
+  which night mode used to keep off the screen entirely — can now appear at
+  night too. Defaults to 9 pm – 7 am, the fixed window this firmware has
+  always used, so nothing changes for anyone until this row is actually
+  opened.
+- **Turning Night mode off also hides the two night brightness rows**
+  (Brightness → Night (in use) / Night (clock)) — with night mode off
+  there's no night look for them to set. Their values are kept and reappear
+  once night mode is turned back on.
+- **The overnight auto-update window now follows Night mode's end time** —
+  two hours after, two hours wide — instead of a fixed 9–11 am, so it tracks
+  the same wake time set on the Night mode row. The Update screen's
+  Auto-update row now shows that window directly (e.g. "9:00–11:00 am")
+  instead of just "On".
+- **The Night mode row says so when it can't actually do anything**: "— set
+  timezone" if this dial has never had a timezone set, "— no clock" if a
+  timezone is set but the clock hasn't synced yet (Wi-Fi up, internet down).
+  The same line appears on the picker itself.
+
 ## 0.1.4 — 2026-09-03
 
 This release completes v1 scope: every step on the new-user path — buy a
