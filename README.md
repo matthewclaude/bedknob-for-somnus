@@ -98,14 +98,16 @@ the normal way to update.
 - **Honest haptics** — the encoder's own detents are the feedback; the motor
   only fires where the clicks can't tell you something, like the end of the
   range. Off / Low / High / Auto, quieter at night.
-- **Day and night** — a warm night palette, dimmer backlight and softer
-  haptics from 21:00 to 07:00 (fixed for now; a settable window is
-  specified in `docs/SPEC-night-window.md`), a **standby clock face** when
-  idle, separate brightness for day, night and the clock, and a screen
-  timeout.
+- **Day and night** — Settings → Night mode picks when the dial switches to
+  its warm palette, dimmer backlight and softer haptics: 9 pm – 7 am, 10 pm
+  – 6 am, or Off. Plus a **standby clock face** when idle, separate
+  brightness for day, night and the clock, and a screen timeout. *(Night
+  mode is new in 0.1.5-beta.1; on the stable channel the window is fixed at
+  9 pm – 7 am until 0.1.5 ships.)*
 - **Over-the-air updates** from this project's GitHub Releases, with
   bootloader rollback if an image fails to boot, an optional beta channel,
-  and optional automatic installs in a morning window.
+  and optional automatic installs in a two-hour window after night ends
+  (9–11 am with the default window).
 - **Escape hatches that work when you need them** — Change network, Check
   for updates and a tap-twice Factory reset are reachable and functional
   even while the dial can't reach the pad.
