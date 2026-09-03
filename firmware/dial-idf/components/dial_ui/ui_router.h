@@ -34,6 +34,7 @@ typedef enum {
     SCR_BRIGHTNESS_MENU,  // Day/Night brightness submenu (arg: unused/NULL — returns to SCR_SETTINGS)
     SCR_BRIGHTNESS,       // day/night backlight percent picker (arg: 0=day, 1=night — returns to SCR_BRIGHTNESS_MENU)
     SCR_NIGHT_MODE,       // Off / preset / preset night-window picker (docs/SPEC-night-window.md; arg: unused/NULL — returns to SCR_SETTINGS)
+    SCR_NIGHT_FACE,       // Number only / Full night-face picker (docs/SPEC-night-face.md §4; arg: unused/NULL — returns to SCR_SETTINGS)
     SCR_WIFI,             // Wi-Fi status + change-network (arg: unused/NULL)
     SCR_ABOUT,            // versions, serial (read-only; arg: unused/NULL)
     SCR_UPDATE,           // update submenu: check for updates + beta builds toggle (arg: unused/NULL — returns to SCR_MENU)

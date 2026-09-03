@@ -92,6 +92,10 @@ static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_scale, *s_val_units, *s_val_haptics, *s_val_rotation;
 static lv_obj_t *s_val_night_mode;
+// s_row_night_face doubles as "does the Night face row currently exist" —
+// NULL while night_on is false (see sync_night_face_row).
+static lv_obj_t *s_row_night_face;
+static lv_obj_t *s_val_night_face;
 static lv_obj_t *s_val_screen_timeout;
 static lv_obj_t *s_val_timezone;
 static lv_obj_t *s_val_pad_address, *s_val_bed_mode;
@@ -278,6 +282,45 @@ static void row_night_mode_cb(lv_event_t *e)
     ui_router_go(SCR_NIGHT_MODE, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
 }
 
+// Opens the Number-only/Full picker (scr_night_face.c, docs/SPEC-night-
+// face.md §4) — plain navigation, same as Night mode above. Value cell
+// shows the current choice. The row itself only exists while night_on is
+// true (sync_night_face_row below) — see this file's header comment.
+static void row_night_face_cb(lv_event_t *e)
+{
+    (void)e;
+    dial_haptics_play(HAPTIC_TICK);
+    ui_router_go(SCR_NIGHT_FACE, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+// Present only while night_on is true (docs/SPEC-night-face.md §4: "a
+// night-face row on a dial that never enters night is sched_follow's
+// grave") — added/removed as a single row, not HIDDEN, same reasoning and
+// same mechanism as scr_brightness_menu.c's sync_night_rows: dial_list's
+// rotor math derives the focused row from raw child count and
+// `index * row_h`, and a hidden child still counts toward both while
+// contributing no scroll height, so a HIDDEN row here would silently
+// desync the knob from every row beneath it. Unlike that pair, this row
+// sits in the MIDDLE of the list (directly under Night mode, docs/SPEC-
+// night-face.md §4), not at the end — lv_obj_move_to_index places it right
+// after Night mode (row index 3: Back=0, Brightness=1, Night mode=2) every
+// time it's (re-)created, so nothing after it ever has to reorder itself.
+static void sync_night_face_row(bool want)
+{
+    if (want && !s_row_night_face) {
+        s_row_night_face = make_row(s_list, "Night face", row_night_face_cb, &s_val_night_face);
+        lv_obj_move_to_index(s_row_night_face, 3);
+        lv_obj_update_layout(s_list);
+        lv_event_send(s_list, LV_EVENT_SCROLL, NULL);   // re-run dial_list's zoom/fade pass
+    } else if (!want && s_row_night_face) {
+        lv_obj_del(s_row_night_face);
+        s_row_night_face = NULL;
+        s_val_night_face = NULL;
+        lv_obj_update_layout(s_list);
+        lv_event_send(s_list, LV_EVENT_SCROLL, NULL);
+    }
+}
+
 // Screen (lock/standby) timeout: how long the dial sits idle before
 // dial_power drops the display into its dim standby clock face. Cycles
 // through the five values dial_state.h's DIAL_SCR_TIMEOUT_CHOICES offers
@@ -377,6 +420,9 @@ static void create(lv_obj_t *scr, void *arg)
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
 
+    app_state_t st_now;
+    dial_state_get(&st_now);
+
     s_list = dial_list_create(scr, ROW_H);
 
     // No "My side" row: it only re-ran SCR_SIDEPICK, which sets the very same
@@ -392,6 +438,7 @@ static void create(lv_obj_t *scr, void *arg)
 
     make_row(s_list, "Brightness",    row_brightness_cb,    NULL);
     make_row(s_list, "Night mode",    row_night_mode_cb,    &s_val_night_mode);
+    sync_night_face_row(st_now.night_on);   // present only while night_on (see that function's comment)
     make_row(s_list, "Screen timeout", row_screen_timeout_cb, &s_val_screen_timeout);
     make_row(s_list, "Scale",         row_scale_cb,         &s_val_scale);
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
@@ -449,6 +496,8 @@ static void destroy(void)
     s_title_lbl = NULL;
     s_val_scale = s_val_units = s_val_haptics = s_val_rotation = NULL;
     s_val_night_mode = NULL;
+    s_row_night_face = NULL;
+    s_val_night_face = NULL;
     s_val_screen_timeout = NULL;
     s_val_timezone = NULL;
     s_val_pad_address = s_val_bed_mode = NULL;
@@ -460,6 +509,14 @@ static void on_state(const app_state_t *st)
 {
     if (!s_list) return;
     apply_palette(lv_obj_get_parent(s_list));
+
+    // A night_on flip WHILE this screen is open (only reachable via
+    // SCR_NIGHT_MODE, but a generation bump from there still lands here on
+    // return) has to add/remove the row live, not just on the next visit —
+    // same reasoning as scr_brightness_menu.c's own sync_night_rows call.
+    sync_night_face_row(st->night_on);
+    if (s_val_night_face)
+        lv_label_set_text(s_val_night_face, st->night_face_min ? "Number only" : "Full");
 
     static const char *ROT[] = { "0\xC2\xB0", "90\xC2\xB0", "180\xC2\xB0", "270\xC2\xB0" };
     lv_label_set_text(s_val_rotation, ROT[st->rotation & 3]);

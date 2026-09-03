@@ -25,6 +25,7 @@ extern const ui_screen_t scr_adjust_mode;
 extern const ui_screen_t scr_brightness_menu;
 extern const ui_screen_t scr_brightness;
 extern const ui_screen_t scr_night_mode;
+extern const ui_screen_t scr_night_face;
 extern const ui_screen_t scr_wifi;
 extern const ui_screen_t scr_about;
 extern const ui_screen_t scr_update;

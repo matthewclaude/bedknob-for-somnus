@@ -369,9 +369,8 @@ static void apply_palette_and_state(const app_state_t *st)
     const dial_palette_t *pal = PAL();
     bool night = dial_palette_is_night();
     // Night face (docs/SPEC-night-face.md §3): number-only layout while
-    // night is active. Commit 1 ties it straight to night; commit 2 adds
-    // the Settings toggle (minimal = night && st->night_face_min).
-    bool minimal = night;
+    // night is active AND the Settings row (§4) is set to Number only.
+    bool minimal = night && st->night_face_min;
     s_units_c = st->units_c;
     s_rel     = st->rel_mode;
     configure_arc_range(st);     // point the arc at this scale's rails

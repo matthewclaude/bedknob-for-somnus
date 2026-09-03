@@ -549,6 +549,21 @@ typedef struct {
     bool     night_on;
     uint16_t night_start_min;
     uint16_t night_end_min;
+    // Night face (docs/SPEC-night-face.md §4, Settings' "Night face" row):
+    // whether the night window's number-only layout is active, vs. the full
+    // day-shaped face just dimmed. true = Number only, false = Full.
+    // Consumed by exactly one place, scr_dial.c's apply_palette_and_state
+    // (minimal = night && night_face_min) — §3's whole layout swap reads
+    // this one flag. Default TRUE (Number only) on a fresh device --
+    // deliberately NOT the "an OTA changes nothing" convention the rest of
+    // the night window follows (night_on/night_start_min/night_end_min
+    // above): this is presentation, not behavior (no write path, no timing,
+    // no brightness change) and is the whole point of the beta -- the Full
+    // row is the one-tap way back (§4). Persisted to NVS "ui"/"night_face"
+    // (u8); clamp-on-read snaps anything outside {0,1} to 1 (Number only),
+    // same defensive shape as night_on's own clamp -- see
+    // dial_state_get_night_face_min/set_night_face_min below.
+    bool     night_face_min;
     // Beta OTA channel opt-in (SCR_UPDATE's "Beta builds" toggle), persisted
     // to NVS "ui"/"beta". dial_state has no business knowing about dial_ota,
     // so this is just the stored preference -- the worker (main.c) reads it
@@ -853,6 +868,16 @@ uint16_t dial_state_get_night_start_min(void);
 void     dial_state_set_night_start_min(uint16_t min);
 uint16_t dial_state_get_night_end_min(void);
 void     dial_state_set_night_end_min(uint16_t min);
+
+// Night face preference (see app_state_t.night_face_min above for the
+// default/NVS key/clamp contract). Getter/setter copied from night_on's
+// exact shape -- direct mutex mutate + generation bump + immediate NVS
+// commit, no dial_state_commit() wrapper and no "changed" hook: the face
+// re-renders on the next on_state (dial_ui's dispatcher already re-runs
+// every screen's on_state on a generation bump), same as night_on's own
+// consumer (dial_night_active, re-read every steady-state tick).
+bool     dial_state_get_night_face_min(void);
+void     dial_state_set_night_face_min(bool minimal);
 
 // Beta OTA channel preference (see app_state_t.beta above). Same
 // getter+setter shape as the brightness pair; setter persists immediately to

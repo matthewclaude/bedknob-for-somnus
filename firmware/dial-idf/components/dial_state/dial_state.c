@@ -86,6 +86,15 @@ static inline bool clamp_night_on(uint8_t raw)
     return (raw <= 1) ? (raw != 0) : true;
 }
 
+// Same shape as clamp_night_on, for the night-face preference -- an
+// out-of-range byte snaps to Number only (1), matching this pref's own
+// fresh-device default (docs/SPEC-night-face.md §4: deliberate, not the
+// rest of the night window's "reproduce old behavior" rule).
+static inline bool clamp_night_face_min(uint8_t raw)
+{
+    return (raw <= 1) ? (raw != 0) : true;
+}
+
 static SemaphoreHandle_t s_mux;
 static QueueHandle_t     s_cmd_q;
 static app_state_t       s_state;
@@ -128,6 +137,8 @@ void dial_state_init(void)
     s_state.night_on         = true;      // fresh-device default: on (see app_state_t.night_on)
     s_state.night_start_min  = 21 * 60;   // 21:00 -- matches the fixed window this
     s_state.night_end_min    =  7 * 60;   // firmware hardcoded before this setting existed
+    s_state.night_face_min   = true;      // fresh-device default: Number only, deliberately
+                                           // (see app_state_t.night_face_min)
     s_state.beta          = false;    // fresh-device default: stable channel only
     s_state.sched_follow  = true;     // fresh-device default: Follow schedule (owner decision)
     s_state.ota_auto      = 0;        // fresh-device default: Off (explicit consent required)
@@ -198,6 +209,8 @@ void dial_state_restore_prefs(void)
     bool have_night_on = nvs_get_u8(h, "night_on", &night_on_raw) == ESP_OK;
     bool have_night_s  = nvs_get_u16(h, "night_s", &night_s) == ESP_OK;
     bool have_night_e  = nvs_get_u16(h, "night_e", &night_e) == ESP_OK;
+    uint8_t  night_face_raw = 1;   // matches init's fresh-device default (Number only)
+    bool have_night_face = nvs_get_u8(h, "night_face", &night_face_raw) == ESP_OK;
     bool have_beta      = nvs_get_u8(h, "beta", &beta) == ESP_OK;
     bool have_sched_follow = nvs_get_u8(h, "sched_follow", &sched_follow) == ESP_OK;
     bool have_ota_auto  = nvs_get_u8(h, "ota_auto", &ota_auto) == ESP_OK;
@@ -213,7 +226,7 @@ void dial_state_restore_prefs(void)
     nvs_close(h);
     if (!have_zone && !have_units && !have_haptics && !have_rot && !have_rel
         && !have_bri_day && !have_bri_night && !have_bri_nclk && !have_scr_to && !have_beta
-        && !have_night_on && !have_night_s && !have_night_e
+        && !have_night_on && !have_night_s && !have_night_e && !have_night_face
         && !have_sched_follow
         && !have_ota_auto && !have_ota_defer && !have_ota_shown && !have_ota_skip
         && !have_pad_url && !have_pad_1zone) return;
@@ -293,6 +306,7 @@ void dial_state_restore_prefs(void)
         s_state.night_end_min   = night_e;
     }
     if (have_night_on) s_state.night_on = clamp_night_on(night_on_raw);
+    if (have_night_face) s_state.night_face_min = clamp_night_face_min(night_face_raw);
     if (have_beta)       s_state.beta         = (beta != 0);
     if (have_sched_follow) s_state.sched_follow = (sched_follow != 0);
     if (have_ota_auto)   s_state.ota_auto  = (ota_auto <= 1) ? ota_auto : 0;
@@ -602,6 +616,29 @@ void dial_state_set_night_on(bool on)
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
         nvs_set_u8(h, "night_on", on ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+bool dial_state_get_night_face_min(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    bool v = s_state.night_face_min;
+    xSemaphoreGive(s_mux);
+    return v;
+}
+
+void dial_state_set_night_face_min(bool minimal)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.night_face_min = minimal;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "night_face", minimal ? 1 : 0);
         nvs_commit(h);
         nvs_close(h);
     }
