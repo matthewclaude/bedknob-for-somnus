@@ -9,8 +9,9 @@
 > `HARDWARE-bringup-log.md` §14.4. **Still current:** §1.1 (a pre-repoint dial can
 > never be repointed over the air), §7.3's list of the four load-bearing prefix
 > spots, §7.5's reason for the changelog split, §8's "no home IP in a tag" rule,
-> §9 (beta channel; note §9.3's `per_page=5` cap means a beta scrolls out of
-> view after five stable releases), and §9.4/§9.6 on the rollback test, which is
+> §9 (beta channel — **§9.7 supersedes §9.3's `per_page=5` paragraph**: the
+> first real beta proved the list order is not newest-first and the beta
+> path was rewritten to scan tags), and §9.4/§9.6 on the rollback test, which is
 > **out of v1**. Everything else below — the `dial-v` prefix in §4, the 404 diagnosis
 > in §1, the "UNREACHABLE-TODAY" rows in §3, §5–§6's plan, §7's options — is history
 > and should be read as such. `dial_ota.h`'s doc comments still say `dial-v`;
@@ -1014,11 +1015,14 @@ once they're found or written.
 
 ---
 
-## 9. The beta channel — already built, never run
+## 9. The beta channel — first run 2026-09-03, and it found a bug
 
 Added 2026-09-02, from a read of `dial_ota.c`, `dial_state.c`, `scr_update.c`,
-`release.yml` and the two manifests. **Every piece of the beta pipeline
-exists. Nothing has ever used it.** Zero prereleases have been cut.
+`release.yml` and the two manifests. Written when every piece of the beta
+pipeline existed and nothing had ever used it. **§9.7 records the first real
+run** — `0.1.5-beta.1`, 2026-09-03 — which published correctly and was then
+invisible to the dial; §9.3's `per_page=5` paragraph below is kept as
+history and is superseded there.
 
 ### 9.1 What is already wired
 
@@ -1054,11 +1058,13 @@ expensive recovery — delete the tag on both remotes and push again.
 **`PROJECT_VER` must equal the tag exactly**, suffix included, or the verify
 step fails the build. So a beta release means committing a beta version string.
 
-**The dial inspects only the newest 5 releases.** `per_page=5` and
-`RELEASES_LIST_SCAN_CAP` are both deliberate: the unbounded list measured ~70KB
-once a project had a dozen releases and blew past `CHECK_BUF_CAP`, failing every
-beta check with "release JSON too large". Cut six releases in a row and a beta
-can scroll out of view. Do not raise the cap without re-checking the buffer.
+**~~The dial inspects only the newest 5 releases.~~ Superseded by §9.7.**
+As written 2026-09-02: `per_page=5` and `RELEASES_LIST_SCAN_CAP` were deliberate
+— the unbounded list measured ~70KB once a project had a dozen releases and
+blew past `CHECK_BUF_CAP`. The paragraph warned that a beta "can scroll out
+of view" after six releases; it turned out to be worse than that, because the
+list is not ordered newest-first at all. Neither the cap nor the list endpoint
+exists in the firmware any more.
 
 **The version ordering is deliberate — do not "fix" it.** `is_newer()` ranks a
 stable `X.Y.Z` above any `X.Y.Z-beta.N` of the same core, which means a beta
@@ -1219,3 +1225,75 @@ angle.
    (`HARDWARE-bringup-log.md` §6). That is the whole reason the test is
    cheap to skip *now* — and, by the same argument this document already
    made in §7, it stops being cheap the moment that stops being true.
+
+### 9.7 First beta, first finding — the release list is not newest-first
+
+Added 2026-09-03, from the first prerelease ever cut on this pipeline.
+
+**What happened.** `somnus-v0.1.5-beta.1` was tagged on the release commit,
+`release.yml` ran clean — verify-tag accepted the suffixed version, the
+CHANGELOG section was extracted, the Release was published to
+`somnus-dial-releases` marked **Pre-release**, both assets attached. A dial
+on `0.1.4` with Beta builds **off** reported up to date, correctly. The same
+dial with Beta builds **on** also reported `latest 0.1.4 -- up to date`.
+
+**Why.** `GET /releases?per_page=5` returned, in order: `0.1.4`, `0.1.3`,
+`0.1.2`, `0.1.1`, `0.1.0`, **then** `0.1.5-beta.1` — sixth, outside the page.
+GitHub orders that list by `created_at`, and for a release `created_at` is
+**the date of the commit the release's tag points at**, not when it was
+published. Every release in `somnus-dial-releases` points at the same commit
+(that repo's `main` has never moved since the first release), so every
+`created_at` is identical — `2026-09-02T02:48:24Z` for all six — and the
+order within the tie is whatever GitHub's storage returns. Prereleases landed
+last. The old comment's "newest-first" assumption was never true for this
+repo; it only *looked* true while every release was stable and the tie-break
+happened to go by id.
+
+Confirmed from outside the dial: the list endpoint with `per_page=10` shows
+the beta sixth; `/releases/tags/somnus-v0.1.5-beta.1` returns it directly,
+`prerelease: true`, `draft: false`, both assets present. The dial did exactly
+what its code said; the code's model of GitHub was wrong.
+
+**The fix (`0.1.5-beta.2`, `dial_ota.c`).** The beta path no longer reads
+release objects at all. Two bounded requests, no ordering assumption:
+
+1. `GET /tags?per_page=50` — ~500 bytes per tag (six tags measured at
+   2,965 bytes; fifty would be ~25 KB, well inside `CHECK_BUF_CAP`). Every
+   entry whose name carries `TAG_PREFIX` is stripped and compared with
+   `is_newer()`; the highest wins. Order is never consulted. Tags without
+   the prefix (the inherited `dial-v*` lineage, if it ever appears there)
+   are excluded before comparison, not merely outranked.
+2. If the highest tag is not newer than the running version: **one
+   request, done** — "up to date", no release object fetched. Cheaper than
+   the old path in the common case.
+3. Otherwise `GET /releases/tags/<tag>` — a single ~7 KB object carrying
+   `draft`, `prerelease` and the assets. A 404 (tag without a release, e.g.
+   a CI run that failed after the tag) or a draft falls back to the
+   next-highest untried tag, at most three candidates. The chosen object
+   then goes through the same asset/`is_newer`/status tail the stable
+   channel uses (`finish_from_release()`), which was factored out unchanged
+   so the two channels cannot drift.
+
+The stable channel (`/releases/latest`) was never affected and did not
+change beyond mechanical extraction of the shared HTTP setup and tail.
+
+**What this means for a dial already in the field.** A dial running code
+older than the fix cannot see any beta once there are five stable releases
+— including `0.1.5-beta.1` itself. The fix only helps a dial that already
+carries it. For this project that is one bench unit, wire-flashed; for a
+future fleet it would have meant a stable release carrying the fix before
+the beta channel worked for anyone.
+
+**Verified on hardware, 2026-09-03** — `HARDWARE-bringup-log.md` §18: the
+bench dial, wire-flashed with the fix while still versioned `0.1.5-beta.1`,
+found `0.1.5-beta.2` via the tags path (`latest 0.1.5-beta.2, running
+0.1.5-beta.1 -- update available`) and installed it; then a factory-blank
+device did the same after a fresh provision. Tag scan, fetch-by-tag,
+prerelease install, and the beta-vs-beta tiebreak all exercised. One of
+the two installs downloaded at ~3 KB/s (8 min 42 s) for no identified
+reason — §18.5 — recorded, not chased.
+
+**Still not exercised after that:** the 404/draft fallback (no such tag
+exists to test against), and a beta dial graduating onto the matching
+stable release (`0.1.5-beta.N` → `0.1.5`), which happens the day stable
+`0.1.5` ships.

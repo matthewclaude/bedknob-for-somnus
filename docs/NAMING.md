@@ -34,8 +34,8 @@ construction is not worth losing.
 
 1. **Firmware repo rename pass** — **done Sep 3 2026** for every copy surface: root
    README, firmware READMEs, ARCHITECTURE.md, the flasher page (title, H1, description,
-   button, the manifests' `name` field), the SoftAP name (`Bedknob-XXXX`), and the
-   portal page's title and heading. **Deliberately not renamed, and staying that way:**
+   button, the manifests' `name` field), the SoftAP name (`Bedknob-XXXX`, **seen on the air Sep 3 evening** after a
+   factory-blank provision), and the portal page's title and heading. **Deliberately not renamed, and staying that way:**
    the binary names `somnus-dial.bin` / `somnus-dial-merged.bin`, the tag prefix
    `somnus-v`, the CMake project name, and the releases repo URL — shipped dials resolve
    updates by exactly these identifiers, so changing any of them would strand every

@@ -1,12 +1,15 @@
 # Spec: User-settable night window
 
-Status: **APPROVED FOR A BETA BUILD, 2026-09-03.** Written 2026-09-03 as a
-proposal held behind the no-new-features rule; the v1 list closed the same
-day with `somnus-v0.1.4`, and the owner released this as the first feature
-after it — shipped as `0.1.5-beta.1` on the beta channel, which has never
-been exercised and is half the point (see §10). **Revision 3** — the UI is
-now a three-choice picker, replacing revision 2's two lists; the change list
-is at the end. Nothing here is built yet.
+Status: **BUILT — shipped as `0.1.5-beta.1` / `0.1.5-beta.2` on the beta
+channel, verified on hardware 2026-09-03** (palette, brightness rows, Update
+row, the Off rule, and the night flip forced by moving the timezone to
+Tokyo). Written 2026-09-03 as a proposal held behind the no-new-features
+rule; the v1 list closed the same day with `somnus-v0.1.4` and the owner
+released this as the first feature after it. Shipping it on the beta channel
+found and fixed a real OTA bug (§10). **Revision 3** is what was built; the
+change list is at the end. Graduates to stable `0.1.5` when the owner says
+so. One post-build correction: on-screen strings use ASCII hyphens, not en
+dashes — the compiled fonts carry no dash glyph (`3db55ad`).
 
 > **Note for an on-disk reader:** `V1-scope.md`, `START-HERE.md`,
 > `HARDWARE-bringup-log.md`, `LICENSING.md` and
@@ -392,9 +395,13 @@ This ships as **`0.1.5-beta.1`**, and the beta channel has never been used.
   `0.1.5-beta.N`, so cutting stable graduates the dial automatically; Beta
   builds can then be switched off. Nothing to clean up.
 
-What the beta proves that this spec cannot: the prerelease classification,
-the list-endpoint scan, the beta toggle actually changing which endpoint is
-polled, and the version tiebreak — on top of the feature itself.
+**What the beta proved, 2026-09-03:** the prerelease classification worked;
+the list-endpoint scan did **not** — GitHub's release list is not
+newest-first, so `per_page=5` never contained the beta. `0.1.5-beta.2`
+replaced the scan with a tags lookup (`SPEC-ota-readiness.md` §9.7) and
+was pulled over the air by a dial on the fixed code, then again by a
+factory-blank device (`HARDWARE-bringup-log.md` §18). The beta toggle, the
+endpoint switch and the beta-vs-beta tiebreak are all verified on hardware.
 
 ## 11. Revision log
 
