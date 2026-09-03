@@ -174,6 +174,6 @@ struct tm *localtime_r(const time_t *timep, struct tm *result)
 
 const esp_app_desc_t *esp_app_get_description(void)
 {
-    static const esp_app_desc_t desc = { .version = "1.4.2", .idf_ver = "v6.0" };
+    static const esp_app_desc_t desc = { .version = "0.1.4", .idf_ver = "v6.0" };
     return &desc;
 }

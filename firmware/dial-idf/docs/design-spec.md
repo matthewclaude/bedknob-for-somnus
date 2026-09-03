@@ -92,7 +92,7 @@ Rule 1 (all modes): every value quantizes exactly to RGB565 — R,B ≡ 0 mod 8;
 
 Night cooling therefore reads by: ▼ glyph, its pulse, and the dim-khaki pill — never blue, never a dimmed numeral (D1's failure mode fixed).
 
-Night window: Orion sleep schedule via MCP (bedtime −30min → wake +30min), manual override in quick-actions. Backlight PWM (`lcd_bl_pwm_bsp`) tiers compound with the palette swap: day ceiling / night floor / 150ms "night-active" intermediate on any input, decaying after 8s (D2). Display never fully black.
+Night window: Orion sleep schedule via MCP (bedtime −30min → wake +30min), manual override in quick-actions. [Not this firmware: fixed 21:00–07:00 window, no quick-actions override — see the provenance note at the top and docs/SPEC-night-window.md.] Backlight PWM (`lcd_bl_pwm_bsp`) tiers compound with the palette swap: day ceiling / night floor / 150ms "night-active" intermediate on any input, decaying after 8s (D2). Display never fully black.
 
 ## 3. Typography
 

@@ -1,4 +1,11 @@
-# Orion Dial — UI Design Spec: "Nightstand Object"
+# UI Design Spec: "Nightstand Object" (inherited)
+
+> **Provenance note (added 2026-09-03).** This is the upstream Orion Dial UI design
+> spec, inherited unchanged from 2026-07-09. Its design thesis — a bedside clock that
+> happens to control temperature — still governs this UI. The product name and any
+> Orion-specific mechanics it describes (account linking, sleep-schedule-derived
+> windows, per-side names, boost) do not describe this firmware; see
+> `design-spec.md`'s provenance note for what replaced them.
 
 Platform: LVGL 8.4 / ESP-IDF, Waveshare ESP32-S3-Knob-Touch-LCD-1.8, round 360×360
 RGB565 IPS @ ~200dpi, CST816 capacitive touch, rotating outer bezel (no-button

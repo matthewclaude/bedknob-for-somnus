@@ -201,7 +201,7 @@ static void apply_baseline(void)
     st->have_state = true;
     st->device_online = true;
     st->clock_valid = true;
-    snprintf(st->serial, sizeof(st->serial), "ORION-7F3A1");
+    st->serial[0] = '\0';   // real hardware never sets one; About shows "--"
 
     st->zone_present[ZONE_A] = true;
     st->zone_present[ZONE_B] = true;

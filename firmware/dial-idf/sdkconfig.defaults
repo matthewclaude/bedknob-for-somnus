@@ -36,8 +36,10 @@ CONFIG_LV_USE_QRCODE=y
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 # No code calls esp_crt_bundle_attach() -- TLS verifies against the curated
-# PEM in dial_oauth instead (see orion_root_ca.pem's own note on why). Drop
-# the compiled-in bundle to reclaim flash.
+# PEM in components/dial_ota/trust_roots.pem instead, embedded by dial_ota
+# (EMBED_TXTFILES) and used only for GitHub (the OTA check and download);
+# the pad client (dial_somnus) is plain HTTP with no TLS at all. Drop the
+# compiled-in bundle to reclaim flash.
 # CONFIG_MBEDTLS_CERTIFICATE_BUNDLE is not set
 
 # app_main's task carries the boot-time UI bring-up, and the router copies a
@@ -48,11 +50,10 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 # transient boot RAM, not a permanent cost.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 
-# TLS buffers out of scarce internal RAM and into the 8MB PSRAM. Without this
-# a second concurrent TLS session (the OTA client opening a GitHub connection
-# while the MCP client holds Orion's) fails its handshake outright for want of
-# internal memory -- diagnosed twice on 2026-07-28, once as "Orion
-# unreachable" and once as "check failed (HTTP -1)". The one-session-at-a-time
-# discipline in dial_mcp_release_connection() stays as defense in depth; this
-# removes the underlying constraint.
+# TLS buffers out of scarce internal RAM and into the 8MB PSRAM. Set on
+# 2026-07-28, when a GitHub handshake failed outright for want of internal
+# memory ("check failed (HTTP -1)"). The OTA client (dial_ota) is the only
+# TLS user today -- the pad client is plain HTTP -- but the setting stays: a
+# GitHub handshake alongside the LVGL frame buffers and the Wi-Fi/lwIP
+# buffers still wants its TLS buffers in PSRAM, not internal RAM.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
