@@ -21,6 +21,63 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.4 — 2026-09-03
+
+This release completes v1 scope: every step on the new-user path — buy a
+board, flash it from a URL, join Wi-Fi from a phone, pick a timezone, add the
+pad without typing an IP, get an over-the-air update — has been verified on
+hardware as of 2026-09-03.
+
+### Fixed
+
+- **A dial set up from an iPhone had no clock and could not see updates.**
+  iPhone Wi-Fi provisioning never fills in the timezone, so the dial came up
+  with no zone at all. Now a dial that has never had a zone set goes straight
+  to the timezone picker the first time it reaches the pad, and stays there
+  until you pick one — after which the clock is right and update checks work.
+  The picker is raised only once the dial is actually connected, so the
+  choice is applied right away instead of sitting unapplied and being lost on
+  the next reboot.
+
+- **Dials upgraded from the Orion-era firmware count as having a zone.** Those
+  builds saved the timezone rule without the zone name. The clock on such a
+  dial was already right, so it is not sent to the picker, and Settings shows
+  the rule it is using instead of "Not set".
+
+- **Change network, Factory reset and Check for updates now work while the
+  dial is still trying to reach the pad.** They used to be ignored between
+  connection attempts — exactly when a dial stuck on the wrong network needed
+  them. Verified on hardware 2026-09-03.
+
+- **Bed Mode is re-read after the dial connects.** A One Bed / Dual Sides choice
+  made while the dial was still trying to reach the pad used to be applied
+  late: the first poll after connecting still used the old mode. Changing
+  Pad Address or Bed Mode during a retry now also cuts the wait short and
+  reconnects straight away.
+
+- **Flasher page: cable instruction.** It now asks for a USB-A to USB-C data
+  cable and explains why a C-to-C cable will not work with this board.
+
+- **Flasher page: it always erases.** The old copy suggested erasing was a
+  choice for brand-new dials. Flashing from the page always erases everything,
+  including Wi-Fi, timezone and pad address, and the page now says so; the
+  flasher's own "erase first" option is gone because it never made a
+  difference. Over-the-air updates from the dial's Update menu keep your
+  settings and remain the normal way to update.
+
+- **Flasher page: two colors were off the palette.** The accent tint was still
+  the old orange and the button text was pure white; both now follow the brass
+  palette.
+
+- **Flasher page: the third-party notices link was broken.** It pointed at a
+  file name that does not exist.
+
+### Changed
+
+- **The PolyForm required notice now appears in the flasher page footer and in
+  every GitHub release's notes.** The footer also states that the firmware is
+  provided as-is, with no warranty.
+
 ## 0.1.3 — 2026-09-02
 
 ### Fixed
