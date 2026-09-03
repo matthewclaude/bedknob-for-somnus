@@ -35,7 +35,7 @@ static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_ota;         // "Check for updates" row's value label, also the confirm target
 static lv_obj_t *s_ota_err_lbl;     // second line under that row, FAILED only
-static lv_obj_t *s_val_auto;        // "Auto-update" row's Off/Overnight value label
+static lv_obj_t *s_val_auto;        // "Auto-update" row's Off/derived-window value label
 static lv_obj_t *s_val_skip;        // "Skip <version>" row's value label ("" / "Skipped")
 static lv_obj_t *s_row_skip;        // the row itself: created/destroyed with availability
 static lv_obj_t *s_val_beta;        // "Beta builds" row's On/Off value label
@@ -171,16 +171,18 @@ static void row_ota_cb(lv_event_t *e)
     }
 }
 
-// Auto-update (docs/SPEC-update-prompt.md): Off/After wake (renamed from
-// "Overnight" -- docs/SPEC-night-window.md §6, the window was always a
-// morning one), a plain binary preference flip -- unlike "Dial adjusts"
-// (which got its own explanation screen because the consequence lands hours
-// later and needs prose), this is a simple standing choice with an obvious
-// meaning, so a single tap
+// Auto-update (docs/SPEC-update-prompt.md): Off/On, a plain binary
+// preference flip -- unlike "Dial adjusts" (which got its own explanation
+// screen because the consequence lands hours later and needs prose), this
+// is a simple standing choice with an obvious meaning, so a single tap
 // cycling it is enough (same shape as Beta builds below). The worker
 // (main.c's idle loop) reads it out of its own app_state_t snapshot the
 // same way it already reads beta/sched_follow -- nothing else to kick off
-// here.
+// here. The row's own value label is the derived install window (was the
+// bare word "Overnight", then "After wake" -- docs/SPEC-night-window.md §6
+// -- now the actual h:mm-am/pm pair from dial_auto_update_window; see
+// on_state) rather than a plain On/Off, since a toggle alone doesn't say
+// WHEN this reboots the device.
 static void row_auto_cb(lv_event_t *e)
 {
     (void)e;
@@ -440,10 +442,25 @@ static void on_state(const app_state_t *st)
     if (!s_list) return;
     apply_palette(lv_obj_get_parent(s_list));
     render_ota_row(st);
-    // "After wake" for now (docs/SPEC-night-window.md §6 rename, was
-    // "Overnight" -- the window has always been a morning one); commit 2
-    // replaces this literal word with the actual derived window.
-    if (s_val_auto) lv_label_set_text(s_val_auto, st->ota_auto ? "After wake" : "Off");
+    // "After wake" (docs/SPEC-night-window.md §6, renamed from "Overnight"
+    // -- the window has always been a morning one) rendered as the actual
+    // derived window rather than the bare word, from the SAME function
+    // main.c's auto-installer uses (dial_auto_update_window) -- nothing on
+    // the Night mode row says this setting reboots the device at a
+    // particular time, so this row is where that coupling has to be
+    // visible. Fixed 09:00-11:00 fallback pair when night is off (see that
+    // function).
+    if (s_val_auto) {
+        if (st->ota_auto) {
+            int auto_start, auto_end;
+            dial_auto_update_window(st, &auto_start, &auto_end);
+            char buf[24];
+            dial_wake_window_str(auto_start, auto_end, buf, sizeof buf);
+            lv_label_set_text(s_val_auto, buf);
+        } else {
+            lv_label_set_text(s_val_auto, "Off");
+        }
+    }
 
     // A check that lands WHILE this screen is open flips availability under
     // the user, so the row has to appear/disappear live rather than only on

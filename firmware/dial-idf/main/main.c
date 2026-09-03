@@ -1170,9 +1170,13 @@ static void worker_task(void *arg)
         s_ota_prev_pwr_level = ota_pwr_level;
 
         // Night mode: warm-dim + quiet haptics while the household sleeps.
-        // Somnus's local API has no sleep-schedule endpoint to derive a real
-        // window from (unlike Orion's get_sleep_schedules) -- fixed
-        // 21:00-07:00 window, unconditionally.
+        // docs/SPEC-night-window.md: user-settable via Settings' "Night
+        // mode" row (Off, or one of two presets) -- dial_night_active reads
+        // the persisted window off `st`, falling back to the fixed
+        // 21:00-07:00 window this firmware hardcoded before the setting
+        // existed if night mode is off. Still no sleep-schedule endpoint to
+        // derive a window from automatically (unlike Orion's
+        // get_sleep_schedules) -- only the user knows when they're in bed.
         struct tm lt;
         if (dial_time_now(&lt)) {
             int now_min = lt.tm_hour * 60 + lt.tm_min;
@@ -1265,10 +1269,10 @@ static void worker_task(void *arg)
                 // fixed 09:00-11:00 pair open-coded here (Somnus has no sleep
                 // schedule to derive a real post-wake window from, unlike
                 // Orion's have_sched branch before it); dial_auto_update_window
-                // now derives it from the night-window setting, falling back to
-                // that same fixed pair when night is off -- byte-identical on
-                // an unchanged device (TODO(commit 2): still hardcoded to
-                // 09:00-11:00 until the night-window state fields exist).
+                // now derives it from the night-window setting (two hours
+                // after night ends, two hours wide), falling back to that
+                // same fixed pair when night is off -- byte-identical on an
+                // unchanged device, since the defaults reproduce it exactly.
                 int auto_start, auto_end;
                 dial_auto_update_window(&st, &auto_start, &auto_end);
                 bool in_window = dial_in_window((uint16_t)auto_start, (uint16_t)auto_end, now_min);

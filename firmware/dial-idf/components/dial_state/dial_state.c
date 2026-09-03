@@ -51,6 +51,41 @@ static inline uint16_t clamp_screen_timeout_s(uint16_t s)
     return 90;
 }
 
+// Clamp-on-read for the persisted night_start_min/night_end_min pair
+// (docs/SPEC-night-window.md §3): a stored time outside 0..1439, or a pair
+// with start == end, snaps the PAIR back to the fixed 21:00/07:00 window
+// this firmware hardcoded before the setting existed -- never one value
+// alone, so a half-corrupt pair can't produce a window neither preset nor a
+// user ever chose. Applied only at NVS restore (dial_state_restore_prefs)
+// -- "Clamp-on-read is the only corruption guard" (spec); the picker
+// (scr_night_mode.c) only ever writes one of the two preset pairs, which
+// never collide, so no setter here needs to reach into its companion field.
+static inline void clamp_night_pair(uint16_t *start, uint16_t *end)
+{
+    if (*start > 1439 || *end > 1439 || *start == *end) {
+        *start = 21 * 60;
+        *end   = 7 * 60;
+    }
+}
+
+// Same defensive style as clamp_bri_pct/clamp_screen_timeout_s, for a
+// single night-window time a caller didn't already clamp -- the pairwise
+// start == end invariant above is a different guard, and is deliberately
+// NOT re-checked here (see that comment).
+static inline uint16_t clamp_night_min(uint16_t m)
+{
+    return (m < 1440) ? m : (uint16_t)(m % 1440);
+}
+
+// A stored night_on byte outside {0,1} snaps to ON (spec) -- silently going
+// dark is the wrong failure mode for a preference whose whole job is
+// dimming the dial at night, and ON reproduces this firmware's pre-setting
+// behavior, same reasoning as the pair's own default.
+static inline bool clamp_night_on(uint8_t raw)
+{
+    return (raw <= 1) ? (raw != 0) : true;
+}
+
 static SemaphoreHandle_t s_mux;
 static QueueHandle_t     s_cmd_q;
 static app_state_t       s_state;
@@ -90,6 +125,9 @@ void dial_state_init(void)
                                         // see app_state_t.screen_timeout_s), so
                                         // shipping this pref changes no device's
                                         // behavior until the user taps the row
+    s_state.night_on         = true;      // fresh-device default: on (see app_state_t.night_on)
+    s_state.night_start_min  = 21 * 60;   // 21:00 -- matches the fixed window this
+    s_state.night_end_min    =  7 * 60;   // firmware hardcoded before this setting existed
     s_state.beta          = false;    // fresh-device default: stable channel only
     s_state.sched_follow  = true;     // fresh-device default: Follow schedule (owner decision)
     s_state.ota_auto      = 0;        // fresh-device default: Off (explicit consent required)
@@ -155,6 +193,11 @@ void dial_state_restore_prefs(void)
     bool have_bri_nclk  = nvs_get_u8(h, "bri_nclk", &bri_nclk) == ESP_OK;
     uint16_t scr_to = 90;   // matches init's fresh-device default
     bool have_scr_to    = nvs_get_u16(h, "scr_to", &scr_to) == ESP_OK;
+    uint8_t  night_on_raw = 1;   // matches init's fresh-device default (on)
+    uint16_t night_s = 21 * 60, night_e = 7 * 60;   // matches init's fresh-device defaults
+    bool have_night_on = nvs_get_u8(h, "night_on", &night_on_raw) == ESP_OK;
+    bool have_night_s  = nvs_get_u16(h, "night_s", &night_s) == ESP_OK;
+    bool have_night_e  = nvs_get_u16(h, "night_e", &night_e) == ESP_OK;
     bool have_beta      = nvs_get_u8(h, "beta", &beta) == ESP_OK;
     bool have_sched_follow = nvs_get_u8(h, "sched_follow", &sched_follow) == ESP_OK;
     bool have_ota_auto  = nvs_get_u8(h, "ota_auto", &ota_auto) == ESP_OK;
@@ -170,6 +213,7 @@ void dial_state_restore_prefs(void)
     nvs_close(h);
     if (!have_zone && !have_units && !have_haptics && !have_rot && !have_rel
         && !have_bri_day && !have_bri_night && !have_bri_nclk && !have_scr_to && !have_beta
+        && !have_night_on && !have_night_s && !have_night_e
         && !have_sched_follow
         && !have_ota_auto && !have_ota_defer && !have_ota_shown && !have_ota_skip
         && !have_pad_url && !have_pad_1zone) return;
@@ -238,6 +282,17 @@ void dial_state_restore_prefs(void)
         s_state.bri_night_clock_pct = (uint8_t)lroundf(100.0f * sqrtf((float)old_duty / 64.0f));
     }
     if (have_scr_to)     s_state.screen_timeout_s = clamp_screen_timeout_s(scr_to);
+    // Clamp-on-read (docs/SPEC-night-window.md §3): if EITHER time key was
+    // ever written, validate the pair together (a partial write across a
+    // crash between the two setters is exactly the corruption this guards
+    // against) -- an absent key already carries its own init-matching
+    // default above, so this still checks a real stored value against it.
+    if (have_night_s || have_night_e) {
+        clamp_night_pair(&night_s, &night_e);
+        s_state.night_start_min = night_s;
+        s_state.night_end_min   = night_e;
+    }
+    if (have_night_on) s_state.night_on = clamp_night_on(night_on_raw);
     if (have_beta)       s_state.beta         = (beta != 0);
     if (have_sched_follow) s_state.sched_follow = (sched_follow != 0);
     if (have_ota_auto)   s_state.ota_auto  = (ota_auto <= 1) ? ota_auto : 0;
@@ -524,6 +579,77 @@ void dial_state_set_screen_timeout_s(uint16_t seconds)
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
         nvs_set_u16(h, "scr_to", seconds);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+bool dial_state_get_night_on(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    bool v = s_state.night_on;
+    xSemaphoreGive(s_mux);
+    return v;
+}
+
+void dial_state_set_night_on(bool on)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.night_on = on;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "night_on", on ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+uint16_t dial_state_get_night_start_min(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    uint16_t v = s_state.night_start_min;
+    xSemaphoreGive(s_mux);
+    return v;
+}
+
+void dial_state_set_night_start_min(uint16_t min)
+{
+    min = clamp_night_min(min);
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.night_start_min = min;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u16(h, "night_s", min);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+uint16_t dial_state_get_night_end_min(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    uint16_t v = s_state.night_end_min;
+    xSemaphoreGive(s_mux);
+    return v;
+}
+
+void dial_state_set_night_end_min(uint16_t min)
+{
+    min = clamp_night_min(min);
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.night_end_min = min;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u16(h, "night_e", min);
         nvs_commit(h);
         nvs_close(h);
     }

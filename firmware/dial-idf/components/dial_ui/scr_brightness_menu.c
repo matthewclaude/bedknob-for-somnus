@@ -38,6 +38,21 @@
  * No other entry point (no schedule, no zone), so on_state has nothing to
  * gate on besides its own root pointer — same shape as every other menu
  * sub-screen (scr_settings.c, scr_about.c, scr_update.c).
+ *
+ * The two Night rows exist only while night_on is true (docs/SPEC-night-
+ * window.md §5: "when night is Off, nothing that depends on it may look
+ * live" — dial_power_set_night(false) never selects bri_night_pct/
+ * bri_night_clock_pct, so a live-looking row for either is sched_follow's
+ * exact grave). Added/removed as a PAIR (sync_night_rows below), not
+ * HIDDEN: dial_list's rotor math (dial_list_knob) derives the focused row
+ * from raw child count and `index * row_h`, and a hidden child still counts
+ * toward both while contributing no scroll height (see scr_update.c's
+ * make_skip_row/row_beta_cb comments, which hit this exact bug first) — a
+ * HIDDEN Night row here would silently desync the knob from every row
+ * beneath it. They're the last two rows, so add/remove never has to
+ * reorder anything after them. Values are preserved underneath (nothing in
+ * dial_state clears them), so turning night back on shows the same numbers
+ * as before.
  */
 #include "ui_screens_internal.h"
 #include "dial_haptics.h"
@@ -49,6 +64,9 @@
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_day;
+// s_row_night/s_row_night_clock double as "do the Night rows currently
+// exist" — NULL together while night_on is false (see sync_night_rows).
+static lv_obj_t *s_row_night, *s_row_night_clock;
 static lv_obj_t *s_val_night;
 static lv_obj_t *s_val_night_clock;
 
@@ -119,6 +137,25 @@ static void row_night_clock_cb(lv_event_t *e)
     ui_router_go(SCR_BRIGHTNESS, (void *)(uintptr_t)2, LV_SCR_LOAD_ANIM_NONE);
 }
 
+/* ---- Night rows, present only while night_on (see header comment) ------- */
+
+static void sync_night_rows(bool want)
+{
+    if (want && !s_row_night) {
+        s_row_night       = make_row(s_list, "Night (in use)", row_night_cb,       &s_val_night);
+        s_row_night_clock = make_row(s_list, "Night (clock)",  row_night_clock_cb, &s_val_night_clock);
+        lv_obj_update_layout(s_list);
+        lv_event_send(s_list, LV_EVENT_SCROLL, NULL);   // re-run dial_list's zoom/fade pass
+    } else if (!want && s_row_night) {
+        lv_obj_del(s_row_night);
+        lv_obj_del(s_row_night_clock);
+        s_row_night = s_row_night_clock = NULL;
+        s_val_night = s_val_night_clock = NULL;
+        lv_obj_update_layout(s_list);
+        lv_event_send(s_list, LV_EVENT_SCROLL, NULL);
+    }
+}
+
 /* ---- palette ---------------------------------------------------------------*/
 
 static void apply_palette(lv_obj_t *scr)
@@ -147,12 +184,14 @@ static void create(lv_obj_t *scr, void *arg)
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
 
+    app_state_t st_now;
+    dial_state_get(&st_now);
+
     s_list = dial_list_create(scr, ROW_H);
 
     make_row(s_list, LV_SYMBOL_LEFT "  Back", row_back_cb, NULL);
     make_row(s_list, "Day",            row_day_cb,         &s_val_day);
-    make_row(s_list, "Night (in use)", row_night_cb,       &s_val_night);
-    make_row(s_list, "Night (clock)",  row_night_clock_cb, &s_val_night_clock);
+    sync_night_rows(st_now.night_on);   // present only while night_on (see header comment)
 
     // Created AFTER the list so it draws over rows scrolling beneath it —
     // same fixed title slot the other menu sub-screens use.
@@ -170,6 +209,7 @@ static void destroy(void)
     s_list = NULL;
     s_title_lbl = NULL;
     s_val_day = NULL;
+    s_row_night = s_row_night_clock = NULL;
     s_val_night = NULL;
     s_val_night_clock = NULL;
 }
@@ -179,6 +219,12 @@ static void on_state(const app_state_t *st)
     if (!s_list) return;
     apply_palette(lv_obj_get_parent(s_list));
 
+    // A night_on flip WHILE this screen is open (only reachable via
+    // SCR_NIGHT_MODE, but a generation bump from there still lands here on
+    // return) has to add/remove the pair live, not just on the next visit —
+    // same reasoning as scr_update.c's skip-row want_skip toggle.
+    sync_night_rows(st->night_on);
+
     // Plain read of the last-committed values — SCR_BRIGHTNESS owns the live
     // preview and the actual commit; this screen just mirrors app_state_t
     // (same contract these two rows had when they lived directly in
@@ -186,6 +232,7 @@ static void on_state(const app_state_t *st)
     char buf[8];
     snprintf(buf, sizeof buf, "%u%%", (unsigned)st->bri_day_pct);
     lv_label_set_text(s_val_day, buf);
+    if (!s_val_night) return;   // night_on is false -- rows don't exist right now
     snprintf(buf, sizeof buf, "%u%%", (unsigned)st->bri_night_pct);
     lv_label_set_text(s_val_night, buf);
     // The clock's 0 IS off (see the header comment) — say so, don't make the

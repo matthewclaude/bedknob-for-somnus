@@ -528,6 +528,27 @@ typedef struct {
     // that off-menu default. Persisted to NVS "ui"/"scr_to"; see
     // dial_state_get_screen_timeout_s/set_screen_timeout_s.
     uint16_t screen_timeout_s;
+    // Night window (docs/SPEC-night-window.md, Settings' "Night mode" row).
+    // night_on == false disables night mode entirely (day palette, day duty,
+    // day haptics, around the clock); the two times are then dormant, not
+    // cleared, so switching back on restores the previous window. Minutes
+    // from local midnight. Defaults on / 21:00 / 07:00 reproduce the fixed
+    // window this firmware hardcoded before the setting existed, so an OTA
+    // changes zero devices' behavior until the user taps a row -- same
+    // discipline as screen_timeout_s's off-menu 90s default and rel_mode's
+    // absolute-stays-absolute migration. Persisted to NVS "ui"/"night_on"
+    // (u8), "ui"/"night_s" and "ui"/"night_e" (u16, nvs_set_u16/
+    // nvs_get_u16 -- a u8 anywhere on the time path turns 22:00 (1320) into
+    // 40 = 00:40 and the feature "works" with a phantom window; grepped for
+    // at review time, see dial_state.c). Clamp-on-read is the only
+    // corruption guard (dial_state_restore_prefs): a stored time outside
+    // 0..1439, or a pair with start == end, snaps the PAIR back to
+    // 21:00/07:00 (never one value alone); a stored flag outside {0,1}
+    // snaps to on. See dial_night_active/dial_auto_update_window above and
+    // dial_state_get_night_on/set_night_on etc. below.
+    bool     night_on;
+    uint16_t night_start_min;
+    uint16_t night_end_min;
     // Beta OTA channel opt-in (SCR_UPDATE's "Beta builds" toggle), persisted
     // to NVS "ui"/"beta". dial_state has no business knowing about dial_ota,
     // so this is just the stored preference -- the worker (main.c) reads it
@@ -693,17 +714,25 @@ static inline int dial_state_temp_max_dc(const app_state_t *st)
     return st->temp_max_dc >= 0 ? st->temp_max_dc : DIAL_TEMP_MAX_DC;
 }
 
+// Night mode presets (docs/SPEC-night-window.md §3/§5) -- Settings' "Night
+// mode" row opens a three-choice dial_list (Back, Off, one row per preset
+// here). Labels use whole hours with no ":00" because every preset is on
+// the hour, keeping the Settings value column short; a future custom editor
+// would render its own values as "h:mm am" and leave these short forms
+// alone. Three values total (Off is night_on == false, not a third row in
+// these tables) -- see app_state_t.night_on's comment for why Off is a flag
+// rather than a sentinel in here.
+#define DIAL_NIGHT_PRESETS_N 2
+static const uint16_t DIAL_NIGHT_PRESET_START[DIAL_NIGHT_PRESETS_N] = { 21 * 60, 22 * 60 };
+static const uint16_t DIAL_NIGHT_PRESET_END  [DIAL_NIGHT_PRESETS_N] = {  7 * 60,  6 * 60 };
+static const char *const DIAL_NIGHT_PRESET_LABEL[DIAL_NIGHT_PRESETS_N] = { "9 pm \xE2\x80\x93 7 am", "10 pm \xE2\x80\x93 6 am" };
+
 // True while night mode is actually engaged right now (docs/SPEC-night-
 // window.md §4) -- takes the whole app_state_t, not just the two times,
-// because it also has to consult the night_on flag. TODO(SPEC-night-
-// window.md commit 2): read st->night_on/night_start_min/night_end_min once
-// those fields exist. Hardcoded to the exact 21:00-07:00 window main.c
-// open-coded before this function existed, so this commit is byte-identical
-// behavior.
+// because it also has to consult the night_on flag.
 static inline bool dial_night_active(const app_state_t *st, int now_min)
 {
-    (void)st;
-    return dial_in_window(21 * 60, 7 * 60, now_min);
+    return st->night_on && dial_in_window(st->night_start_min, st->night_end_min, now_min);
 }
 
 // Post-wake install window (docs/SPEC-night-window.md §6): two hours after
@@ -711,14 +740,13 @@ static inline bool dial_night_active(const app_state_t *st, int now_min)
 // sleep schedule; the Somnus port lost the schedule and froze the result at
 // 09:00-11:00, which is right only for a 07:00 riser. Falls back to that
 // same fixed pair when night is off, since there is no wake time to derive
-// from -- TODO(SPEC-night-window.md commit 2): derive from st->night_on/
-// night_end_min once those fields exist. Hardcoded to 09:00-11:00 for now,
-// so this commit is byte-identical behavior.
+// from. With the defaults this computes 09:00-11:00 -- byte-identical to
+// the fixed window this firmware hardcoded before this setting existed.
 static inline void dial_auto_update_window(const app_state_t *st, int *start, int *end)
 {
-    (void)st;
-    *start = 9 * 60;
-    *end   = 11 * 60;
+    if (!st->night_on) { *start = 9 * 60; *end = 11 * 60; return; }
+    *start = (st->night_end_min + 120) % 1440;
+    *end   = (*start + 120)            % 1440;
 }
 
 // Initialize the store (mutex + defaults). Call once before any other call.
@@ -809,6 +837,22 @@ void    dial_state_set_bri_night_clock_pct(uint8_t pct);
 // tick with no separate "changed" hook required; see dial_power.c.
 uint16_t dial_state_get_screen_timeout_s(void);
 void     dial_state_set_screen_timeout_s(uint16_t seconds);
+
+// Night window preference (see app_state_t.night_on/night_start_min/
+// night_end_min above for defaults/NVS keys/the pair's clamp-on-read
+// contract). Same getter+setter/immediate-commit shape as the pair above,
+// no "changed" hook — worker_task (dial_night_active/
+// dial_auto_update_window, dial_state.h) re-reads the snapshot every
+// steady-state tick. dial_state_set_night_start_min/_end_min do NOT flip
+// night_on — SCR_NIGHT_MODE calls all three in sequence (start, end, flag
+// last) so the worker never observes on=true paired with a half-written
+// window; see that screen's header comment.
+bool     dial_state_get_night_on(void);
+void     dial_state_set_night_on(bool on);
+uint16_t dial_state_get_night_start_min(void);
+void     dial_state_set_night_start_min(uint16_t min);
+uint16_t dial_state_get_night_end_min(void);
+void     dial_state_set_night_end_min(uint16_t min);
 
 // Beta OTA channel preference (see app_state_t.beta above). Same
 // getter+setter shape as the brightness pair; setter persists immediately to

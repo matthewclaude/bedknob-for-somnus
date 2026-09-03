@@ -40,13 +40,21 @@
  * is still fully reachable via scr_dial.c's power-disc long-press, so it is
  * not dead code and nothing about it needed deleting.
  *
+ * "Night mode" (docs/SPEC-night-window.md) sits directly below Brightness:
+ * brightness, night mode and screen timeout are all "what the dial does in a
+ * dark room". Opens the Off/preset picker sub-screen (scr_night_mode.c) like
+ * Timezone/Pad Address do their own sub-screens — three choices don't fit a
+ * value column plus a tap-to-cycle idiom the way Rotation's four do. Value
+ * cell can carry the §7 "no clock" / "set timezone" annotation, which is
+ * also why this isn't a plain in-place toggle.
+ *
  * "Screen timeout" (the lock-screen/standby idle threshold, dial_power's
  * STANDBY level — owner request: "a configurable lock screen timer... in an
- * appropriate location") was added directly below Brightness: both rows
+ * appropriate location") sits right after Night mode: all three rows
  * govern what the panel is doing when nobody's touching it, so they read as
  * one group rather than being split across the list. Tap cycles through the
- * five values dial_state.h's DIAL_SCR_TIMEOUT_CHOICES offers (30s/1m/2m/5m/
- * 10m — same idiom as Rotation below, not a submenu; five values don't need
+ * four values dial_state.h's DIAL_SCR_TIMEOUT_CHOICES offers (5s/15s/30s/1m
+ * — same idiom as Rotation below, not a submenu; four values don't need
  * one).
  *
  * "Timezone" (docs/SPEC-timezone-source.md) sits right after Rotation, still
@@ -83,6 +91,7 @@
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_scale, *s_val_units, *s_val_haptics, *s_val_rotation;
+static lv_obj_t *s_val_night_mode;
 static lv_obj_t *s_val_screen_timeout;
 static lv_obj_t *s_val_timezone;
 static lv_obj_t *s_val_pad_address, *s_val_bed_mode;
@@ -258,6 +267,17 @@ static void row_brightness_cb(lv_event_t *e)
     ui_router_go(SCR_BRIGHTNESS_MENU, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
 }
 
+// Opens the Off/preset picker (scr_night_mode.c, docs/SPEC-night-window.md)
+// — plain navigation, same as Brightness above. Value cell shows the
+// current window (or "Off"), annotated per §7 when the clock the setting
+// depends on isn't valid (see on_state).
+static void row_night_mode_cb(lv_event_t *e)
+{
+    (void)e;
+    dial_haptics_play(HAPTIC_TICK);
+    ui_router_go(SCR_NIGHT_MODE, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
 // Screen (lock/standby) timeout: how long the dial sits idle before
 // dial_power drops the display into its dim standby clock face. Cycles
 // through the five values dial_state.h's DIAL_SCR_TIMEOUT_CHOICES offers
@@ -371,6 +391,7 @@ static void create(lv_obj_t *scr, void *arg)
     // are untouched.
 
     make_row(s_list, "Brightness",    row_brightness_cb,    NULL);
+    make_row(s_list, "Night mode",    row_night_mode_cb,    &s_val_night_mode);
     make_row(s_list, "Screen timeout", row_screen_timeout_cb, &s_val_screen_timeout);
     make_row(s_list, "Scale",         row_scale_cb,         &s_val_scale);
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
@@ -427,6 +448,7 @@ static void destroy(void)
     s_list = NULL;
     s_title_lbl = NULL;
     s_val_scale = s_val_units = s_val_haptics = s_val_rotation = NULL;
+    s_val_night_mode = NULL;
     s_val_screen_timeout = NULL;
     s_val_timezone = NULL;
     s_val_pad_address = s_val_bed_mode = NULL;
@@ -451,6 +473,14 @@ static void on_state(const app_state_t *st)
         lv_label_set_text(s_val_units, st->units_c ? "\xC2\xB0" "C" : "\xC2\xB0" "F");
     // No s_val_adjust_mode update here: that row is hidden (see header
     // comment) and its label object no longer exists.
+    // Night mode's value (docs/SPEC-night-window.md §5/§7) -- shared with
+    // scr_night_mode.c's own subtitle so the row and the picker can't drift
+    // out of agreement (see ui_screens_internal.h's dial_night_row_value).
+    {
+        char buf[40];
+        dial_night_row_value(st, buf, sizeof buf);
+        lv_label_set_text(s_val_night_mode, buf);
+    }
     lv_label_set_text(s_val_screen_timeout, dial_scr_timeout_label(st->screen_timeout_s));
     // Indexed directly by the stored value (see app_state_t.haptics_level):
     // 0=Off, 1=Auto, 2=Low, 3=High.
