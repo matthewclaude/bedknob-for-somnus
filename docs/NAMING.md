@@ -26,19 +26,24 @@ construction is not worth losing.
 
 | Was | Now | Status |
 |---|---|---|
-| Somnus Dial / the dial | Bedknob for Somnus | Name settled; on-screen strings, README, flasher copy and repo name **not yet changed** |
+| Somnus Dial / the dial | Bedknob for Somnus | **Copy surfaces done Sep 3** — root README, firmware READMEs, ARCHITECTURE.md, flasher page (title, H1, description, button, manifests' `name` field), SoftAP name `Bedknob-XXXX`, portal page title and heading. GitHub repo still `matthewclaude/somnus-waveshare-rotary-dial`; binary, tag and URL identifiers stay by design (see below). |
 | SomnusDialPreview | Bedknob for Mac | **Done Sep 2** — package, target, module, directories, app struct, Info.plist, build.sh, docs. Builds clean, 9/9 tests pass. GitHub repo still `matthewclaude/SomnusDialPreview`. |
 | SomnusWidget | Bedknob Mini | **Not started** |
 
 ## What is still outstanding
 
-1. **Firmware repo rename pass** — on-screen strings, root README, flasher page copy,
-   `PROJECT_VER` metadata, and the repo names `somnus-waveshare-rotary-dial` and
-   `somnus-dial-releases`. Do it **before 1.0.0**: the releases repo is public and the
-   flasher is live, so this gets more expensive once people have flashed boards and
-   bookmarked the page.
+1. **Firmware repo rename pass** — **done Sep 3 2026** for every copy surface: root
+   README, firmware READMEs, ARCHITECTURE.md, the flasher page (title, H1, description,
+   button, the manifests' `name` field), the SoftAP name (`Bedknob-XXXX`), and the
+   portal page's title and heading. **Deliberately not renamed, and staying that way:**
+   the binary names `somnus-dial.bin` / `somnus-dial-merged.bin`, the tag prefix
+   `somnus-v`, the CMake project name, and the releases repo URL — shipped dials resolve
+   updates by exactly these identifiers, so changing any of them would strand every
+   flashed board.
 2. **Bedknob Mini** — the whole rename, same shape as the Mac app's.
-3. **Two GitHub repo renames**, both manual and both the owner's to do.
+3. **Two GitHub repo renames** (`somnus-waveshare-rotary-dial`, `SomnusDialPreview`),
+   both manual and both the owner's to do. `somnus-dial-releases` stays: its URL is one
+   of the identifiers above.
 4. **The Claude Project** — docs, instructions, description and title ("Bedknob family")
    all updated Sep 2 2026. Only the summary's *filename*
    (`somnus-dial-project-summary.md`) still carries the old name; fold that into the

@@ -90,6 +90,12 @@ void dial_state_set_side_picked(void)
     s_state.generation++;
 }
 
+void dial_state_set_tz_prompted(void)
+{
+    s_state.tz_prompted = true;
+    s_state.generation++;
+}
+
 void dial_state_set_units_c(bool units_c)
 {
     s_state.units_c = units_c;

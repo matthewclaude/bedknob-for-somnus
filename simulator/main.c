@@ -243,10 +243,10 @@ static void scenario_wifi_portal(void)
     app_state_t *st = sim_state_ptr();
     st->phase = PH_WIFI_PORTAL;
     // Same format as the real construction site (dial_wifi.c's
-    // "SomnusDial-%02X%02X", MAC-derived) -- kept as a literal here since the
+    // "Bedknob-%02X%02X", MAC-derived) -- kept as a literal here since the
     // simulator never links the real dial_net component (no ESP-IDF Wi-Fi
     // driver on the host), same reasoning as stubs.c's dial_net_ap_ssid().
-    snprintf(st->ap_ssid, sizeof(st->ap_ssid), "SomnusDial-A1B2");
+    snprintf(st->ap_ssid, sizeof(st->ap_ssid), "Bedknob-A1B2");
     ui_router_go(SCR_WIFI_PORTAL, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
     snapshot("wifi-portal");
@@ -331,7 +331,8 @@ static void scenario_dial_update(void)
 }
 
 // The Home face in RELATIVE scale. Deliberately a POSITIVE, OFF-GRID setpoint:
-// 300dc (30.0°C), which is level +2 (its anchor is 306dc/30.6°C) — so the
+// 300dc (30.0°C), which is level +3 (1.0°C per level, level 0 = 27.0°C,
+// commit 018d8f6) — so the
 // render proves the spliced '+' glyph draws AND that an off-grid device
 // value shows as the nearest level. Water below the setpoint keeps the
 // heating overlay + pill on screen, and the neutral notch/"LEVEL" suffix
@@ -344,7 +345,7 @@ static void scenario_dial_relative(void)
     st->ui_zone = ZONE_A;
     zone_state_t *a = &st->zones[ZONE_A];
     a->on = true;
-    a->temp_dc = 300;     // 30.0C, off-grid -> level +2
+    a->temp_dc = 300;     // 30.0C -> level +3
     a->actual_c = 26.0f;  // -> 79F, below setpoint: still warming
     st->generation++;     // direct field-sets don't bump it; make on_state re-run
     ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);

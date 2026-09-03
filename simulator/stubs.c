@@ -18,8 +18,16 @@
 #include "dial_power.h"
 #include "dial_display.h"
 #include "dial_wifi.h"
+#include "dial_time.h"
 #include "esp_wifi.h"
 #include "esp_app_desc.h"
+
+/* ---- dial_time ---------------------------------------------------------- */
+// Settings' Timezone row and the picker read these; the simulator has no
+// SNTP and no persisted zone, so it renders the honest "Not set" state.
+bool dial_time_get_iana_tz(char *out, size_t sz) { (void)out; (void)sz; return false; }
+bool dial_time_get_posix_tz(char *out, size_t sz) { (void)out; (void)sz; return false; }
+bool dial_time_set_iana_tz(const char *iana) { (void)iana; return true; }
 
 /* ---- dial_haptics ------------------------------------------------------ */
 
@@ -107,7 +115,7 @@ void dial_net_forget(void) {}
 void dial_net_request_setup(void) {}
 bool dial_net_setup_requested(void) { return false; }
 void dial_net_bringup(void) {}
-const char *dial_net_ap_ssid(void) { return "SomnusDial-A1B2"; }
+const char *dial_net_ap_ssid(void) { return "Bedknob-A1B2"; }
 void dial_net_on_event(dial_net_event_cb_t cb) { (void)cb; }
 
 /* ---- deterministic clock -------------------------------------------------
