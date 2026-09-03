@@ -16,11 +16,15 @@
  *
  * Beta channel: dial_ota_check(beta) takes the caller's current
  * dial_state.beta preference (SCR_UPDATE's "Beta builds" toggle). Off, this
- * is exactly today's behavior. On, it queries the releases LIST endpoint
- * instead of /releases/latest (which by definition excludes prereleases)
- * and picks the newest by version among the entries it inspects, tags like
- * "dial-v1.1.0-beta.1" included -- see is_newer()'s semver §11 prerelease
- * tiebreak in the .c file.
+ * is exactly today's behavior against /releases/latest (which by
+ * definition excludes prereleases). On (docs/REPORT-beta-fix.md, 2026-09-03
+ * finding), it queries the tags endpoint instead of a releases LIST --
+ * GitHub orders that list by created_at, which every release in this repo
+ * ties on, so no per_page cap of it can be trusted to contain the newest
+ * one. The tags endpoint is scanned in full for the highest version (tags
+ * like "dial-v1.1.0-beta.1" excluded, see is_newer()'s semver §11
+ * prerelease tiebreak in the .c file), then that one release is fetched by
+ * tag name for its asset URL.
  *
  * Threading: dial_ota_check/download_and_apply are blocking and worker-task
  * only. dial_ota_get() is a mutex-guarded snapshot safe to call from any task

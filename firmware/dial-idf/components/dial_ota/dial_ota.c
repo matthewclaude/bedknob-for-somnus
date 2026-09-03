@@ -33,15 +33,18 @@ static const char *TAG = "ota";
 // (§1), and both the dial and ESP Web Tools are unauthenticated by design.
 #define GITHUB_API_URL \
     "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/latest"
-// The LIST endpoint (beta channel only) -- unlike /releases/latest, this
-// includes prereleases. Same host/owner/repo, no trailing "/latest".
-// per_page is load-bearing: the unbounded list is ~70KB once a project has a
-// dozen releases (measured 2026-07-29) and blew straight past CHECK_BUF_CAP,
-// failing every beta check with "release JSON too large". GitHub returns
-// newest-first, so the newest few are the only ones that can ever win the
-// is_newer comparison; 5 of them is ~27KB, comfortably inside the cap.
-#define GITHUB_API_URL_LIST \
-    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases?per_page=5"
+// Beta channel only (docs/REPORT-beta-fix.md, 2026-09-03 finding): GitHub's
+// /releases list is ordered by created_at, which here is the date of the
+// one commit every release/tag points at, so every entry ties and a
+// per_page cap cannot be trusted to contain the newest one -- the first
+// beta release landed sixth, past a per_page=5 cap. The tags endpoint is
+// scanned in full instead (below) and never assumed to be ordered either.
+#define GITHUB_API_URL_TAGS \
+    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/tags?per_page=50"
+// One release, by its exact tag name -- the beta channel's second request,
+// made only for the single tag check_beta() already picked as newest.
+#define GITHUB_API_URL_RELEASE_BY_TAG_FMT \
+    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/tags/%s"
 #define ASSET_NAME     "somnus-dial.bin"
 // "somnus-v" since 2026-09-01 (docs/SPEC-ota-readiness.md §7) -- the repo's
 // own release history through "dial-v1.4.2" is inherited lineage from the
@@ -53,12 +56,12 @@ static const char *TAG = "ota";
 // distinguishing it from "already current").
 #define TAG_PREFIX     "somnus-v"
 #define CHECK_BUF_CAP  (64 * 1024)   // release JSON is normally ~10-30KB
-// Beta channel only: how many of the list endpoint's (newest-first) entries
-// to inspect before giving up on finding a usable release. Bounds both the
-// JSON walk and the worst case where the newest few entries are all drafts
-// or malformed -- this device has no business scanning its whole release
-// history.
-#define RELEASES_LIST_SCAN_CAP 5   // matches per_page above
+// Beta channel only: how many candidate tags (highest first) check_beta()
+// will fetch a release object for before giving up. Bounds the worst case
+// where the newest tag or two turn out to be a draft or a deleted release
+// -- this device has no business scanning its whole tag history for a
+// usable release.
+#define OTA_BETA_CANDIDATE_CAP 3
 
 // Guards s_info and s_asset_url. A short spinlock (never held across a
 // blocking call), matching dial_state.c's s_input_mux idiom for cross-task
@@ -188,8 +191,10 @@ static esp_err_t on_check_http(esp_http_client_event_t *e)
 
 // Extracts + TAG_PREFIX-strips a release object's version tag into `out`
 // (sized like dial_ota_info_t.latest). False (leaving *out untouched) if the
-// object has no usable tag_name -- callers treat that as "skip this entry"
-// (list/beta mode) or "malformed release" (single/stable mode).
+// object has no usable tag_name -- callers treat that as "malformed
+// release" (this is only ever called on a single, already-identified
+// release object -- /releases/latest, or the one release check_beta()
+// fetched by tag).
 static bool release_version(cJSON *rel, char *out, size_t out_sz)
 {
     cJSON *tag = cJSON_GetObjectItem(rel, "tag_name");
@@ -200,21 +205,37 @@ static bool release_version(cJSON *rel, char *out, size_t out_sz)
     return true;
 }
 
-void dial_ota_mark_checking(void) { set_status(OTA_CHECKING, NULL, NULL); }
-
-bool dial_ota_check(bool beta)
+// Extracts + TAG_PREFIX-validates a tags-list entry's "name" field into
+// `out` (sized like dial_ota_info_t.latest). False (leaving *out untouched,
+// caller skips the entry) for anything that isn't a Somnus release tag --
+// unlike release_version() above, this REQUIRES the prefix: the tags
+// endpoint lists every git tag in the repo, including the pre-fork
+// "dial-v*" lineage (TAG_PREFIX's own comment), and those must never enter
+// the beta-channel comparison at all, not just lose it on an unparseable
+// core.
+static bool tag_version(cJSON *tag, char *out, size_t out_sz)
 {
-    set_status(OTA_CHECKING, NULL, NULL);
+    cJSON *name = cJSON_GetObjectItem(tag, "name");
+    if (!cJSON_IsString(name) || !name->valuestring) return false;
+    const char *ver = name->valuestring;
+    size_t plen = strlen(TAG_PREFIX);
+    if (strncmp(ver, TAG_PREFIX, plen) != 0) return false;
+    strlcpy(out, ver + plen, out_sz);
+    return true;
+}
 
-    const esp_app_desc_t *desc = esp_app_get_description();
-    char user_agent[40];
-    snprintf(user_agent, sizeof(user_agent), "somnus-dial/%s", desc->version);
-
-    check_resp_t r = { 0 };
+// One GET against the GitHub API, using this component's one HTTP client
+// setup (cert_pem, user_agent, Accept header) -- shared by the stable
+// channel's /releases/latest fetch and the beta channel's two-request path
+// below, so there is exactly one place that builds the request. Fills `r`
+// with the (possibly capped) response body; returns the HTTP status code,
+// or -1 on a transport-level error (*err_out, if non-NULL, carries why).
+static int ota_http_get(const char *url, const char *user_agent, check_resp_t *r, esp_err_t *err_out)
+{
     esp_http_client_config_t cfg = {
-        .url           = beta ? GITHUB_API_URL_LIST : GITHUB_API_URL,
+        .url           = url,
         .event_handler = on_check_http,
-        .user_data     = &r,
+        .user_data     = r,
         .cert_pem      = trust_roots_pem_start,
         .user_agent    = user_agent,   // required by the GitHub API
         .timeout_ms    = 15000,
@@ -224,12 +245,62 @@ bool dial_ota_check(bool beta)
     esp_err_t err = esp_http_client_perform(c);
     int status = (err == ESP_OK) ? esp_http_client_get_status_code(c) : -1;
     esp_http_client_cleanup(c);
+    if (err_out) *err_out = err;
+    return status;
+}
 
-    // GitHub 404s /releases/latest (never the list endpoint) when the repo
-    // has zero published releases -- expected right now for the freshly
-    // created matthewclaude/somnus-dial-releases repo, not a check
-    // failure. Report it exactly like "checked, nothing newer" rather than
-    // an error state, and don't fall back to any other repo.
+// Shared tail once a single release object has been chosen -- the
+// /releases/latest object for the stable channel, or the fetched-by-tag
+// object check_beta() picked below: pull the ASSET_NAME download URL from
+// assets[], compare `latest` against the running version, and set the
+// final status. Verbatim from the pre-fix single-request version of this
+// function (docs/REPORT-beta-fix.md) -- factored out so the beta channel's
+// extra HTTP round trip changes nothing about how a chosen release is
+// actually consumed.
+static bool finish_from_release(cJSON *chosen, const char *latest, const esp_app_desc_t *desc)
+{
+    char asset_url[sizeof(s_asset_url)] = { 0 };
+    cJSON *assets = cJSON_GetObjectItem(chosen, "assets");
+    cJSON *a;
+    cJSON_ArrayForEach(a, assets) {
+        cJSON *name = cJSON_GetObjectItem(a, "name");
+        if (!cJSON_IsString(name) || strcmp(name->valuestring, ASSET_NAME) != 0) continue;
+        cJSON *url = cJSON_GetObjectItem(a, "browser_download_url");
+        if (cJSON_IsString(url)) strlcpy(asset_url, url->valuestring, sizeof(asset_url));
+        break;
+    }
+
+    if (!asset_url[0]) {
+        set_status(OTA_FAILED, latest, "no " ASSET_NAME " asset in latest release");
+        return false;
+    }
+    if (is_newer(latest, desc->version)) {
+        taskENTER_CRITICAL(&s_mux);
+        strlcpy(s_asset_url, asset_url, sizeof(s_asset_url));
+        taskEXIT_CRITICAL(&s_mux);
+        ESP_LOGI(TAG, "latest %s, running %s -- update available", latest, desc->version);
+        set_status(OTA_AVAILABLE, latest, NULL);
+        return true;
+    }
+    ESP_LOGI(TAG, "latest %s, running %s -- up to date", latest, desc->version);
+    set_status(OTA_IDLE, latest, NULL);
+    return true;
+}
+
+// Stable channel: the one /releases/latest object. Unchanged from before
+// the beta-channel fix (docs/REPORT-beta-fix.md) apart from the HTTP-client
+// setup moving into ota_http_get, shared with the beta channel below.
+static bool check_stable(const esp_app_desc_t *desc, const char *user_agent)
+{
+    check_resp_t r = { 0 };
+    esp_err_t err;
+    int status = ota_http_get(GITHUB_API_URL, user_agent, &r, &err);
+
+    // GitHub 404s /releases/latest when the repo has zero published
+    // releases -- expected right now for the freshly created
+    // matthewclaude/somnus-dial-releases repo, not a check failure. Report
+    // it exactly like "checked, nothing newer" rather than an error state,
+    // and don't fall back to any other repo.
     if (err == ESP_OK && status == 404) {
         ESP_LOGI(TAG, "no releases published yet (HTTP 404)");
         set_status(OTA_IDLE, NULL, NULL);
@@ -259,89 +330,182 @@ bool dial_ota_check(bool beta)
         return false;
     }
 
-    bool ok = false;
-    // The release object to actually pull tag_name/assets from: /latest's
-    // singular object for the stable channel, or -- beta on -- whichever
-    // entry of the list endpoint carries the newest version among the first
-    // RELEASES_LIST_SCAN_CAP (newest-first) entries. cJSON owns all of
-    // `chosen`'s memory either way (it's a view into `root`), so there is
-    // nothing to free beyond the one cJSON_Delete(root) at the bottom.
-    cJSON *chosen = NULL;
-    char   latest[16];
-
-    if (!beta) {
-        chosen = root;
-        if (!release_version(chosen, latest, sizeof(latest))) {
-            set_status(OTA_FAILED, NULL, "no tag_name in release");
-            goto done;
-        }
-    } else {
-        if (!cJSON_IsArray(root)) {
-            set_status(OTA_FAILED, NULL, "release list JSON not an array");
-            goto done;
-        }
-        char chosen_ver[16] = { 0 };
-        int n = cJSON_GetArraySize(root);
-        // Unlike /releases/latest, the list endpoint returns 200 with an
-        // empty array for a repo with zero releases (expected right now for
-        // matthewclaude/somnus-dial-releases) -- report that as
-        // "nothing to offer", not a failure.
-        if (n == 0) {
-            ESP_LOGI(TAG, "no releases in list, running %s -- up to date", desc->version);
-            set_status(OTA_IDLE, NULL, NULL);
-            ok = true;
-            goto done;
-        }
-        if (n > RELEASES_LIST_SCAN_CAP) n = RELEASES_LIST_SCAN_CAP;
-        for (int i = 0; i < n; i++) {
-            cJSON *rel = cJSON_GetArrayItem(root, i);
-            if (!cJSON_IsObject(rel)) continue;
-            if (cJSON_IsTrue(cJSON_GetObjectItem(rel, "draft"))) continue;
-            char ver[16];
-            if (!release_version(rel, ver, sizeof(ver))) continue;
-            if (!chosen || is_newer(ver, chosen_ver)) {
-                chosen = rel;
-                strlcpy(chosen_ver, ver, sizeof(chosen_ver));
-            }
-        }
-        if (!chosen) {
-            set_status(OTA_FAILED, NULL, "no usable release in list");
-            goto done;
-        }
-        strlcpy(latest, chosen_ver, sizeof(latest));
+    char latest[16];
+    if (!release_version(root, latest, sizeof(latest))) {
+        set_status(OTA_FAILED, NULL, "no tag_name in release");
+        cJSON_Delete(root);
+        return false;
     }
 
-    {
-        char asset_url[sizeof(s_asset_url)] = { 0 };
-        cJSON *assets = cJSON_GetObjectItem(chosen, "assets");
-        cJSON *a;
-        cJSON_ArrayForEach(a, assets) {
-            cJSON *name = cJSON_GetObjectItem(a, "name");
-            if (!cJSON_IsString(name) || strcmp(name->valuestring, ASSET_NAME) != 0) continue;
-            cJSON *url = cJSON_GetObjectItem(a, "browser_download_url");
-            if (cJSON_IsString(url)) strlcpy(asset_url, url->valuestring, sizeof(asset_url));
-            break;
-        }
-
-        if (!asset_url[0]) {
-            set_status(OTA_FAILED, latest, "no " ASSET_NAME " asset in latest release");
-        } else if (is_newer(latest, desc->version)) {
-            taskENTER_CRITICAL(&s_mux);
-            strlcpy(s_asset_url, asset_url, sizeof(s_asset_url));
-            taskEXIT_CRITICAL(&s_mux);
-            ESP_LOGI(TAG, "latest %s, running %s -- update available", latest, desc->version);
-            set_status(OTA_AVAILABLE, latest, NULL);
-            ok = true;
-        } else {
-            ESP_LOGI(TAG, "latest %s, running %s -- up to date", latest, desc->version);
-            set_status(OTA_IDLE, latest, NULL);
-            ok = true;
-        }
-    }
-
-done:
+    bool ok = finish_from_release(root, latest, desc);
     cJSON_Delete(root);
     return ok;
+}
+
+// Beta channel (docs/REPORT-beta-fix.md, 2026-09-03 finding -- see
+// GITHUB_API_URL_TAGS's own comment for why the list endpoint can't be
+// trusted). Two requests, bounded and order-independent:
+//  1. GET the tags list (one page, per_page=50) and find the single
+//     highest Somnus release tag anywhere in it -- order is never assumed.
+//  2. If that tag isn't even newer than the running version, stop: one
+//     request, no release object ever fetched.
+//  3. Otherwise GET that one release by tag name. If it 404s or is a
+//     draft, retry with the next-highest UNTRIED tag, up to
+//     OTA_BETA_CANDIDATE_CAP attempts, then continue into the same
+//     finish_from_release() tail the stable channel uses.
+static bool check_beta(const esp_app_desc_t *desc, const char *user_agent)
+{
+    check_resp_t r = { 0 };
+    esp_err_t err;
+    int status = ota_http_get(GITHUB_API_URL_TAGS, user_agent, &r, &err);
+
+    if (err != ESP_OK || status != 200 || !r.buf) {
+        ESP_LOGW(TAG, "tag list check failed: %s (HTTP %d)", esp_err_to_name(err), status);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "check failed (HTTP %d)", status);
+        set_status(OTA_FAILED, NULL, msg);
+        free(r.buf);
+        return false;
+    }
+    if (r.overflow) {
+        ESP_LOGW(TAG, "tag list JSON exceeded %d bytes", CHECK_BUF_CAP);
+        set_status(OTA_FAILED, NULL, "tag list JSON too large");
+        free(r.buf);
+        return false;
+    }
+
+    cJSON *root = cJSON_Parse(r.buf);
+    free(r.buf);
+    if (!root) {
+        set_status(OTA_FAILED, NULL, "bad tag list JSON");
+        return false;
+    }
+    if (!cJSON_IsArray(root)) {
+        set_status(OTA_FAILED, NULL, "tag list JSON not an array");
+        cJSON_Delete(root);
+        return false;
+    }
+    int n = cJSON_GetArraySize(root);
+
+    // Step 1: the single highest Somnus release tag anywhere in the page --
+    // order is irrelevant and never relied on (see the finding above).
+    char highest[16] = { 0 };
+    bool have_highest = false;
+    for (int i = 0; i < n; i++) {
+        cJSON *tag = cJSON_GetArrayItem(root, i);
+        if (!cJSON_IsObject(tag)) continue;
+        char ver[16];
+        if (!tag_version(tag, ver, sizeof(ver))) continue;   // not a somnus-v* tag
+        if (!have_highest || is_newer(ver, highest)) {
+            strlcpy(highest, ver, sizeof(highest));
+            have_highest = true;
+        }
+    }
+    if (!have_highest) {
+        ESP_LOGI(TAG, "no somnus-v tags, running %s -- up to date", desc->version);
+        set_status(OTA_IDLE, NULL, NULL);
+        cJSON_Delete(root);
+        return true;
+    }
+
+    // Step 2: one request total if the highest tag isn't even newer than
+    // what's running -- no release object ever fetched.
+    if (!is_newer(highest, desc->version)) {
+        ESP_LOGI(TAG, "latest %s, running %s -- up to date", highest, desc->version);
+        set_status(OTA_IDLE, highest, NULL);
+        cJSON_Delete(root);
+        return true;
+    }
+
+    // Step 3: fetch the chosen tag's release object; on a 404 or a draft,
+    // fall back to the next-highest tag not already tried and try again,
+    // up to OTA_BETA_CANDIDATE_CAP times total.
+    char tried[OTA_BETA_CANDIDATE_CAP][16];
+    int  n_tried = 0;
+    char candidate[16];
+    strlcpy(candidate, highest, sizeof(candidate));
+    bool ok = false;
+
+    for (int attempt = 0; attempt < OTA_BETA_CANDIDATE_CAP; attempt++) {
+        strlcpy(tried[n_tried++], candidate, sizeof(tried[0]));
+
+        char full_tag[24];
+        snprintf(full_tag, sizeof(full_tag), "%s%s", TAG_PREFIX, candidate);
+        char url[160];
+        snprintf(url, sizeof(url), GITHUB_API_URL_RELEASE_BY_TAG_FMT, full_tag);
+
+        check_resp_t rr = { 0 };
+        esp_err_t rerr;
+        int rstatus = ota_http_get(url, user_agent, &rr, &rerr);
+
+        cJSON *rel = NULL;
+        bool usable = false;
+        if (rerr == ESP_OK && rstatus == 404) {
+            ESP_LOGW(TAG, "release for %s not found (HTTP 404) -- trying next tag", full_tag);
+        } else if (rerr != ESP_OK || rstatus != 200 || !rr.buf) {
+            ESP_LOGW(TAG, "release fetch for %s failed: %s (HTTP %d) -- trying next tag",
+                     full_tag, esp_err_to_name(rerr), rstatus);
+        } else if (rr.overflow) {
+            ESP_LOGW(TAG, "release JSON for %s exceeded %d bytes -- trying next tag",
+                     full_tag, CHECK_BUF_CAP);
+        } else {
+            rel = cJSON_Parse(rr.buf);
+            if (!rel) {
+                ESP_LOGW(TAG, "bad release JSON for %s -- trying next tag", full_tag);
+            } else if (cJSON_IsTrue(cJSON_GetObjectItem(rel, "draft"))) {
+                ESP_LOGW(TAG, "%s is a draft -- trying next tag", full_tag);
+            } else {
+                usable = true;
+            }
+        }
+        free(rr.buf);
+
+        if (usable) {
+            ok = finish_from_release(rel, candidate, desc);
+            cJSON_Delete(rel);
+            break;
+        }
+        if (rel) cJSON_Delete(rel);
+
+        // Next-highest tag not already tried, if any -- re-scanned from
+        // `root` rather than precomputed, so this is always the true
+        // runner-up regardless of how many attempts have already failed.
+        char next[16] = { 0 };
+        bool have_next = false;
+        for (int i = 0; i < n; i++) {
+            cJSON *tag = cJSON_GetArrayItem(root, i);
+            if (!cJSON_IsObject(tag)) continue;
+            char ver[16];
+            if (!tag_version(tag, ver, sizeof(ver))) continue;
+            bool already_tried = false;
+            for (int t = 0; t < n_tried; t++)
+                if (strcmp(ver, tried[t]) == 0) { already_tried = true; break; }
+            if (already_tried) continue;
+            if (!have_next || is_newer(ver, next)) {
+                strlcpy(next, ver, sizeof(next));
+                have_next = true;
+            }
+        }
+        if (!have_next) break;
+        strlcpy(candidate, next, sizeof(candidate));
+    }
+
+    cJSON_Delete(root);
+    if (!ok) set_status(OTA_FAILED, NULL, "no usable release for newest tags");
+    return ok;
+}
+
+void dial_ota_mark_checking(void) { set_status(OTA_CHECKING, NULL, NULL); }
+
+bool dial_ota_check(bool beta)
+{
+    set_status(OTA_CHECKING, NULL, NULL);
+
+    const esp_app_desc_t *desc = esp_app_get_description();
+    char user_agent[40];
+    snprintf(user_agent, sizeof(user_agent), "somnus-dial/%s", desc->version);
+
+    return beta ? check_beta(desc, user_agent) : check_stable(desc, user_agent);
 }
 
 void dial_ota_set_blocked(const char *reason)
