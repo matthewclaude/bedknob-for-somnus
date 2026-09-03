@@ -11,7 +11,7 @@ auto-discovery (`dial_pad_discovery`), the on-device timezone source
 (`dial_time`'s IANA/POSIX handling and the paths that feed it), the
 relative-temperature-scale rework (`dial_state.h`), and the connect-phase
 navigation fixes in `main.c` — under the same PolyForm Noncommercial License
-1.0.0 terms, © 2026 the Somnus Dial contributors. Both layers also build on hardware
+1.0.0 terms, © 2026 the Bedknob for Somnus contributors. Both layers also build on hardware
 bring-up code, fonts, data, and libraries from other sources, each under its
 own terms. This file inventories those third-party components. The license
 on this repository covers this project's original work only (both layers
