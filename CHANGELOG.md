@@ -21,6 +21,14 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.5-beta.2 — 2026-09-03 (beta)
+
+### Fixed
+
+- **The beta channel could miss a beta release once the repo had five or
+  more stable releases.** Update checks on the beta channel are now
+  smaller and no longer depend on how GitHub orders its release list.
+
 ## 0.1.5-beta.1 — 2026-09-03 (beta)
 
 The first release on the beta channel (see the note above about what
