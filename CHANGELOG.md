@@ -21,6 +21,23 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.5-beta.3 — 2026-09-04 (beta)
+
+### Added
+
+- **Night face.** While Night mode is active, the dial shows just the
+  temperature, much larger, with the unit, water line, status pill and
+  side label out of the way — readable across a dark room without
+  glasses. The power button and the ring stay.
+- **Water temperature, one number at a time.** While the bed is heating or
+  cooling, the night face alternates between your setting and the water
+  temperature every two seconds; the water reading is marked WATER above
+  the number and drawn in the heating/cooling color. When the bed reaches
+  your setting the number holds still. Turning the knob or touching the
+  ring always shows your setting.
+- **Settings → Night face.** Number only (the default) or Full, the
+  previous night layout. The row appears only while Night mode is on.
+
 ## 0.1.5-beta.2 — 2026-09-03 (beta)
 
 ### Fixed
