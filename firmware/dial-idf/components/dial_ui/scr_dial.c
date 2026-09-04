@@ -100,6 +100,8 @@ static lv_obj_t *s_dot_a, *s_dot_b, *s_dot_menu;
 static lv_obj_t *s_away_lbl;   // dormant -- see app_state_t.away's comment
 static lv_obj_t *s_ota_lbl;   // OTA notice, dual-purpose: "Finalizing
                                // update..." / "Update available" — see create()
+static power_glyph_t s_batt_glyph;               // docs/SPEC-power-sensing.md §10.4
+static dial_power_src_t s_batt_glyph_last;        // reset PWR_UNKNOWN in create()
 static lv_point_t s_dash_pts[2];
 
 static zone_idx_t s_zone = ZONE_A;
@@ -709,6 +711,14 @@ static void apply_palette_and_state(const app_state_t *st)
         lv_obj_set_style_opa(s_stale_dot, stale_target, 0);
     }
 
+    // Battery / plug-in glyph (§10.4) — one of the things the night face
+    // keeps in both layouts (minimal and full), at the same night opacity as
+    // the stale dot just above (LV_OPA_40, not tied to `minimal`: it stays
+    // through the full-layout night face too, exactly like the dot).
+    lv_obj_set_style_text_color(s_batt_glyph.label, pal->ink_secondary, 0);
+    lv_obj_set_style_text_opa(s_batt_glyph.label, night ? LV_OPA_40 : LV_OPA_COVER, 0);
+    power_glyph_apply(&s_batt_glyph, &s_batt_glyph_last, st->power_src);
+
     // Page dots — one per face, in the order the chain walks them (see
     // on_gesture): Dial(B) - Dial(A) - Menu on a dual topper, and just
     // Dial - Menu on a single-zone one, re-centered so the pair sits
@@ -942,6 +952,7 @@ static void create(lv_obj_t *scr, void *arg)
     s_shown_dc = -1;
     s_chevron_active = false;
     s_stale_shown = false;
+    s_batt_glyph_last = PWR_UNKNOWN;
     s_units_c = false;   // on_state (called right after create) sets the real value
     s_rel = false;
     s_dragging = false;
@@ -1165,6 +1176,11 @@ static void create(lv_obj_t *scr, void *arg)
     // the whole time or fade_in would animate an object LVGL still skips.
     lv_obj_set_style_opa(s_stale_dot, LV_OPA_TRANSP, 0);
 
+    // #12b Battery / plug-in glyph (docs/SPEC-power-sensing.md §10.4) --
+    // same slot the stale dot sits just above, one of the things the night
+    // face keeps at either layout (see apply_palette_and_state's opacity).
+    power_glyph_create(&s_batt_glyph, scr, 46 - CY, pal);
+
     // #13 Page dots — 3 (Dial(A) - Dial(B) - Menu), evenly spaced
     // 16px apart around the same centered slot the original 2-dot pair used.
     s_dot_a = lv_obj_create(scr);
@@ -1252,6 +1268,11 @@ static void destroy(void)
     // to render into by the time anything would next call that function.
     if (s_alt_timer) { lv_timer_del(s_alt_timer); s_alt_timer = NULL; }
     s_alt_water = false;
+
+    // Battery / plug-in glyph (§10.4): deletes the CHARGE-flash timer if one
+    // was running, same reasoning as the water-alternation timer just above.
+    power_glyph_destroy(&s_batt_glyph);
+    s_batt_glyph_last = PWR_UNKNOWN;
 
     s_actual_dc = -1;
 

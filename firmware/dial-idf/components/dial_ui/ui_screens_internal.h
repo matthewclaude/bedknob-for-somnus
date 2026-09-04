@@ -119,6 +119,101 @@ static inline lv_color_t dial_zone_accent(zone_kind_t k, const dial_palette_t *p
 }
 
 /*
+ * Battery / plug-in glyph (docs/SPEC-power-sensing.md §10.4), shared by
+ * scr_dial.c and scr_standby.c so the two can't drift out of agreement about
+ * which glyph shows on which transition. One label, one slot, two symbols,
+ * never both:
+ *   power_src == BATTERY            -> LV_SYMBOL_BATTERY_EMPTY, persistent.
+ *   BATTERY -> PLUGGED (a real transition, not a screen re-create) -> a 3s
+ *     LV_SYMBOL_CHARGE flash, then hidden.
+ *   otherwise (PLUGGED at steady state, UNKNOWN)                   -> hidden.
+ * No confirmation on UNPLUG beyond the battery glyph itself appearing.
+ *
+ * Callers own create (position/font/color) and destroy (delete the timer);
+ * this owns only the symbol/visibility/timer decision, driven off the
+ * caller's own "last power_src this screen instance has rendered" — same
+ * edge-triggered idiom scr_dial.c's s_stale_shown already uses, folded into
+ * power_glyph_apply() so both screens share the transition logic exactly
+ * rather than each re-deriving "was that a real transition" from scratch.
+ */
+typedef struct {
+    lv_obj_t   *label;
+    lv_timer_t *charge_timer;   // NULL except during the 3s CHARGE flash
+} power_glyph_t;
+
+#define POWER_GLYPH_CHARGE_MS 3000
+
+static inline void power_glyph_charge_timer_cb(lv_timer_t *t)
+{
+    power_glyph_t *pg = (power_glyph_t *)t->user_data;
+    lv_obj_add_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+    pg->charge_timer = NULL;
+}
+
+// Create the shared label at LV_ALIGN_CENTER (0, y_off) -- callers pass
+// their own (46 - CY) the same way every other element on these faces
+// computes its offset. font montserrat_16 / color ink_secondary per §10.4;
+// callers may re-tint per render (scr_standby.c's night-ink override) the
+// same way they already do for every other label on the face. Starts
+// hidden -- power_glyph_apply's first call (power_src still UNKNOWN at
+// boot) leaves it that way until there is something to show.
+static inline void power_glyph_create(power_glyph_t *pg, lv_obj_t *scr, lv_coord_t y_off, const dial_palette_t *pal)
+{
+    pg->label = lv_label_create(scr);
+    lv_obj_set_style_text_font(pg->label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(pg->label, pal->ink_secondary, 0);
+    lv_label_set_text(pg->label, LV_SYMBOL_BATTERY_EMPTY);
+    lv_obj_clear_flag(pg->label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(pg->label, LV_ALIGN_CENTER, 0, y_off);
+    lv_obj_add_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+    pg->charge_timer = NULL;
+}
+
+static inline void power_glyph_destroy(power_glyph_t *pg)
+{
+    if (pg->charge_timer) { lv_timer_del(pg->charge_timer); pg->charge_timer = NULL; }
+    pg->label = NULL;
+}
+
+// Call once per on_state with the screen's own persisted "last power_src
+// rendered" (reset to PWR_UNKNOWN in create(), same as s_stale_shown is
+// reset there) and the current snapshot's power_src. Idempotent: safe to
+// call on every on_state regardless of whether power_src actually moved --
+// *last only differs from cur on a genuine transition, which is exactly
+// when the CHARGE flash and the BATTERY glyph are allowed to (re)trigger.
+static inline void power_glyph_apply(power_glyph_t *pg, dial_power_src_t *last, dial_power_src_t cur)
+{
+    dial_power_src_t prev = *last;
+    *last = cur;
+
+    if (cur == PWR_BATTERY) {
+        // Persistent battery glyph. An unplug mid-flash must not leave a
+        // stale CHARGE glyph on screen -- cancel any in-flight timer.
+        if (pg->charge_timer) { lv_timer_del(pg->charge_timer); pg->charge_timer = NULL; }
+        lv_label_set_text(pg->label, LV_SYMBOL_BATTERY_EMPTY);
+        lv_obj_clear_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (cur == PWR_PLUGGED) {
+        if (prev == PWR_BATTERY && !pg->charge_timer) {
+            // The one real transition that gets a confirmation (§10.4).
+            lv_label_set_text(pg->label, LV_SYMBOL_CHARGE);
+            lv_obj_clear_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+            pg->charge_timer = lv_timer_create(power_glyph_charge_timer_cb, POWER_GLYPH_CHARGE_MS, pg);
+            lv_timer_set_repeat_count(pg->charge_timer, 1);
+        }
+        // Already PLUGGED, or the flash is already running: nothing to do --
+        // no glyph at PLUGGED steady state.
+        return;
+    }
+    // UNKNOWN: no glyph, and no leftover flash from a state that can't
+    // legitimately follow it (defensive -- power_src never actually
+    // reverts to UNKNOWN post-boot, see dial_power.c).
+    if (pg->charge_timer) { lv_timer_del(pg->charge_timer); pg->charge_timer = NULL; }
+    lv_obj_add_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+}
+
+/*
  * Night mode display (docs/SPEC-night-window.md §5/§7) — shared between
  * scr_settings.c's Settings-row value, scr_night_mode.c's picker subtitle,
  * and scr_update.c's derived "After wake" window, so the three can't drift

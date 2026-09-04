@@ -30,6 +30,8 @@ static lv_obj_t *s_clock_lbl, *s_date_lbl;
 static lv_obj_t *s_dot_left, *s_dot_right;   // left=ZONE_B (partner), right=ZONE_A (home)
 static lv_obj_t *s_ota_lbl;   // ambient "Update available" — see create()
 static lv_timer_t *s_clock_timer;
+static power_glyph_t    s_batt_glyph;         // docs/SPEC-power-sensing.md §10.4
+static dial_power_src_t s_batt_glyph_last;    // reset PWR_UNKNOWN in create()
 
 static zone_idx_t s_zone = ZONE_A;   // last-shown side; wake target
 
@@ -84,6 +86,12 @@ static void apply_palette_and_state(const app_state_t *st)
     // Deliberately dimmer than the ember ink at night so the room stays dark.
     lv_obj_set_style_text_color(s_clock_lbl, night ? pal->neutral_holding : pal->ink_primary, 0);
 
+    // Battery / plug-in glyph (§10.4): the clock's own night ink at night
+    // (same reasoning as s_clock_lbl just above -- this face is otherwise
+    // ink_secondary, scr_dial.c's own color), ink_secondary by day.
+    lv_obj_set_style_text_color(s_batt_glyph.label, night ? pal->neutral_holding : pal->ink_secondary, 0);
+    power_glyph_apply(&s_batt_glyph, &s_batt_glyph_last, st->power_src);
+
     // Ambient "Update available" (owner reassessment,
     // docs/SPEC-update-prompt.md) — unconditional on status + night, same
     // rule scr_dial.c's own copy of this notice uses: no idle window, no
@@ -131,6 +139,7 @@ static void tap_cb(lv_event_t *e) { (void)e; wake(); }
 static void create(lv_obj_t *scr, void *arg)
 {
     s_zone = (zone_idx_t)(uintptr_t)arg;
+    s_batt_glyph_last = PWR_UNKNOWN;
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
     lv_obj_add_event_cb(scr, tap_cb, LV_EVENT_CLICKED, NULL);
@@ -172,6 +181,10 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_clear_flag(s_dot_right, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 196 - CX, 104 - CY);
 
+    // Battery / plug-in glyph (docs/SPEC-power-sensing.md §10.4) -- same slot
+    // scr_dial.c uses (0, 46 - CY).
+    power_glyph_create(&s_batt_glyph, scr, 46 - CY, pal);
+
     // Ambient "Update available" — same slot scr_dial.c parks its own copy
     // of this notice in (below the ring's own content, inside its bottom
     // gap): here that gap is entirely empty (no page dots on this face — it
@@ -194,6 +207,8 @@ static void create(lv_obj_t *scr, void *arg)
 static void destroy(void)
 {
     if (s_clock_timer) { lv_timer_del(s_clock_timer); s_clock_timer = NULL; }
+    power_glyph_destroy(&s_batt_glyph);
+    s_batt_glyph_last = PWR_UNKNOWN;
     s_ring = s_clock_lbl = s_date_lbl = s_dot_left = s_dot_right = s_ota_lbl = NULL;
 }
 
