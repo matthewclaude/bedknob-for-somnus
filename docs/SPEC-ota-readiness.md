@@ -1297,3 +1297,29 @@ reason — §18.5 — recorded, not chased.
 exists to test against), and a beta dial graduating onto the matching
 stable release (`0.1.5-beta.N` → `0.1.5`), which happens the day stable
 `0.1.5` ships.
+
+### 9.8 Downgrading from a beta — verified against the code 2026-09-03
+
+There is no over-the-air downgrade, by design. `is_newer()` gates every
+candidate, so a dial on `0.1.5-beta.2` with Beta builds turned off sees
+stable `0.1.4` as older and reports up to date. Keep it that way: a
+client willing to install anything older than itself is how a stale or
+hijacked release page takes a fleet backwards.
+
+The intended exit from the beta channel is graduation: `is_newer()` ranks
+a plain release above any `-beta.N` of the same core, so stable `0.1.5`
+is taken by a beta.N dial whether the toggle is on or off. Claimed by the
+code, not yet observed on hardware (see §9.7's last paragraph).
+
+Wire downgrades, both real: the browser flasher (stable image, wipes NVS,
+re-provision) or `idf.py flash` of a stable build (keeps NVS, needs the
+toolchain). The flasher is the answer for a stranger.
+
+**Post-1.0 idea, owner agreed 2026-09-03:** a Settings row "Revert to
+previous version" — `esp_ota_set_boot_partition()` on the inactive slot,
+then reboot. One step back, no server, settings preserved. Two things it
+must handle: the rollback-arming logic has to treat a deliberate revert as
+valid on the next boot rather than trying to roll forward again, and the
+row must be hidden when the inactive slot holds no valid image
+(`esp_ota_get_state_partition()` / a blank slot after a wire flash). Not
+scheduled; recorded so it is not re-derived.
