@@ -159,7 +159,7 @@ static void pwr_sample_and_classify(void)
     // this series once the curve has been captured, per the task's own
     // instruction to keep it only "for the bench only and only in this
     // commit series".
-    ESP_LOGD(TAG, "power: sample %u mV", mv);
+    ESP_LOGD(TAG, "sample %u mV", mv);
 
     if (s_pwr_ring_n < PWR_BOOT_MIN_SAMPLES) return;   // still UNKNOWN (§10.2)
 
@@ -179,9 +179,9 @@ static void pwr_sample_and_classify(void)
     s_power_src = vote;
     dial_state_commit(mut_power_src, &vote);
     switch (vote) {
-    case PWR_PLUGGED: ESP_LOGI(TAG, "power: plugged (%u mV)", mv); break;
-    case PWR_BATTERY: ESP_LOGI(TAG, "power: battery (%u mV)", mv); break;
-    default:          ESP_LOGI(TAG, "power: unknown"); break;
+    case PWR_PLUGGED: ESP_LOGI(TAG, "plugged (%u mV)", mv); break;
+    case PWR_BATTERY: ESP_LOGI(TAG, "battery (%u mV)", mv); break;
+    default:          ESP_LOGI(TAG, "unknown"); break;
     }
 }
 
