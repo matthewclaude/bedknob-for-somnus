@@ -21,6 +21,18 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.5-beta.4 — 2026-09-04 (beta)
+
+### Added
+
+- **Battery indicator.** When the dial is running on its battery, a small
+  battery mark appears at the top of the face and on the clock. When you
+  plug it in, a lightning mark shows for three seconds and then the face
+  goes back to showing nothing — plugged in is the normal state and stays
+  quiet. No percentage, no warnings, no settings.
+- **Menu → About → Power** shows the live reading: "USB 4.65 V" or
+  "Battery 4.10 V".
+
 ## 0.1.5-beta.3 — 2026-09-04 (beta)
 
 ### Added
