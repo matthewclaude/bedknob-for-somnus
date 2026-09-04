@@ -1,16 +1,189 @@
 #include "dial_power.h"
 
 #include <stdint.h>
+#include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "driver/ledc.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "dial_state.h"
 #include "dial_haptics.h"
 
 static const char *TAG = "power";
+
+/*
+ * Plugged-in / on-battery detector (docs/SPEC-power-sensing.md §10).
+ * GPIO1 / ADC1_CH0, net BATT_ADC, a 10K/10K divider off the board's 5V rail
+ * (§1) -- adc_read_mv() below reads it x2 to undo the divider. Same
+ * adc_oneshot + adc_cali setup as Waveshare's 01_ADC_Test demo (§10.1);
+ * deliberately not a hand-rolled raw*3.3/4096.
+ *
+ * Detection is §10.2, verbatim:
+ *   - Hysteresis: enter PLUGGED at >= PWR_ENTER_PLUGGED_MV, leave PLUGGED
+ *     (i.e. enter BATTERY) at <= PWR_LEAVE_PLUGGED_MV. The 100mV band between
+ *     them is centered in the ~150mV worst-case gap §10.2's table measured.
+ *   - Debounce: a state change needs PWR_DEBOUNCE_N consecutive 1-second
+ *     samples whose classification agrees -- a marginal cable (§4) sagging
+ *     across the band flaps at most once per five seconds, and with the
+ *     slope term below, not at all.
+ *   - Slope tiebreak inside the band: over the last PWR_RING_N samples, if
+ *     the mean of the newest 5 exceeds the mean of the oldest 5 by more than
+ *     PWR_SLOPE_TIEBREAK_MV, that's charging regardless of level; if lower
+ *     by more than that, discharging. This is what makes a depleted cell
+ *     climbing through the band on plug-in (§9.5) classify correctly instead
+ *     of reading "on battery" for however long the climb takes.
+ *   - Boot: UNKNOWN until PWR_BOOT_MIN_SAMPLES samples exist (~5s).
+ * Sampled once per second -- every PWR_SAMPLE_EVERY_TICKS'th tick of
+ * power_task's existing 100ms loop, not every tick: the ADC is noisy and the
+ * number moves in minutes, not milliseconds.
+ */
+#define PWR_ADC_CHANNEL         ADC_CHANNEL_0
+#define PWR_ADC_ATTEN           ADC_ATTEN_DB_12
+#define PWR_ADC_BITWIDTH        ADC_BITWIDTH_12
+#define PWR_SAMPLE_EVERY_TICKS  10      // power_task ticks at 100ms -> 1 sample/s
+#define PWR_RING_N               10     // slope tiebreak window (§10.2)
+#define PWR_BOOT_MIN_SAMPLES      5     // UNKNOWN until this many samples exist
+#define PWR_DEBOUNCE_N             5    // consecutive agreeing samples to change state
+#define PWR_ENTER_PLUGGED_MV    4280    // hysteresis: enter PLUGGED at >= 4.28V
+#define PWR_LEAVE_PLUGGED_MV    4180    // hysteresis: leave PLUGGED at <= 4.18V
+#define PWR_SLOPE_TIEBREAK_MV      20   // mean(newest5) - mean(oldest5), mV
+
+static adc_oneshot_unit_handle_t s_pwr_adc;
+static adc_cali_handle_t         s_pwr_cali;
+
+// Chronological ring, oldest at [0] .. newest at [s_pwr_ring_n-1], saturating
+// at PWR_RING_N (see pwr_ring_push). Plain shift-on-push rather than a
+// circular index: one push per second, so the memmove cost is nothing.
+static uint16_t         s_pwr_ring[PWR_RING_N];
+static uint8_t          s_pwr_ring_n;
+static dial_power_src_t s_power_src = PWR_UNKNOWN;   // mirrors the store; power_task's own view
+static dial_power_src_t s_pwr_pending_vote = PWR_UNKNOWN;
+static uint8_t           s_pwr_pending_count;
+
+static void pwr_adc_init(void)
+{
+    adc_oneshot_unit_init_cfg_t unit_cfg = { .unit_id = ADC_UNIT_1 };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &s_pwr_adc));
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten = PWR_ADC_ATTEN,
+        .bitwidth = PWR_ADC_BITWIDTH,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_pwr_adc, PWR_ADC_CHANNEL, &chan_cfg));
+
+    adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .atten = PWR_ADC_ATTEN,
+        .bitwidth = PWR_ADC_BITWIDTH,
+    };
+    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_pwr_cali));
+}
+
+// One calibrated reading, x2 for the divider (§1, §10.1). Skips the sample
+// (returns false) on a transient read/cali error rather than crashing the
+// task -- the ring's own PWR_BOOT_MIN_SAMPLES/PWR_RING_N gates already treat
+// a short gap as "not enough history yet".
+static bool pwr_read_mv(uint16_t *out_mv)
+{
+    int raw = 0;
+    if (adc_oneshot_read(s_pwr_adc, PWR_ADC_CHANNEL, &raw) != ESP_OK) return false;
+    int mv = 0;
+    if (adc_cali_raw_to_voltage(s_pwr_cali, raw, &mv) != ESP_OK) return false;
+    *out_mv = (uint16_t)(mv * 2);
+    return true;
+}
+
+static void pwr_ring_push(uint16_t mv)
+{
+    if (s_pwr_ring_n < PWR_RING_N) {
+        s_pwr_ring[s_pwr_ring_n++] = mv;
+    } else {
+        memmove(&s_pwr_ring[0], &s_pwr_ring[1], (PWR_RING_N - 1) * sizeof(uint16_t));
+        s_pwr_ring[PWR_RING_N - 1] = mv;
+    }
+}
+
+// §10.2's slope tiebreak: mean(newest 5) - mean(oldest 5), only once the ring
+// is full (PWR_RING_N samples deep, ~10s after boot or after a gap) -- before
+// that there is no well-defined "oldest 5" distinct from "newest 5", so an
+// in-band reading is left inconclusive (see pwr_classify) rather than voting
+// off a half-populated window.
+static bool pwr_ring_slope_mv(int *out_slope)
+{
+    if (s_pwr_ring_n < PWR_RING_N) return false;
+    uint32_t oldest_sum = 0, newest_sum = 0;
+    for (int i = 0; i < 5; i++) oldest_sum += s_pwr_ring[i];
+    for (int i = 5; i < PWR_RING_N; i++) newest_sum += s_pwr_ring[i];
+    *out_slope = (int)(newest_sum / 5) - (int)(oldest_sum / 5);
+    return true;
+}
+
+// This sample's vote: PLUGGED/BATTERY by threshold outside the hysteresis
+// band, the slope tiebreak inside it, or PWR_UNKNOWN if inconclusive (inside
+// the band with no full ring yet, or a slope within +-PWR_SLOPE_TIEBREAK_MV).
+// An inconclusive vote breaks the debounce run without changing power_src --
+// see pwr_sample_and_classify.
+static dial_power_src_t pwr_classify(uint16_t mv)
+{
+    if (mv >= PWR_ENTER_PLUGGED_MV) return PWR_PLUGGED;
+    if (mv <= PWR_LEAVE_PLUGGED_MV) return PWR_BATTERY;
+    int slope;
+    if (!pwr_ring_slope_mv(&slope)) return PWR_UNKNOWN;
+    if (slope > PWR_SLOPE_TIEBREAK_MV)  return PWR_PLUGGED;
+    if (slope < -PWR_SLOPE_TIEBREAK_MV) return PWR_BATTERY;
+    return PWR_UNKNOWN;
+}
+
+static void mut_power_src(app_state_t *st, void *arg)
+{
+    st->power_src = *(dial_power_src_t *)arg;
+}
+
+// Runs once per second (every PWR_SAMPLE_EVERY_TICKS'th power_task tick).
+// power_mv is written to the store on every call, without a commit (§10.3) --
+// only a debounced power_src change commits (and logs a transition line).
+static void pwr_sample_and_classify(void)
+{
+    uint16_t mv;
+    if (!pwr_read_mv(&mv)) return;
+
+    pwr_ring_push(mv);
+    dial_state_set_power_mv(mv);
+    // Bench-only instrumentation (§10.2's "open measurement, before
+    // building": capture the plug-in curve with the log level raised).
+    // Silent by default at ESP_LOGD -- removed from any future commit past
+    // this series once the curve has been captured, per the task's own
+    // instruction to keep it only "for the bench only and only in this
+    // commit series".
+    ESP_LOGD(TAG, "power: sample %u mV", mv);
+
+    if (s_pwr_ring_n < PWR_BOOT_MIN_SAMPLES) return;   // still UNKNOWN (§10.2)
+
+    dial_power_src_t vote = pwr_classify(mv);
+    if (vote == PWR_UNKNOWN) {
+        s_pwr_pending_count = 0;   // inconclusive sample breaks the run
+        return;
+    }
+    if (vote == s_pwr_pending_vote) {
+        s_pwr_pending_count++;
+    } else {
+        s_pwr_pending_vote = vote;
+        s_pwr_pending_count = 1;
+    }
+    if (s_pwr_pending_count < PWR_DEBOUNCE_N || vote == s_power_src) return;
+
+    s_power_src = vote;
+    dial_state_commit(mut_power_src, &vote);
+    switch (vote) {
+    case PWR_PLUGGED: ESP_LOGI(TAG, "power: plugged (%u mV)", mv); break;
+    case PWR_BATTERY: ESP_LOGI(TAG, "power: battery (%u mV)", mv); break;
+    default:          ESP_LOGI(TAG, "power: unknown"); break;
+    }
+}
 
 // Backlight is LEDC timer 3 / channel 1 (lcd_bl_pwm_bsp); we install the fade
 // service and drive the same channel with hardware fades.
@@ -173,6 +346,7 @@ static void power_task(void *arg)
 {
     (void)arg;
     dial_power_level_t applied = (dial_power_level_t)-1;
+    uint32_t pwr_tick = 0;
     for (;;) {
         int64_t idle = esp_timer_get_time() - dial_state_last_input_us();
 
@@ -234,6 +408,12 @@ static void power_task(void *arg)
             }
             applied = want;
         }
+
+        // Plugged-in / on-battery detector (§10.2): every 10th tick of this
+        // same 100ms loop, i.e. once per second -- not every tick, the ADC is
+        // noisy and the number moves in minutes.
+        if (++pwr_tick % PWR_SAMPLE_EVERY_TICKS == 0) pwr_sample_and_classify();
+
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -242,6 +422,7 @@ void dial_power_start(void)
 {
     ledc_fade_func_install(0);
     fade_to(duties()->active);
+    pwr_adc_init();
     xTaskCreate(power_task, "power", 2560, NULL, 2, NULL);
 }
 

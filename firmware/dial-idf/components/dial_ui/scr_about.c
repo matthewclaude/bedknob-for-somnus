@@ -20,6 +20,7 @@
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
 static lv_obj_t *s_val_serial;
+static lv_obj_t *s_val_power;   // "Power" row (docs/SPEC-power-sensing.md §10.4)
 
 /* ---- row factory (scr_settings.c's, ported verbatim) --------------------*/
 
@@ -98,6 +99,7 @@ static void create(lv_obj_t *scr, void *arg)
     make_row(s_list, "Firmware", NULL, &fw_val);
     make_row(s_list, "IDF",      NULL, &idf_val);
     make_row(s_list, "Serial",   NULL, &s_val_serial);
+    make_row(s_list, "Power",    NULL, &s_val_power);
 
     const esp_app_desc_t *desc = esp_app_get_description();
     char fw[36];
@@ -105,6 +107,7 @@ static void create(lv_obj_t *scr, void *arg)
     lv_label_set_text(fw_val, fw);
     lv_label_set_text(idf_val, desc->idf_ver);
     lv_label_set_text(s_val_serial, "--");   // filled from the state snapshot on first on_state
+    lv_label_set_text(s_val_power, "--");    // ditto — power_src starts UNKNOWN anyway
 
     // Created AFTER the list so it draws over rows scrolling beneath it.
     s_title_lbl = lv_label_create(scr);
@@ -121,6 +124,27 @@ static void destroy(void)
     s_title_lbl = NULL;
     s_list = NULL;
     s_val_serial = NULL;
+    s_val_power = NULL;
+}
+
+// docs/SPEC-power-sensing.md §10.4's "the only place the number lives" row:
+// USB/Battery + the calibrated reading, or "--" while UNKNOWN. power_mv rides
+// along in the store without its own commit (dial_power.c writes it every 1s
+// sample under the mutex, no generation bump — see app_state_t.power_mv's
+// comment), so this reads whatever value happened to be current the last
+// time ANY commit landed and re-ran on_state here — exactly §10.3's "About
+// reads it on on_state, so the row refreshes whenever anything else
+// changes". No separate timer: this screen already has an on_state (the
+// Serial row above), so that mechanism does the refreshing.
+static void render_power_row(const app_state_t *st)
+{
+    char buf[24];
+    switch (st->power_src) {
+    case PWR_PLUGGED: snprintf(buf, sizeof(buf), "USB  %.2f V", st->power_mv / 1000.0f); break;
+    case PWR_BATTERY: snprintf(buf, sizeof(buf), "Battery  %.2f V", st->power_mv / 1000.0f); break;
+    default:          strlcpy(buf, "--", sizeof(buf)); break;
+    }
+    lv_label_set_text(s_val_power, buf);
 }
 
 static void on_state(const app_state_t *st)
@@ -128,6 +152,7 @@ static void on_state(const app_state_t *st)
     if (!s_list) return;
     apply_palette(lv_obj_get_parent(s_list));
     lv_label_set_text(s_val_serial, st->serial[0] ? st->serial : "--");
+    render_power_row(st);
 }
 
 // The knob walks the focused row (one per detent, dial_list's rotor snap) —

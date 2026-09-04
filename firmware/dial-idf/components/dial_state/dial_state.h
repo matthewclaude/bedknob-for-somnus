@@ -44,6 +44,11 @@ typedef enum {
 
 typedef enum { ZONE_A = 0, ZONE_B = 1, ZONE_COUNT = 2 } zone_idx_t;
 
+// Plugged-in / on-battery detector (docs/SPEC-power-sensing.md §10). UNKNOWN
+// until dial_power.c's power_task has accumulated 5 one-second samples of
+// GPIO1/BATT_ADC after boot -- see app_state_t.power_src below.
+typedef enum { PWR_UNKNOWN = 0, PWR_BATTERY, PWR_PLUGGED } dial_power_src_t;
+
 /*
  * Canonical temperature unit (2026-08-30 units fix, see the Q1 audit this
  * fixes): tenths of a degree Celsius, integer, "dc" for short. The pad's own
@@ -433,6 +438,21 @@ typedef struct {
     // Wall clock
     bool    clock_valid;
 
+    // Plugged-in / on-battery detector (docs/SPEC-power-sensing.md §10).
+    // Worker-owned fact published into the snapshot, same model as
+    // clock_valid just above: dial_power.c's power_task is the only writer.
+    // power_mv updates every 1s sample directly under the store mutex,
+    // WITHOUT a commit (dial_state_set_power_mv, no generation bump) --
+    // a commit per second would wake every screen for nothing (§10.3).
+    // power_src only changes (and only THEN triggers a real
+    // dial_state_commit, bumping generation) on a debounced transition --
+    // see dial_power.c's detector. UNKNOWN renders as nothing (§10.2).
+    dial_power_src_t power_src;
+    // Last calibrated reading, already x2 for the 10K/10K divider --
+    // diagnostic only (About's Power row); not itself state that decides
+    // anything on the face.
+    uint16_t         power_mv;
+
     // UI intent (optimistic layer, kept apart from device truth). Canonical
     // unit tenths of °C (see the block comment above zone_idx_t) -- NOT °F,
     // even though the field predates that fix and used to be.
@@ -779,6 +799,14 @@ void dial_state_commit(void (*mutate)(app_state_t *st, void *arg), void *arg);
 
 // Convenience: set the connection phase (+ optional error text, NULL to keep).
 void dial_state_set_phase(conn_phase_t phase, const char *err);
+
+// Update app_state_t.power_mv under the store mutex with NO generation bump
+// (docs/SPEC-power-sensing.md §10.3) -- dial_power.c's power_task calls this
+// every 1s sample; About's Power row picks the new value up on its next
+// on_state regardless (dial_state_get() always returns the live store, gen
+// bump or not). power_src changes go through dial_state_commit() instead, so
+// a real transition still wakes every screen.
+void dial_state_set_power_mv(uint16_t mv);
 
 // Hot-path setter used by the dial screen during knob/drag interaction.
 // temp_dc is the canonical unit, tenths of °C — see the block comment above

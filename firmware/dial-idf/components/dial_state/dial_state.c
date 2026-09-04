@@ -905,6 +905,17 @@ void dial_state_set_phase(conn_phase_t phase, const char *err)
     xSemaphoreGive(s_mux);
 }
 
+// docs/SPEC-power-sensing.md §10.3 -- diagnostic-only value, deliberately no
+// generation bump (see dial_state_set_ui_zone above for the same idiom): a
+// commit per 1s sample would wake every screen for nothing. power_src
+// transitions go through dial_state_commit() instead.
+void dial_state_set_power_mv(uint16_t mv)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.power_mv = mv;
+    xSemaphoreGive(s_mux);
+}
+
 void dial_state_stamp_input(void)
 {
     int64_t now = esp_timer_get_time();
