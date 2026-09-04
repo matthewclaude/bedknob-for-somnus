@@ -133,7 +133,9 @@ Still unknown: the charger IC and whether it is power-bank class (§9.3). Not ne
 
 **Plug-in detection has to survive a depleted cell.** Observed Sep 4: plugging in at ~3175 mV, the pin read **~4350 mV and climbing** — on USB the `5V` net is the charger's system node riding just above the cell, not a fixed rail, and it only reaches the ~4.6–4.7 V seen on a charged board once the cell is well up. So §4's flat 4.4 V threshold would call a just-plugged-in dead dial "on battery" for as long as that climb takes, and hysteresis cannot fix a reading that is slowly and correctly low. Detect with either a **~4.25 V threshold** (an unplugged cell never exceeds ~4.2 V; the plugged-in floor seen so far is 4.35 V — a narrow gap) or, better, **the slope**: rising means charging, falling means on battery, whatever the level. Time-to-4.4 V and time-to-4.6 V from plug-in were not recorded; worth one measurement before this is built.
 
-## 10. The indicator — design (owner asked Sep 4 2026; target beta 0.1.5-beta.4)
+## 10. The indicator — BUILT (`e7ff49b`, `8245021`, `6f76af1`) and VERIFIED ON HARDWARE Sep 4 2026; shipped as `0.1.5-beta.4`
+
+*Bench, Sep 4: boot classifies plugged at ~10 s (`plugged (4772 mV)`); unplug → battery glyph within ~5 s, About `Battery 4.10 V`; plug in → lightning glyph 3 s then nothing, About `USB 4.65 V`; cable wiggle did not flap; night face shows the glyph dim and clear of the WATER word; standby clock carries it. The glyphs live on the dial face and standby only — a transition seen while About is open draws nothing on return, by design. The ESP_LOGD sample line is compiled out (`CONFIG_LOG_MAXIMUM_LEVEL=3`); About is the bench instrument. §10.2's open measurement (time-to-4280 mV on a depleted cell) is still unmeasured; the slope tiebreak stands as designed.*
 
 **Scope, per §9.5's revised decision:** two states, **plugged in** or **on battery**. No percentage, no low warning, no setting. One new reading, one new field, two glyphs, one diagnostic row.
 
