@@ -1,6 +1,6 @@
 # Spec: Standby face — Clock or Temperature
 
-Status: **PROPOSAL, owner-approved in shape 2026-09-05. Not built.** Target: its own beta after `0.1.6-beta.1` (one feature per beta). Replaces the earlier "screen-timeout Off" idea, which was rejected on 2026-09-05 for the reasons in §1.
+Status: **PROPOSAL, owner-approved in shape 2026-09-05; default Temperature per owner. Not built.** Target: its own beta after `0.1.6-beta.1` (one feature per beta). Replaces the earlier "screen-timeout Off" idea, which was rejected on 2026-09-05 for the reasons in §1.
 
 > **Note for an on-disk reader:** `V1-scope.md`, `START-HERE.md`, `HARDWARE-bringup-log.md`, `LICENSING.md` and `somnus-dial-project-summary.md` are **not in this repo** — they live only in the Claude Project. Everything this spec needs is restated here.
 
@@ -25,7 +25,7 @@ So the timeout stays exactly as it is, the power tiers stay exactly as they are,
 
 ## 3. The feature
 
-One Settings row, **Standby face**, values **Clock** (default) / **Temperature**, placed directly under **Screen timeout** (it describes what the timeout leads to).
+One Settings row, **Standby face**, values **Temperature** (default) / **Clock**, placed directly under **Screen timeout** (it describes what the timeout leads to).
 
 While `dial_power_level() == DPWR_STANDBY` and Standby face is **Temperature**, `nav_policy()` returns `SCR_DIAL` instead of `SCR_STANDBY`. That is the entire behavioural change. Consequences, all free:
 
@@ -35,11 +35,11 @@ While `dial_power_level() == DPWR_STANDBY` and Standby face is **Temperature**, 
 - Unattended OTA, the update prompt, the auto-update window, night dimming, haptic trim: untouched — they read the power tier.
 - The passive-screen site (Menu / Wi-Fi / About / Update at STANDBY) returns the same choice: `SCR_DIAL` under Temperature, `SCR_STANDBY` under Clock. Factor a `standby_screen(st)` helper so both sites read one rule.
 
-**Default Clock, deliberately** — an OTA changes nothing on any existing dial. Temperature is one tap away.
+**Default Temperature, deliberately — owner's ruling 2026-09-05: "why would I want yet another clock on my nightstand?"** This knowingly departs from the "an OTA changes nothing" rule: the clock face is Orion's design (`design-spec.md` §5, "a clock, not a dashboard"), inherited by the port, and the only existing dials are the owner's. Clock stays as the other value because `scr_standby.c` already exists and a future user who wants one is one tap away; deleting the clock face outright is a possible later cleanup, not this beta.
 
 ## 4. The setting
 
-Pref `ui/sb_face` (u8, 0 = clock, 1 = temperature), clamp-on-read to `{0,1}` → 0, getter/setter copied from `night_face`, applied via `dial_state_commit` so the next `nav_policy` run sees it. Picker `scr_standby_face.c` in `scr_night_face.c`'s shape. Row label "Standby face", value "Clock" / "Temperature". Always visible (unlike Night face, it does not depend on night_on).
+Pref `ui/sb_face` (u8, 0 = clock, 1 = temperature), clamp-on-read to `{0,1}` → **1 (Temperature)**, getter/setter copied from `night_face`, applied via `dial_state_commit` so the next `nav_policy` run sees it. Picker `scr_standby_face.c` in `scr_night_face.c`'s shape, Temperature listed first. Row label "Standby face", value "Temperature" / "Clock". Always visible (unlike Night face, it does not depend on night_on).
 
 **The two questions.** Changeable from the state it needs changing in: yes — Settings, at steady state and inside the connect loop. Read by anything: `nav_policy()`'s two STANDBY sites, and commit 1 (§6) proves the consumer before the row exists.
 
@@ -54,7 +54,7 @@ Pref `ui/sb_face` (u8, 0 = clock, 1 = temperature), clamp-on-read to `{0,1}` →
 ## 6. Commits
 
 1. **The consumer, no setting.** `standby_screen()` helper in `main.c`, both call sites use it, hard-wired to Temperature for this commit only. Build, flash, let it time out by day and (Tokyo-timezone trick) at night; wake it; confirm §5 items 1–3 and 5.
-2. **The setting.** Pref, getter/setter, clamp, `SCR_STANDBY_FACE` + `scr_standby_face.c`, the Settings row under Screen timeout, and `standby_screen()` reads the pref (default Clock). Simulator scenario `settings` re-rendered (new row) plus `standby-temperature` if the harness can force the tier; otherwise hardware only.
+2. **The setting.** Pref, getter/setter, clamp, `SCR_STANDBY_FACE` + `scr_standby_face.c`, the Settings row under Screen timeout, and `standby_screen()` reads the pref (default Temperature). Simulator scenario `settings` re-rendered (new row) plus `standby-temperature` if the harness can force the tier; otherwise hardware only.
 3. **Release** as the next beta after hardware verification of commit 2: `CHANGELOG.md` section, `PROJECT_VER` bump, tag, push to `somnus` only.
 
 ## 7. Not in this spec
