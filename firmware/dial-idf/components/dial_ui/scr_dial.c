@@ -14,6 +14,7 @@
 #include "dial_haptics.h"
 #include "dial_ota.h"
 #include <math.h>
+#include <stdlib.h>
 #include <time.h>
 
 LV_FONT_DECLARE(dial_font_num_88)
@@ -53,7 +54,7 @@ static lv_obj_t *s_handle;       // setpoint drag handle — the ONLY temp touch
  * Recomputed only when a poll moves the water or the user moves the target.
  */
 // The setpoint numeral's opacity while the side is OFF, on either face, along
-// with its unit/LEVEL suffix and the WATER caption. Pitched below everything
+// with its unit suffix and the WATER caption. Pitched below everything
 // else so the numeral joins the chassis rather than sitting above it: once the
 // pill is hidden and the power button has gone quiet, a full-strength numeral
 // is the last thing that still reads as a live setting. It also has to lose
@@ -407,8 +408,12 @@ static void apply_identity(const dial_palette_t *pal, bool night)
 // dial_font_num_140 (docs/SPEC-night-face.md §5). Absolute mode shows the
 // dc value directly (a trivial /10 split, exact — no rounding, since it IS
 // the canonical unit) when s_units_c, or dial_dc_to_f() when not (M4 units
-// toggle). °F is display-only math with no bearing on what gets stored or
-// posted: after the Q1 units fix, absolute mode steps in exact whole 1.0°C
+// toggle). A zero tenth is dropped ("34", not "34.0"): every setpoint is a
+// whole degree (1.0 °C per level, level 0 = 27.0, rails 12/42), so the ".0"
+// carried nothing and cost a glyph — four glyphs put the unit on the ring and
+// under the handle at every °C value (A1b). A non-zero tenth is kept, which
+// is what the shared water reading (below) needs: "23.4" stays "23.4".
+// °F is display-only math with no bearing on what gets stored or posted: after the Q1 units fix, absolute mode steps in exact whole 1.0°C
 // increments, so the °F numeral now steps IRREGULARLY (e.g. 68, 70, 72, 73,
 // 75 — each is the nearest whole °F to a clean whole-°C value). That
 // irregularity is the correct, expected result of the setpoint actually
@@ -430,7 +435,12 @@ static void render_value(int temp_dc, char *out, size_t out_sz)
         if (lvl == 0) snprintf(out, out_sz, "0");
         else          snprintf(out, out_sz, "%+d", lvl);   // "+3" / "-3"
     } else if (s_units_c) {
-        snprintf(out, out_sz, "%d.%d", temp_dc / 10, temp_dc % 10);
+        // abs() on the remainder only: dc can't go negative on this pad
+        // (floor 12.0 °C), but a sub-zero water reading must not print a
+        // second '-' from the tenths.
+        int tenths = abs(temp_dc % 10);
+        if (tenths == 0) snprintf(out, out_sz, "%d", temp_dc / 10);
+        else             snprintf(out, out_sz, "%d.%d", temp_dc / 10, tenths);
     } else {
         snprintf(out, out_sz, "%d", dial_dc_to_f(temp_dc));
     }
@@ -441,8 +451,10 @@ static void render_value(int temp_dc, char *out, size_t out_sz)
 // "+10"…"+15" in relative) ran straight through it (2026-09-04 layout
 // audit §1a). OUT_RIGHT_TOP with a 22px gap and −6 lift puts the °F case
 // exactly where the fixed slot had it (box x 254–275 vs 255–277 before,
-// same y), and the widest cases ("20.0 °C" → 320, "+15 LEVEL" → 335) stay
-// inside the chord at the unit's y-band (x ≤ 347). lv_obj_align_to
+// same y). After A1b the widest cases are "42 °C" and "108 °F" — three
+// glyphs plus the unit — which sit well inside the chord at the unit's
+// y-band (x ≤ 347); relative mode has no unit label at all, so the old
+// "+15 LEVEL" case no longer exists. lv_obj_align_to
 // re-lays-out the screen first, so the numeral's fresh width is what gets
 // measured. The range-stop nudge animates s_num_box's x, not the label, so
 // the unit stays put during a nudge exactly as before.
@@ -641,14 +653,14 @@ static void apply_palette_and_state(const app_state_t *st)
     }
     lv_obj_set_style_text_color(s_unit_lbl, pal->ink_secondary, 0);
     lv_obj_set_style_text_opa(s_unit_lbl, z->on ? LV_OPA_COVER : NUM_STANDBY_OPA, 0);
-    // Relative mode has no unit — the suffix names the quantity instead. The
-    // measured-water caption above keeps its degree, so an absolute
-    // reference stays on the face in every mode.
-    if (st->rel_mode) lv_label_set_text(s_unit_lbl, "LEVEL");
-    else              lv_label_set_text(s_unit_lbl, st->units_c ? "\xC2\xB0" "C" : "\xC2\xB0" "F");
-    // Night face (§3): unit / LEVEL label hidden under minimal.
-    if (minimal) lv_obj_add_flag(s_unit_lbl, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_clear_flag(s_unit_lbl, LV_OBJ_FLAG_HIDDEN);
+    // Relative mode has no unit and shows no label: the signed numeral
+    // ("+15") is the whole reading, and the "LEVEL" suffix it used to carry
+    // ran onto the ring for |level| >= 10 (A1b). The measured-water caption
+    // above keeps its degree, so an absolute reference stays on the face in
+    // every mode. Hidden under minimal too (night face, §3).
+    lv_label_set_text(s_unit_lbl, st->units_c ? "\xC2\xB0" "C" : "\xC2\xB0" "F");
+    if (minimal || st->rel_mode) lv_obj_add_flag(s_unit_lbl, LV_OBJ_FLAG_HIDDEN);
+    else                         lv_obj_clear_flag(s_unit_lbl, LV_OBJ_FLAG_HIDDEN);
 
     // Neutral landmark: a tick at 12 o'clock (level 0's center) shown only in
     // relative mode — it turns the ring from a plain bar into a bipolar

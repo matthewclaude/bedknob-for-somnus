@@ -349,8 +349,8 @@ static void scenario_dial_update(void)
 // commit 018d8f6) — so the
 // render proves the spliced '+' glyph draws AND that an off-grid device
 // value shows as the nearest level. Water below the setpoint keeps the
-// heating overlay + pill on screen, and the neutral notch/"LEVEL" suffix
-// are visible.
+// heating overlay + pill on screen, and the neutral notch is visible (the
+// "LEVEL" suffix is gone since A1b — relative mode shows no unit label).
 static void scenario_dial_relative(void)
 {
     apply_baseline();
@@ -393,7 +393,9 @@ static void scenario_dial_celsius(void)
 
 // The Home face in RELATIVE scale at the +15 rail (DIAL_REL_MAX_DC, 42.0°C):
 // the widest relative numeral ("+15" -- three glyphs, the spliced '+' plus
-// the wide '1'/'5'), the other §1a collision case for the "LEVEL" suffix.
+// the wide '1'/'5'), the other §1a collision case for the old "LEVEL"
+// suffix — since A1b relative mode shows no unit label at all, so this
+// render proves the bare "+15" with nothing to its right.
 // Same SCR_MENU bounce as scenario_dial_celsius, same reason.
 static void scenario_dial_relative_max(void)
 {
@@ -411,6 +413,38 @@ static void scenario_dial_relative_max(void)
     ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(600);
     snapshot("dial-relative-max");
+}
+
+// The night face (Number only) mid water-alternation (docs/SPEC-night-face.md
+// §3a) in °C with a FRACTIONAL water reading: A1b drops a zero tenth from
+// the shared °C renderer ("34", not "34.0") and this is the case that must
+// keep its tenth — the water at 23.4 °C must read "23.4", in the accent, with
+// the WATER word under it. Night comes from dial_palette_set_night() (the
+// real firmware's night worker is what calls it); sim_state_reset() already
+// ships night_face_min = true. Timing: create() leaves the alternation
+// unlocked (s_last_interact_ms = 0 and the sim tick is well past
+// ALT_KNOB_LOCK_MS by now), the timer is created on the on_state inside
+// ui_router_go and first fires at +2000 ms into the water phase, which
+// holds until +4000 — so a 3000 ms pump lands mid-phase. Same SCR_MENU
+// bounce as scenario_dial_celsius, same reason; day palette restored after.
+static void scenario_dial_night_water(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    app_state_t *st = sim_state_ptr();
+    st->units_c = true;
+    st->ui_zone = ZONE_A;
+    zone_state_t *a = &st->zones[ZONE_A];
+    a->on = true;
+    a->temp_dc = 340;     // 34.0C -> "34" on the setpoint phase
+    a->actual_c = 23.4f;  // below setpoint: heating -> alternation runs; "23.4"
+    st->generation++;
+    dial_palette_set_night(true);
+    ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(3000);
+    snapshot("dial-night-water");
+    dial_palette_set_night(false);
 }
 
 // Also documents the M7 permanent "Update" row (replaces the M6 conditional
@@ -971,6 +1005,7 @@ int main(void)
     scenario_dial_relative();
     scenario_dial_celsius();
     scenario_dial_relative_max();
+    scenario_dial_night_water();
     scenario_menu();
     scenario_update();
     scenario_update_prompt();

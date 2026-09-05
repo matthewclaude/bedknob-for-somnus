@@ -476,3 +476,25 @@ updates(2)" comment is stale (left alone — not a Section S row).
 `settings-pad.png` at +9 came out byte-identical to the checked-in file, so
 only four of the five "stale" shots actually changed in `a009840`.
 
+**A1b (2026-09-05, follow-up to A1):** the residual above turned out to be
+the general case, not a +15 corner. On hardware in °C every setpoint
+rendered as four glyphs ("34.0") because the setpoint always lands on a
+whole degree (1.0 °C per level, level 0 = 27.0 °C, rails 12 and 42), so the
+".0" carried nothing and pushed the anchored unit onto the chassis ring and
+under the handle at every °C value; in relative mode "+15 LEVEL" overlapped
+the ring for |level| ≥ 10. Two changes in `scr_dial.c`: `render_value()`'s
+°C branch drops a zero tenth ("34", not "34.0") and keeps a non-zero one
+(the branch is shared with the night-face water alternation, whose reading
+is fractional — "23.4" still reads "23.4"), and `apply_palette_and_state()`
+hides the unit label in relative mode instead of writing "LEVEL" into it
+(hidden if minimal OR relative; otherwise °C/°F). Measured on the fresh
+renders: `dial-celsius.png` now reads "20 °C" with the °C ink box at
+x 258–278 × y 115–129 (right edge 278, inside the °F slot's 280 and 37 px
+short of the ring's inner edge at ≥ 315; was 297–317). `dial-relative-max.png`
+shows a bare "+15" — the 364 px that differ from the A1 render are exactly
+the old "LEVEL" area (x 273–334); `dial-relative.png` likewise loses its
+"LEVEL" (x 256–317). `dial.png` and `dial-update.png` (°F) are pixel-identical
+to the A1 renders. A new scenario, `dial-night-water.png`, renders the
+Number-only night face mid water-phase in °C with the water at 23.4 °C and
+the setpoint at 34 °C: "23.4" in the accent with WATER above it, proving
+the tenth survives. Report: `docs/REPORT-layout-a1b.md`.
