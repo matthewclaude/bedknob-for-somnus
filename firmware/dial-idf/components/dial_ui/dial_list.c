@@ -22,8 +22,20 @@
 // Zoom/fade floors at the second neighbor's rest distance (2 * row_h — the
 // falloff must scale with the row pitch or the 72px menu rows and 76px
 // settings rows would get visibly different edge treatments).
+//
+// ZOOM_MIN is set by the round panel's chord, not by taste: the row two
+// below focus rests centred at y=332 (76px rows) and its 288px content
+// (pad_hor 36 each side) scales about its own centre, so at 140/256 (0.547)
+// the content spans x 101–259 while the chord at the bottom of its value's
+// text band (y≈339) is 96–264 — ~5px clear on both sides. At the previous
+// 168 (0.656) the same content spanned 85.5–274.5 against a chord of
+// 80–260 at y 341, so the last ~14px of every right-aligned value and the
+// first glyph of every label were masked ("Absolu", "-48 dB" — 2026-09-04
+// layout audit §3). Per-screen insets can't fix it (they'd need ≥60px,
+// starving the focused row); the rotor's own falloff is the lever.
+// Neighbours one row away are unaffected (quadratic ease keeps them ~0.91).
 #define ZOOM_FULL     256
-#define ZOOM_MIN      168
+#define ZOOM_MIN      140
 #define OPA_FULL      255
 #define OPA_MIN       100
 

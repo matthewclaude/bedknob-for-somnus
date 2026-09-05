@@ -437,14 +437,34 @@ static void create(lv_obj_t *scr, void *arg)
     // are untouched.
 
     make_row(s_list, "Brightness",    row_brightness_cb,    NULL);
-    make_row(s_list, "Night mode",    row_night_mode_cb,    &s_val_night_mode);
+
+    // Night mode's value carries the §7 clock annotation ("9 pm - 7 am - set
+    // timezone", up to 224px at Mont 16) — beside the 147px label that is
+    // 76px of overprint (2026-09-04 layout audit §2a). So it gets Pad
+    // Address's stacked shape below (label nudged up, value on its own
+    // full-width LONG_DOT line), and gets it UNCONDITIONALLY: the row's
+    // shape must not reflow when the annotation comes and goes.
+    lv_obj_t *night_row = make_row(s_list, "Night mode", row_night_mode_cb, &s_val_night_mode);
+    lv_obj_align(lv_obj_get_child(night_row, 0), LV_ALIGN_LEFT_MID, 0, -16);
+    lv_obj_set_width(s_val_night_mode, LV_PCT(100));
+    lv_label_set_long_mode(s_val_night_mode, LV_LABEL_LONG_DOT);
+    lv_obj_align(s_val_night_mode, LV_ALIGN_LEFT_MID, 0, 16);
     sync_night_face_row(st_now.night_on);   // present only while night_on (see that function's comment)
     make_row(s_list, "Screen timeout", row_screen_timeout_cb, &s_val_screen_timeout);
     make_row(s_list, "Scale",         row_scale_cb,         &s_val_scale);
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
     make_row(s_list, "Haptics",       row_haptics_cb,       &s_val_haptics);
     make_row(s_list, "Rotation",      row_rotation_cb,      &s_val_rotation);
-    make_row(s_list, "Timezone",      row_timezone_cb,      &s_val_timezone);
+
+    // Timezone's raw fallbacks (an IANA name outside the curated 11, or a
+    // dial-v1.4.x POSIX rule — see on_state) are 177–187px, past the 120px
+    // label's right edge by 9–19px (audit §2b). Same stacked shape as Night
+    // mode above, same unconditional rule.
+    lv_obj_t *tz_row = make_row(s_list, "Timezone", row_timezone_cb, &s_val_timezone);
+    lv_obj_align(lv_obj_get_child(tz_row, 0), LV_ALIGN_LEFT_MID, 0, -16);
+    lv_obj_set_width(s_val_timezone, LV_PCT(100));
+    lv_label_set_long_mode(s_val_timezone, LV_LABEL_LONG_DOT);
+    lv_obj_align(s_val_timezone, LV_ALIGN_LEFT_MID, 0, 16);
 
     // Pad Address's value is a full URL — too long to share Adjustment
     // mode's label with a right-aligned value, so it gets the same

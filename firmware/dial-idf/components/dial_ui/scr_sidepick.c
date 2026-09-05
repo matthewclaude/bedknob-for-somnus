@@ -53,12 +53,6 @@ static void create(lv_obj_t *scr, void *arg)
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_bg_color(scr, pal->bg, 0);
 
-    s_title = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_title, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(s_title, pal->ink_primary, 0);
-    lv_label_set_text(s_title, "Which side of the bed?");
-    lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, 36);
-
     static const struct { zone_idx_t zone; lv_event_cb_t cb; lv_coord_t x; const char *fallback; } halves[ZONE_COUNT] = {
         { ZONE_B, half_b_cb, 0,       "LEFT"  },
         { ZONE_A, half_a_cb, HALF_W,  "RIGHT" },
@@ -89,6 +83,18 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_radius(s_divider, 0, 0);
     lv_obj_clear_flag(s_divider, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(s_divider, pal->track, 0);
+
+    // Title LAST: the two halves are full-height opaque objects and LVGL
+    // draws later siblings on top, so a title created before them was
+    // never visible (2026-09-04 layout audit §4 — dead since the halves
+    // were added). y=72, not 36: the 235px title needs a chord wider than
+    // the 216px available at 36; at 72 the chord is 288px (26px margin per
+    // side) and it still clears the LEFT/RIGHT labels centred at 180.
+    s_title = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(s_title, pal->ink_primary, 0);
+    lv_label_set_text(s_title, "Which side of the bed?");
+    lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, 72);
 
     apply_highlight();
 }

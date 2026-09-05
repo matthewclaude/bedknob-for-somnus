@@ -432,3 +432,47 @@ above is from the current tree's own render or its own font tables; the
 "computed" items are the ones the simulator cannot currently show, and
 those are the first scenarios to add before fixing so the fix has a
 before/after like the About pass did.
+
+## Resolution — phase 1 (2026-09-04)
+
+Section S and Tier A of `docs/PLAN-screen-layout-fixes.md` shipped in two
+commits: `a009840` (scenarios + the BEFORE renders) and the commit after it
+(`ui: layout fixes A1-A5 from the screen audit`, code + the AFTER renders +
+these doc edits). Tiers B–D were not touched. Numbers below are ink boxes
+from the fresh PNGs, measured the same way as above (bg-diff threshold 40
+inside the 180 px mask; the far-row check at threshold 12 because that row
+is faded to opa 100/255); "before" is the `a009840` render.
+
+| # | Fix | Before (a009840) | After | Verifies as |
+|---|---|---|---|---|
+| A1 | `scr_dial.c`: unit anchored to the numeral (`place_unit()`: `OUT_RIGHT_TOP`, +22, −6) | `dial.png` °F ink 257–275 × 114–128. `dial-celsius.png` "20.0" 87–276 with °C drawn **under** the digits (no separate unit run). `dial-relative-max.png` "+15" 117–~250 with "LEVEL" starting at 236 (overprint). | `dial.png` °F 256–274 × 115–129 — **1 px** shift, 92 px differ in the whole panel. `dial-celsius.png` "20.0" 87–270, °C 297–317: **27 px clear**. `dial-relative-max.png` "+15" 117–246, "LEVEL" 273–334: 27 px clear of the digits. | pass / pass / pass — see the residual below |
+| A2 | `scr_settings.c`: Night mode + Timezone rows stacked (label −16, value full-width `LONG_DOT` +16), unconditional | `settings.png` Night mode row: one ink band 248–268 with the 224 px value through the label. `settings-timezone-raw.png` (new): "America/Mexico_City" 60–322 through "Timezone" 37–154. | `settings.png` Night mode row: two bands, label 234–253 and value 265–277. `settings-timezone-raw.png`: label 155–172, value 188–204. | pass — two clean lines on both |
+| A3 | `scr_dial.c`: `s_ota_lbl` y 330 → 326 | `dial-update.png` label ink 325–337 vs dots 337–342: **1 row shared** (the "p" descender). | label 321–333, dots 337–342: 3 empty rows between, 4 below the disc (316). | pass — plan said 321–332; the 1 px difference is the measurement threshold (before measured 325–337 the same way where the audit said 325–336) |
+| A4 | `scr_sidepick.c`: title created after the halves, y 36 → 72 | `sidepick.png`: **no ink** in y 20–110 (title covered). | title ink 63–296 × 75–89; chord at y 89 is 24–336 (39 px margin each side); LEFT/RIGHT at 180 untouched. | pass |
+| A5 | `dial_list.c`: `ZOOM_MIN` 168 → 140 | `settings.png` / `wifi-info.png` far row: max ink radius **178.3** (on the mask edge = clipped; "Absolu", "-48 dB"). | max radius 174.2 / 173.8; far-row content 103–~250, chord at the band's bottom 96–264. "Number only" and "Strong -48 dBm" complete. | pass |
+
+Every list screenshot changed under A5 (about*, brightness-menu, menu,
+netpick, night-face, night-mode, settings*, timezone, update*, wifi-info) —
+the far rows are smaller and dimmer; neighbours one row away are unchanged.
+The simulator was rebuilt and `idf.py build` finished with zero warnings.
+Not done here: the flash + eyes-on pass (plan verification steps 3–4).
+
+**Residual worth a look (A1, relative +15 only):** with the unit riding the
+numeral, "LEVEL" at level +15 ends at x = 334 while the r = 165 chassis
+ring's inner edge at that height (y 116–129) is at x ≈ 315–322, so the
+final "L" sits on the ring by ~12–17 px — visible in
+`dial-relative-max.png` where the accent arc is at full extent. The plan's
+chord check (≤ 347) was against the mask, not the ring. Levels ≤ +9 and
+every absolute value are clear of it ("+3 LEVEL" ends at 317). Options if
+it bothers: a smaller gap (16 px puts the "L" at 328), or a smaller unit at
+|level| ≥ 10. Left as specified.
+
+**Scenario notes:** S3 uses `America/Mexico_City`, not the audit's
+`America/Los_Angeles` — that one is in `DIAL_TZ_IANA[]` and renders as
+"Pacific", so it never exercised the raw-IANA path; Mexico_City is the same
+19 characters. S7 needs no knob-walk: `scr_update.c` opens on "Check for
+updates" already (row 1), so `scenario_update`'s "Installed(1)/Check for
+updates(2)" comment is stale (left alone — not a Section S row).
+`settings-pad.png` at +9 came out byte-identical to the checked-in file, so
+only four of the five "stale" shots actually changed in `a009840`.
+

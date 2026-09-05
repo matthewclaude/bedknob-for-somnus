@@ -120,7 +120,8 @@ static bool s_units_c;
 // Relative-scale cache (owner: togglable absolute/relative setpoint scale),
 // same lifecycle as s_units_c: set from apply_palette_and_state, read by
 // render_numeral and on_knob (both run without a fresh snapshot). The internal
-// setpoint stays tenths of °C; relative is a −10…+10 level view over it.
+// setpoint stays tenths of °C; relative is a −15…+15 level view over it
+// (DIAL_REL_MIN/MAX, dial_state.h).
 static bool s_rel;
 
 // Current configured arc range, tenths of °C. Absolute mode keeps the pad's
@@ -401,7 +402,7 @@ static void apply_identity(const dial_palette_t *pal, bool night)
 /* ---- numeral formatting (setpoint AND water, §3a) ----------------------- */
 // The value passed in is always tenths of °C (dc) — the internal, canonical
 // representation (see dial_state.h). Relative mode shows the nearest
-// −10…+10 level ("+3" / "0" / "-3"); the '+' is the glyph spliced into
+// −15…+15 level ("+3" / "0" / "-3"); the '+' is the glyph spliced into
 // dial_font_num_88 (level 0 is a bare "0", no sign) and present outright in
 // dial_font_num_140 (docs/SPEC-night-face.md §5). Absolute mode shows the
 // dc value directly (a trivial /10 split, exact — no rounding, since it IS
@@ -435,11 +436,27 @@ static void render_value(int temp_dc, char *out, size_t out_sz)
     }
 }
 
+// The unit label (#9) is anchored to the numeral's right edge here, not to
+// a fixed screen slot: at a fixed x=266 the wide numerals ("20.0" in °C,
+// "+10"…"+15" in relative) ran straight through it (2026-09-04 layout
+// audit §1a). OUT_RIGHT_TOP with a 22px gap and −6 lift puts the °F case
+// exactly where the fixed slot had it (box x 254–275 vs 255–277 before,
+// same y), and the widest cases ("20.0 °C" → 320, "+15 LEVEL" → 335) stay
+// inside the chord at the unit's y-band (x ≤ 347). lv_obj_align_to
+// re-lays-out the screen first, so the numeral's fresh width is what gets
+// measured. The range-stop nudge animates s_num_box's x, not the label, so
+// the unit stays put during a nudge exactly as before.
+static void place_unit(void)
+{
+    lv_obj_align_to(s_unit_lbl, s_temp_lbl, LV_ALIGN_OUT_RIGHT_TOP, 22, -6);
+}
+
 static void render_numeral(int temp_dc)
 {
     char t[8];
     render_value(temp_dc, t, sizeof t);
     lv_label_set_text(s_temp_lbl, t);
+    place_unit();
 }
 
 /* ---- water alternation (docs/SPEC-night-face.md §3a) -------------------- */
@@ -464,6 +481,7 @@ static void alt_show_water(void)
     char t[8];
     render_value(s_actual_dc, t, sizeof t);
     lv_label_set_text(s_temp_lbl, t);
+    place_unit();
     lv_obj_set_style_text_color(s_temp_lbl, s_level_accent, 0);
     lv_label_set_text(s_water_word, "WATER");
     lv_obj_set_style_text_color(s_water_word, s_level_accent, 0);
@@ -1111,11 +1129,12 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_align(s_water_word, LV_ALIGN_CENTER, 0, 92 - CY);
     lv_obj_add_flag(s_water_word, LV_OBJ_FLAG_HIDDEN);
 
-    // #9 Unit.
+    // #9 Unit. No fixed position: place_unit() (see render_numeral) anchors
+    // it to the numeral's right edge on every render, so it follows the
+    // digits' width instead of being overprinted by them.
     s_unit_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_unit_lbl, &lv_font_montserrat_20, 0);
     lv_label_set_text(s_unit_lbl, "\xC2\xB0" "F");
-    lv_obj_align(s_unit_lbl, LV_ALIGN_CENTER, 266 - CX, 122 - CY);
 
     // #10 State pill.
     s_pill = lv_obj_create(scr);
@@ -1220,11 +1239,15 @@ static void create(lv_obj_t *scr, void *arg)
     // reassessment) the ambient "Update available" indicator. Both tiny,
     // both hidden unless their own condition holds. Parked in the one
     // genuinely dead patch of this carefully-laid-out face rather than a new
-    // region: the gap between the power disc's bottom edge (#11, now
-    // 280+36=316 since the owner-pass-3 shrink) and the page dots (#13,
-    // y=340) sits squarely inside the arc's own
-    // 90deg gap at 6 o'clock (#2), the same void the disc and dots already
-    // share — and neither state this label carries claims the slot
+    // region: the 21px gap between the power disc's bottom edge (#11, now
+    // 280+36=316 since the owner-pass-3 shrink) and the page dots' ink top
+    // (#13, 337 — the dots are centred at 340) sits squarely inside the
+    // arc's own 90deg gap at 6 o'clock (#2), the same void the disc and
+    // dots already share. A 15px Mont 12 line centred in that 316→337
+    // budget is y=326: ink 321–332, 5px under the disc and 2px above the
+    // dots (at the old 330 the "p" descender of "Update available" overran
+    // the dots by 2px — 2026-09-04 layout audit §1b). Neither state this
+    // label carries claims the slot
     // permanently (pending_verify is gone within ~30s of boot; the update
     // notice disappears the moment the update is installed, skipped, or
     // night falls).
@@ -1233,7 +1256,7 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_text_align(s_ota_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_ota_lbl, "Finalizing update...");
     lv_obj_clear_flag(s_ota_lbl, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(s_ota_lbl, LV_ALIGN_CENTER, 0, 330 - CY);
+    lv_obj_align(s_ota_lbl, LV_ALIGN_CENTER, 0, 326 - CY);
     lv_obj_add_flag(s_ota_lbl, LV_OBJ_FLAG_HIDDEN);
     // Touch target for the "Update available" state only (CLICKABLE is
     // added/removed per-render, same idiom as s_pill above). ext_click_area

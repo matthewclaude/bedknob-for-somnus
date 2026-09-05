@@ -1,5 +1,7 @@
 # PLAN — Implementing the screen layout audit (for review)
 
+> **Status (2026-09-04):** Section S and Tier A are done — Section S in commit `a009840` ("sim: scenarios for the layout audit"), Tier A in the commit immediately after it ("ui: layout fixes A1-A5 from the screen audit"); see `docs/REPORT-layout-phase1.md` and the audit report's "Resolution — phase 1". Tiers B, C, D untouched.
+
 Companion to `docs/REPORT-screen-layout-audit.md`, which has the
 measurements behind every item. This is the proposed change list, grouped
 by risk, with the exact edit for each so the review can approve, drop, or
