@@ -1323,3 +1323,62 @@ valid on the next boot rather than trying to roll forward again, and the
 row must be hidden when the inactive slot holds no valid image
 (`esp_ota_get_state_partition()` / a blank slot after a wire flash). Not
 scheduled; recorded so it is not re-derived.
+
+### 9.9 Stable channel never received the beta-discovery fix
+
+Added 2026-09-05. Every fact below was re-checked against `git log` / `git
+show` / `git tag --contains` when written, not carried over from §9.7.
+
+**The ordering.** `somnus-v0.1.4` — the current stable release, and the
+image the web flasher installs when "Install beta build instead" is left
+unchecked (`manifest.json` → `firmware/latest/somnus-dial-merged.bin`) —
+is a lightweight tag on commit `56aded3` ("release: 0.1.4 — v1 new-user
+path verified on hardware"; authored 2026-09-03 11:06:28 -0500, committed
+11:10:12 -0500). The beta-discovery fix described in §9.7 — the beta path
+switching from `GET /releases?per_page=5` (scan cap 5) to `GET
+/tags?per_page=50` followed by `GET /releases/tags/<tag>` — is commit
+`819f102` ("ota: beta channel picks the newest tag, then fetches that
+release; the release list order is not newest-first"), 2026-09-03 15:10:39
+-0500: four hours **after** the 0.1.4 tag. `git merge-base --is-ancestor
+819f102 somnus-v0.1.4` fails; `git tag --contains 819f102` lists exactly
+`somnus-v0.1.5-beta.2`, `-beta.3`, `-beta.4`, `-beta.5` and nothing else.
+`dial_ota.c` at `somnus-v0.1.4` still carries the `releases?per_page=5`
+URL and `RELEASES_LIST_SCAN_CAP 5`.
+
+**What a 0.1.4 unit does.** With Beta builds **on**, the 0.1.4 code asks
+for the first five entries of the release list. `somnus-dial-releases`
+has exactly five stable releases (`0.1.0`–`0.1.4`), and §9.7 established
+that prereleases sort after them in that list, so the scan never sees a
+beta — the §9.7 bug, unchanged, because the fix only ever shipped in
+prereleases. The unit logs `latest 0.1.4, running 0.1.4 -- up to date`
+and cannot discover any beta over the air, indefinitely, until a stable
+build carrying the fix is installed by wire or by OTA. With Beta builds
+**off** the same unit reads `/releases/latest`, which excludes
+prereleases by definition, and correctly reports the same line.
+
+**Seen on hardware, 2026-09-05** (`docs/REPORT-ota-beta-not-found.md`):
+a bench unit reporting `running 0.1.4`, with `somnus-v0.1.5-beta.5`
+already published as a prerelease, logged `latest 0.1.4, running 0.1.4
+-- up to date` eight times across eight manual checks. One caveat on the
+evidence: at the 0.1.4 tag both channels converge on the same `ESP_LOGI`
+line, so the serial capture alone does not show which channel the unit
+was on. The toggle state was not separately recorded during that capture.
+The code-level consequence above stands regardless; the capture is
+consistent with it, not independent proof of the toggle position.
+
+**Who this hits.** A stranger who follows the documented first-install
+path (browser flasher, default manifest, stable image) and later turns
+on Beta builds sees "up to date" for every beta, forever, with no error
+and nothing on screen or serial to say the check was structurally unable
+to succeed. §9.7 predicted this for "a future fleet"; the point of this
+section is that it is the situation for anyone on stable today, not a
+hypothetical.
+
+**Where the fix lives.** Only in `0.1.5-beta.2` through `0.1.5-beta.5`.
+No stable release ships it. (`0.1.5-beta.1` predates it too.)
+
+**Open, deliberately undecided here:** whether to cut a new stable
+release carrying the fix before v1 closes, or handle it another way
+(e.g. accept that the beta channel only works for units that reach it by
+wire, and document that). Not decided in this pass; recorded so the
+decision is made on purpose.

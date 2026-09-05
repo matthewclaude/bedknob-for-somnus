@@ -21,6 +21,45 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.5 — 2026-09-05
+
+The first stable release since `0.1.4`. Everything below shipped incrementally
+on the beta channel (`0.1.5-beta.1` through `-beta.5`); this collects it for
+anyone upgrading straight from stable.
+
+### Added
+
+- **Settings → Night mode.** Pick when the dial switches to its dim, warm
+  night look: Off, 9 pm – 7 am, or 10 pm – 6 am. Off runs day brightness and
+  haptics around the clock, and the update-available prompt can now appear
+  at night too. Defaults to 9 pm – 7 am, the fixed window this firmware has
+  always used. The auto-update window now follows Night mode's end time
+  (two hours after, two hours wide) instead of a fixed 9–11 am, and the
+  Update screen shows that window directly. The Night mode row explains
+  itself when it can't do anything yet ("— set timezone" / "— no clock").
+- **Night face.** While Night mode is active, the dial shows just the
+  temperature, much larger, with the unit, water line, status pill and side
+  label out of the way. While the bed is heating or cooling it alternates
+  between your setting and the water temperature every two seconds.
+  Settings → Night face picks Number only (default) or Full.
+- **Battery indicator and percentage.** On battery, a small mark at the top
+  of the face and clock tracks charge level continuously and breathes red
+  below 15%. Plugging in shows a lightning mark for three seconds, then
+  goes quiet. Menu → About → Battery now shows percent and voltage.
+- **Menu → About redesign.** Every row (Firmware, IDF, Wi-Fi, Pad, Battery)
+  is now a centered stack — small title, large value, optional detail line
+  — instead of label-left/value-right. Wi-Fi and Pad are new rows (network
+  name/signal, and the bed's address, replacing "Serial").
+
+### Fixed
+
+- **The beta channel could miss a beta release once five or more stable
+  releases existed**, and — since this fix had only ever shipped inside a
+  beta release itself — a device on stable `0.1.4` turning on Beta builds
+  hit the exact same bug and could never discover any beta. Both directions
+  are fixed now: update checks no longer depend on how GitHub orders its
+  release list, on either channel.
+
 ## 0.1.5-beta.5 — 2026-09-04 (beta)
 
 ### Added
