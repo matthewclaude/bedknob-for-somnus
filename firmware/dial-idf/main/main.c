@@ -148,6 +148,19 @@ static void knob_init(void)
 
 /* ---- navigation policy (runs in the LVGL task) ------------------------ */
 
+// Standby face (docs/SPEC-standby-face.md): the screen the router shows
+// while dial_power_level() == DPWR_STANDBY. Both STANDBY sites in nav_policy
+// read this one rule. Commit 1 (§6) hard-wires Temperature — the dial face,
+// which dial_power dims to the STANDBY duty like any other screen, so a wake
+// is a brightness change and not a screen transition. Commit 2 makes this
+// read the ui/sb_face pref — default Temperature (SCR_DIAL) per the spec's
+// 2026-09-05 ruling, with SCR_STANDBY (the clock) as the other value.
+static screen_id_t standby_screen(const app_state_t *st)
+{
+    (void)st;   // commit 2 reads the pref off st here
+    return SCR_DIAL;
+}
+
 static screen_id_t nav_policy(const app_state_t *st, void **arg)
 {
     // OTA install takeover (M6 UX hardening): once the confirmed install on
@@ -365,7 +378,7 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
                            cur == SCR_WIFI || cur == SCR_ABOUT || cur == SCR_UPDATE;
             if (passive && dial_power_level() == DPWR_STANDBY) {
                 *arg = (void *)(uintptr_t)st->ui_zone;
-                return SCR_STANDBY;
+                return standby_screen(st);
             }
             // ADJUST_MODE joins BRIGHTNESS_MENU here (not the idle-dismissed
             // passive set above): both are Settings sub-screens reached by a
@@ -396,7 +409,7 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
                 ((st->fresh_device && !st->side_picked) || cur == SCR_SIDEPICK))
                 return SCR_SIDEPICK;
             *arg = (void *)(uintptr_t)st->ui_zone;
-            return dial_power_level() == DPWR_STANDBY ? SCR_STANDBY : SCR_DIAL;
+            return dial_power_level() == DPWR_STANDBY ? standby_screen(st) : SCR_DIAL;
         }
         // Never trap the user (field incident 2026-07-28): with no device
         // state the connect/error screen used to own the display outright,
