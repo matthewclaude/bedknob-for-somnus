@@ -1298,6 +1298,13 @@ exists to test against), and a beta dial graduating onto the matching
 stable release (`0.1.5-beta.N` → `0.1.5`), which happens the day stable
 `0.1.5` ships.
 
+*Update 2026-09-05:* stable `0.1.5` shipped. A `0.1.4` dial (Beta builds
+off) took it over the air on the bench — `latest 0.1.5, running 0.1.4 --
+update available`, ~21 s download+verify, booted `App version: 0.1.5`,
+rollback cancelled at 3.9 s (`docs/REPORT-0.1.5-upgrade-path-verify.md`,
+`bench-logs/2026-09-05-upgrade-0.1.4-to-0.1.5.log`). The beta.N → 0.1.5
+graduation and the 404/draft fallback remain unobserved on hardware.
+
 ### 9.8 Downgrading from a beta — verified against the code 2026-09-03
 
 There is no over-the-air downgrade, by design. `is_newer()` gates every
@@ -1382,3 +1389,14 @@ release carrying the fix before v1 closes, or handle it another way
 (e.g. accept that the beta channel only works for units that reach it by
 wire, and document that). Not decided in this pass; recorded so the
 decision is made on purpose.
+
+**Resolved 2026-09-05 — stable `0.1.5` cut.** Tag `somnus-v0.1.5` on
+`1f527bb`, published as a non-prerelease by run 33935053719
+(`docs/REPORT-0.1.5-ci-check.md`); `/releases/latest` now returns it. Both
+0.1.4 toggle positions reach 0.1.5: Beta off via `/releases/latest`
+(verified on hardware, `docs/REPORT-0.1.5-upgrade-path-verify.md`); Beta
+on because 0.1.5 happened to land first in the five-entry list (observed
+via the API, not on hardware — and still GitHub's tie-break, which is the
+whole reason the fixed code stopped relying on it). Once a stable dial is
+on 0.1.5 it carries the tags-endpoint code, so this class of miss cannot
+recur for it.

@@ -2,7 +2,7 @@
 
 > **Not affiliated with, endorsed by, or supported by Somnus Lab or Waveshare.**
 > An independent, community-built project. **Beta** — current release
-> `somnus-v0.1.4`.
+> `somnus-v0.1.5`.
 
 Turn a knob to change the temperature of your bed. This project turns a
 **Waveshare ESP32-S3 round touch-LCD knob** into a standalone bedside dial
@@ -102,8 +102,7 @@ the normal way to update.
   its warm palette, dimmer backlight and softer haptics: 9 pm – 7 am, 10 pm
   – 6 am, or Off. Plus a **standby clock face** when idle, separate
   brightness for day, night and the clock, and a screen timeout. *(Night
-  mode is new in 0.1.5-beta.1; on the stable channel the window is fixed at
-  9 pm – 7 am until 0.1.5 ships.)*
+  mode arrived in 0.1.5-beta.1 and shipped on the stable channel in 0.1.5.)*
 - **Over-the-air updates** from this project's GitHub Releases, with
   bootloader rollback if an image fails to boot, an optional beta channel,
   and optional automatic installs in a two-hour window after night ends

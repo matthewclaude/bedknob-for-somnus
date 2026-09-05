@@ -47,3 +47,4 @@ reference/sleep_temps.csv
 # Local research/reference material — personal pad data, the vendor's API
 # spec, and scratch viewers. Not part of the firmware; never publish.
 reference/
+Claude outputs/

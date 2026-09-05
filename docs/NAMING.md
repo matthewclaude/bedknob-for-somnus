@@ -28,7 +28,7 @@ construction is not worth losing.
 |---|---|---|
 | Somnus Dial / the dial | Bedknob for Somnus | **Copy surfaces done Sep 3** — root README, firmware READMEs, ARCHITECTURE.md, flasher page (title, H1, description, button, manifests' `name` field), SoftAP name `Bedknob-XXXX`, portal page title and heading. GitHub repo still `matthewclaude/somnus-waveshare-rotary-dial`; binary, tag and URL identifiers stay by design (see below). |
 | SomnusDialPreview | Bedknob for Mac | **Done Sep 2** — package, target, module, directories, app struct, Info.plist, build.sh, docs. Builds clean, 9/9 tests pass. GitHub repo still `matthewclaude/SomnusDialPreview`. |
-| SomnusWidget | Bedknob Mini | **Not started** |
+| SomnusWidget | Bedknob Mini | **Not started — not under git** |
 
 ## What is still outstanding
 
@@ -48,6 +48,12 @@ construction is not worth losing.
    all updated Sep 2 2026. Only the summary's *filename*
    (`somnus-dial-project-summary.md`) still carries the old name; fold that into the
    rename pass.
+5. **Sep 5 2026 audit of what is actually published.** The firmware repo's GitHub
+   default branch is still `main`, which points at the un-ported Orion code — that is
+   why the GitHub repo page shows the Orion README rather than this one; the ported
+   firmware lives on `firmware/somnus-port`. The Mac repo's rename commit `d762ba6`
+   ("Rename to Bedknob for Mac …") was never pushed, so GitHub still shows
+   SomnusDialPreview. `~/Projects/SomnusWidget` is not a git repository at all.
 
 ## Naming assets
 
