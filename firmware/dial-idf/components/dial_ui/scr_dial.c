@@ -897,11 +897,23 @@ static void handle_event_cb(lv_event_t *e)
     // LV_EVENT_RELEASED / LV_EVENT_PRESS_LOST — end of the drag. "The knob
     // wins" (§3a): starts the post-release lock window here; s_dragging
     // itself already covered the drag proper.
+    //
+    // Commit exactly on the grid in BOTH scales: the relative-level grid
+    // when s_rel, else the nearest whole degree (round-half-up; dc >=
+    // s_arc_min >= 120, never negative). value_from_point() maps the finger
+    // to any tenth, and until 2026-09-05 absolute mode posted that raw tenth
+    // — the bench log showed 42.3 from a drag, then 41.3, 40.3 … by knob.
+    // The pad must never be asked for a tenth from this dial; the snap
+    // happens before the render and the post so the numeral, the fill, the
+    // handle and the bed all land on the same whole degree.
     s_dragging = false;
     s_last_interact_ms = lv_tick_get();
     int dc = s_shown_dc;
-    if (s_rel) {                          // commit exactly on the relative-level grid
-        dc = dial_rel_to_dc(dial_rel_from_dc(dc));
+    if (s_rel) dc = dial_rel_to_dc(dial_rel_from_dc(dc));
+    else       dc = ((dc + 5) / 10) * 10;
+    if (dc < s_arc_min) dc = s_arc_min;   // 42.0 rounds to itself; the clamp only
+    if (dc > s_arc_max) dc = s_arc_max;   // matters if a rail ever sits off-grid
+    if (dc != s_shown_dc) {
         s_shown_dc = dc;
         lv_arc_set_value(s_arc, dc);
         render_numeral(dc);
@@ -1411,16 +1423,27 @@ static bool on_knob(int detents)
     // Absolute: one detent = 10 tenths = exactly 1.0°C (the Q1 units fix's
     // design decision — matches the Somnus app's own whole-degree scale, so
     // the dial and the app never disagree about the setpoint, even though
-    // the pad itself accepts finer values), clamped to s_arc_min/s_arc_max —
-    // the same device-reported (or fallback) rails configure_arc_range() just
-    // set, read back here rather than re-deriving them, since this branch
-    // only runs when s_rel is false (so s_arc_min/max already hold the
-    // absolute range, not the relative one).
+    // the pad itself accepts finer values), stepped from the DISPLAYED value
+    // snapped to its nearest whole degree first — the same rule
+    // dial_rel_step applies to levels. Without the snap an off-grid start
+    // (a 42.3 posted by an older build's rail, or a 33.5 set from the app)
+    // carried its tenth through every later detent until a rail reset it.
+    // Round-half-up: s_shown_dc >= s_arc_min >= 120 here, never negative,
+    // so plain integer division is a true floor. Then clamped to
+    // s_arc_min/s_arc_max — the rails configure_arc_range() just set (120/420
+    // from main.c, or the fallback), read back here rather than re-derived,
+    // since this branch only runs when s_rel is false (so s_arc_min/max
+    // already hold the absolute range, not the relative one). The range-stop
+    // test below (nf == s_shown_dc) still fires at both rails from an
+    // on-grid value; from an off-grid value it deliberately does NOT
+    // (423 + up -> base 420 -> 430 -> clamp 420 != 423): that detent snaps
+    // the display and the bed onto the grid instead of nudging.
     int nf;
     if (s_rel) {
         nf = dial_rel_step(s_shown_dc, detents);
     } else {
-        nf = s_shown_dc + detents * 10;
+        int base = ((s_shown_dc + 5) / 10) * 10;   // nearest whole degree
+        nf = base + detents * 10;
         if (nf < s_arc_min) nf = s_arc_min;
         if (nf > s_arc_max) nf = s_arc_max;
     }

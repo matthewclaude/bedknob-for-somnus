@@ -122,6 +122,29 @@ static void sim_tap(lv_coord_t x, lv_coord_t y)
     pump_ms(60);
 }
 
+// A press at (x0,y0) that travels to (x1,y1) and is HELD there — the same
+// pointer indev as sim_tap, so LV_EVENT_PRESSED lands on whatever sits at
+// the start point and LV_EVENT_PRESSING follows the point. Two intermediate
+// steps so the move looks like a finger, not a teleport. sim_release() ends
+// it (LV_EVENT_RELEASED). Used to drive scr_dial's setpoint handle.
+static void sim_drag_to(lv_coord_t x0, lv_coord_t y0, lv_coord_t x1, lv_coord_t y1)
+{
+    s_ptr_x = x0; s_ptr_y = y0;
+    s_ptr_pressed = true;
+    pump_ms(60);
+    for (int i = 1; i <= 3; i++) {
+        s_ptr_x = x0 + (x1 - x0) * i / 3;
+        s_ptr_y = y0 + (y1 - y0) * i / 3;
+        pump_ms(60);
+    }
+}
+
+static void sim_release(void)
+{
+    s_ptr_pressed = false;
+    pump_ms(60);
+}
+
 /* ---- PNG output ----------------------------------------------------------*/
 
 static void ensure_dir(const char *path)
@@ -445,6 +468,105 @@ static void scenario_dial_night_water(void)
     pump_ms(3000);
     snapshot("dial-night-water");
     dial_palette_set_night(false);
+}
+
+/* ---- absolute-mode rails + whole-degree grid (fix(dial), 2026-09-05) ----
+ * The dial's absolute rails are 120..420 (main.c seeds them on connect —
+ * the Somnus app's whole-degree scale, same as the relative rails). The
+ * sim's baseline leaves temp_min_dc/temp_max_dc at -1 (fallback 100..450),
+ * so these scenarios seed the connected values themselves and put them
+ * back after, leaving every other dial render untouched. °C so the numeral
+ * shows the tenth if one survives. ui_temp_dc is cleared too: sim_knob /
+ * a drag on the dial post through dial_state_set_ui_temp, and on_state
+ * prefers that over temp_dc, so a stale one from the previous scenario
+ * would otherwise win. Same SCR_MENU bounce as scenario_dial_celsius. */
+static void rails_setup(int temp_dc)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    app_state_t *st = sim_state_ptr();
+    st->units_c = true;
+    st->temp_min_dc = 120;
+    st->temp_max_dc = 420;
+    st->ui_temp_dc[ZONE_A] = -1;
+    st->ui_temp_dc[ZONE_B] = -1;
+    st->ui_zone = ZONE_A;
+    zone_state_t *a = &st->zones[ZONE_A];
+    a->on = true;
+    a->temp_dc = temp_dc;
+    a->actual_c = 26.0f;   // below every setpoint used here: heating
+    st->generation++;
+    ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(600);
+}
+
+static void rails_teardown(void)
+{
+    app_state_t *st = sim_state_ptr();
+    st->temp_min_dc = -1;
+    st->temp_max_dc = -1;
+    st->ui_temp_dc[ZONE_A] = -1;
+    st->ui_temp_dc[ZONE_B] = -1;
+    st->generation++;
+}
+
+// Screen point on the ring at a setpoint, for the pointer indev. Mirrors
+// scr_dial.c's position_handle / value_from_point mapping: 270° sweep from
+// 135° (lower-left) clockwise, radius = ARC_R − arc width / 2 = 165 − 8 (the
+// handle's ext_click_area of 14 px makes a few px of error irrelevant).
+static void ring_point(int dc, int lo, int hi, lv_coord_t *x, lv_coord_t *y)
+{
+    float frac = (float)(dc - lo) / (float)(hi - lo);
+    float ang  = (135.0f + frac * 270.0f) * 3.14159265f / 180.0f;
+    *x = (lv_coord_t)(180 + lroundf(157.0f * cosf(ang)));
+    *y = (lv_coord_t)(180 + lroundf(157.0f * sinf(ang)));
+}
+
+// From the 42.0 rail: one detent up is the range stop ("42" stays, the
+// numeral nudges), then one detent down reads "41". Before the fix the
+// rail was 423 and the first detent read "42.3".
+static void scenario_rails_420(void)
+{
+    rails_setup(420);
+    sim_knob(1);
+    pump_until_idle(800);   // the range-stop nudge is an lv_anim
+    snapshot("rails-420-up");
+    sim_knob(-1);
+    pump_until_idle(800);
+    snapshot("rails-420-up-down");
+    rails_teardown();
+}
+
+// A pad setpoint of 42.3 (set by an older build or the app) above the
+// 42.0 rail: renders as "42.3" with the handle pinned at the rail end
+// (position_handle clamps frac to 1, lv_arc clamps the value), and the
+// first detent — up, against the rail — snaps it onto the grid: "42".
+static void scenario_rails_423(void)
+{
+    rails_setup(423);
+    snapshot("rails-423");
+    sim_knob(1);
+    pump_until_idle(800);
+    snapshot("rails-423-up");
+    rails_teardown();
+}
+
+// A handle drag that lands off-grid: press the handle at 30.0, drag it to
+// the ring angle for 33.7 and hold — the live numeral follows the finger
+// ("33.7"); release — the commit snaps to the nearest whole degree ("34").
+static void scenario_rails_drag_337(void)
+{
+    rails_setup(300);
+    lv_coord_t x0, y0, x1, y1;
+    ring_point(300, 120, 420, &x0, &y0);
+    ring_point(337, 120, 420, &x1, &y1);
+    sim_drag_to(x0, y0, x1, y1);
+    snapshot("rails-drag-337-live");
+    sim_release();
+    pump_until_idle(800);
+    snapshot("rails-drag-337");
+    rails_teardown();
 }
 
 // Also documents the M7 permanent "Update" row (replaces the M6 conditional
@@ -1006,6 +1128,9 @@ int main(void)
     scenario_dial_celsius();
     scenario_dial_relative_max();
     scenario_dial_night_water();
+    scenario_rails_420();
+    scenario_rails_423();
+    scenario_rails_drag_337();
     scenario_menu();
     scenario_update();
     scenario_update_prompt();

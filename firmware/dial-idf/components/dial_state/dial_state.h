@@ -81,8 +81,10 @@ static inline int dial_c_to_f(float c) { return (int)lroundf(c * 1.8f + 32.0f); 
 // convert a whole-°F value back into the canonical unit.)
 static inline int dial_dc_to_f(int dc) { return (int)lroundf((float)dc * 0.18f + 32.0f); }
 
-// ABSOLUTE display range, tenths of °C. Superseded at runtime by the pad's
-// own fixed range (dial_somnus.h: 12.0-42.3°C, seeded once into
+// ABSOLUTE display range, tenths of °C. Superseded at runtime by the dial's
+// fixed rails (12.0-42.0°C, the Somnus app's whole-degree scale — the same
+// rails as relative mode; the pad itself accepts up to 42.3 per
+// dial_somnus.h but the dial never sets it — seeded once into
 // app_state_t.temp_min_dc/temp_max_dc right after the first successful
 // connect — see main.c's worker_task) — screens read it through
 // dial_state_temp_min_dc()/dial_state_temp_max_dc() below, never these
@@ -324,7 +326,8 @@ typedef struct {
     // rounds the pad's reported float to the nearest 0.1°C on the way in, the
     // one deliberate, one-directional C(float)->C(int tenths) quantization
     // this design makes; nothing downstream of this field ever converts
-    // through °F. Spec range 12.0-42.3°C = 120-423 here.
+    // through °F. The dial's own rails are 12.0-42.0°C = 120-420 here (the
+    // pad accepts up to 42.3 and may report a value this dial never set).
     int   temp_dc;
     float actual_c;     // measured water temp (current_c); <0 = unknown (mirrors
                         // somnus_side_state_t.has_current — the pad reports no
@@ -423,12 +426,14 @@ typedef struct {
     // again with no further plumbing. Not session-optimistic like Orion's
     // version was; there's no write path to be optimistic about.
     bool    away;
-    // Absolute temperature range, tenths of °C, mirrored here once
+    // Absolute temperature range, tenths of °C, seeded here once
     // worker_task connects successfully. Somnus's pad has no discovery
-    // call to report its own rails (unlike Orion's list_devices), but the
-    // local_api spec fixes them at 12.0-42.3°C regardless of pad -- see
-    // dial_somnus.h. This, not the DIAL_TEMP_MIN_DC/MAX_DC constants, is what
-    // the arc range / knob clamp / drag clamp use in ABSOLUTE mode.
+    // call to report its own rails (unlike Orion's list_devices); the dial
+    // uses the Somnus app's whole-degree scale, 12.0-42.0°C, identical to
+    // the relative rails (DIAL_REL_MIN_DC/MAX_DC) -- the pad accepts up to
+    // 42.3 (local_api spec, dial_somnus.h) but the dial never sets it. This,
+    // not the DIAL_TEMP_MIN_DC/MAX_DC constants, is what the arc range /
+    // knob clamp / drag clamp use in ABSOLUTE mode.
     // -1 = not yet known (fresh boot, before the first successful connect)
     // -- dial_state_temp_min_dc()/_max_dc() below fall back to the
     // DIAL_TEMP_MIN_DC/MAX_DC constants then.

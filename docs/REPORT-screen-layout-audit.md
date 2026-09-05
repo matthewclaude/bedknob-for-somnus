@@ -498,3 +498,29 @@ to the A1 renders. A new scenario, `dial-night-water.png`, renders the
 Number-only night face mid water-phase in °C with the water at 23.4 °C and
 the setpoint at 34 °C: "23.4" in the accent with WATER above it, proving
 the tenth survives. Report: `docs/REPORT-layout-a1b.md`.
+
+**Range-stop / drag grid bug (2026-09-05, found on hardware during the
+phase-1 eyes-on; the drag half in the A1b bench log):** in absolute mode the
+setpoint could walk off the whole-degree grid by two routes. (a) Knob:
+`main.c` seeded the dial's rails from the API's accept range, `{ 120, 423 }`,
+and `on_knob()`'s absolute branch stepped `s_shown_dc ± 10` and clamped to
+that 423, so one detent above 42.0 landed on 42.3 and every later value
+carried the 3 until the 12.0 rail reset it. (b) Drag: the handle's release
+handler in `scr_dial.c` snapped to the grid only in relative mode and posted
+the raw `value_from_point()` tenth otherwise (bench log: 42.3, then 41.3 …
+13.3 by knob). Fix, in one commit: the rails are now `{ 120, 420 }` — the
+Somnus app's whole-degree scale, identical to `DIAL_REL_MIN_DC/MAX_DC`; the
+pad accepts up to 42.3 but the dial never sets it (dial_state.h comments
+updated to match, dial_somnus.h left as the API description). `on_knob()`
+snaps the displayed value to its nearest whole degree before stepping
+(round-half-up, then the existing clamp), so an off-grid start such as 42.3
+or an app-set 33.5 lands on the grid on the first detent and the range-stop
+test still fires at both rails from on-grid values. The release handler
+snaps to the nearest whole degree in absolute mode exactly as it snaps to a
+level in relative mode, before the render and the post. Six simulator
+scenarios drive it through the real `on_knob` and pointer-indev paths:
+`rails-420-up.png` "42" (pinned, nothing posted), `rails-420-up-down.png`
+"41" (posts 410), `rails-423.png` "42.3" with the handle pinned at the rail
+end, `rails-423-up.png` "42" (posts 420 — not pinned, by design),
+`rails-drag-337-live.png` "33.7" mid-drag, `rails-drag-337.png` "34" on
+release (posts 340). Report: `docs/REPORT-rails-fix.md`.

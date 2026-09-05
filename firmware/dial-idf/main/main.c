@@ -1051,13 +1051,18 @@ static void worker_task(void *arg)
     dial_somnus_set_zone_mode(dial_state_get_zone_mode());
     ESP_LOGI(TAG, "pad connected at %s", pad_url);
 
-    // Fixed pad range (local_api spec, dial_somnus.h) — no discovery call to
-    // report it, unlike Orion's list_devices, so seed it once here instead
-    // of per-poll. Hardcoded directly in the canonical unit (tenths of °C):
-    // 12.0-42.3°C == 120-423dc, no conversion needed or wanted — there is no
-    // °F anywhere upstream of this to convert from.
+    // Fixed dial rails — no discovery call to report them, unlike Orion's
+    // list_devices, so seed them once here instead of per-poll. Hardcoded
+    // directly in the canonical unit (tenths of °C): 12.0-42.0°C == 120-420dc,
+    // no conversion needed or wanted — there is no °F anywhere upstream of
+    // this to convert from. These are the Somnus app's own whole-degree scale
+    // 12-42, identical to the relative rails (DIAL_REL_MIN_DC/MAX_DC): the
+    // pad accepts up to 42.3 (local_api spec, dial_somnus.h) but the dial
+    // never sets it — seeding the API's 423 here put one detent above 42.0
+    // on 42.3 and every value after it off the whole-degree grid until the
+    // 12.0 rail reset it (found on hardware 2026-09-05).
     {
-        temp_range_t range = { 120, 423 };
+        temp_range_t range = { 120, 420 };
         dial_state_commit(mut_temp_range, &range);
     }
 
