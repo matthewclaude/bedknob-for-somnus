@@ -1,6 +1,6 @@
 # Spec: Standby face — Clock or Temperature
 
-Status: **Commit 1 BUILT (`03e6259`) and VERIFIED ON HARDWARE 2026-09-05 — owner: "exactly my vision." Commit 2 (the setting) next.** Default Temperature per owner. Target: its own beta after `0.1.6-beta.1` (one feature per beta). Replaces the earlier "screen-timeout Off" idea, which was rejected on 2026-09-05 for the reasons in §1.
+Status: **BUILT (`03e6259` consumer, `9dad0b2` setting) and VERIFIED ON HARDWARE 2026-09-05 — owner: "works exactly as designed, °C and °F, night and day, Clock and Temperature." Ships as `0.1.6-beta.2`.** Default Temperature per owner. Target: its own beta after `0.1.6-beta.1` (one feature per beta). Replaces the earlier "screen-timeout Off" idea, which was rejected on 2026-09-05 for the reasons in §1.
 
 > **Note for an on-disk reader:** `V1-scope.md`, `START-HERE.md`, `HARDWARE-bringup-log.md`, `LICENSING.md` and `somnus-dial-project-summary.md` are **not in this repo** — they live only in the Claude Project. Everything this spec needs is restated here.
 
