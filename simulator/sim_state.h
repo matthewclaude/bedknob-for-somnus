@@ -24,3 +24,11 @@ void sim_state_reset(void);
 // an SSID/RSSI combination beyond that fixed default, e.g. a worst-case
 // 32-char SSID for a layout check. Pass ssid=NULL to go back to FAKE_SCAN[0].
 void sim_set_fake_ap(const char *ssid, int8_t rssi);
+
+// Test-only override for dial_time_get_iana_tz() (stubs.c normally returns
+// false -- "no zone ever set", the honest fresh-device state). Lets one
+// scenario render Settings' Timezone row with a raw IANA name the curated
+// picker doesn't offer (the 2026-09-04 layout audit's §2b case). Pass NULL
+// to go back to the default. dial_time_valid() stays false either way: the
+// hook fakes a persisted zone, not a synced clock.
+void sim_set_fake_iana_tz(const char *iana);

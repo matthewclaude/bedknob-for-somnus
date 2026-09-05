@@ -210,6 +210,12 @@ static void apply_baseline(void)
     // About/Pad row -- sim_state_reset()'s own fresh-device default,
     // reapplied the same way it's seeded there.
     dial_state_set_pad_url(DIAL_PAD_DEFAULT_BASE_URL);   // also restores PH_READY
+    // scenario_pad_discovery / scenario_pad_degraded_real leave a phase_err
+    // and retry countdown behind; dial_state_set_pad_url() above only
+    // resets the phase, so clear the text too or the next PH_DEGRADED
+    // render would echo a stale reason.
+    st->phase_err[0] = '\0';
+    st->retry_in_s = 0;
 
     st->zone_present[ZONE_A] = true;
     st->zone_present[ZONE_B] = true;
@@ -361,6 +367,52 @@ static void scenario_dial_relative(void)
     snapshot("dial-relative");
 }
 
+// The Home face in °C (Settings -> Units), at 20.0°C: the widest absolute
+// numeral the 88px font produces ("20.0", 191px -- only 1-heavy values are
+// narrower) and the 2026-09-04 layout audit's §1a worst case for the unit
+// label, which used to sit at a fixed screen slot the digits overprinted.
+// Bounces through SCR_MENU first: the previous scenario ended on this same
+// (SCR_DIAL, ZONE_A) pair and ui_router_go() no-ops on an identical one.
+static void scenario_dial_celsius(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    app_state_t *st = sim_state_ptr();
+    st->units_c = true;
+    st->ui_zone = ZONE_A;
+    zone_state_t *a = &st->zones[ZONE_A];
+    a->on = true;
+    a->temp_dc = 200;     // 20.0C
+    a->actual_c = 20.0f;  // at target: HOLDING
+    st->generation++;
+    ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(600);
+    snapshot("dial-celsius");
+}
+
+// The Home face in RELATIVE scale at the +15 rail (DIAL_REL_MAX_DC, 42.0°C):
+// the widest relative numeral ("+15" -- three glyphs, the spliced '+' plus
+// the wide '1'/'5'), the other §1a collision case for the "LEVEL" suffix.
+// Same SCR_MENU bounce as scenario_dial_celsius, same reason.
+static void scenario_dial_relative_max(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    app_state_t *st = sim_state_ptr();
+    st->rel_mode = true;
+    st->ui_zone = ZONE_A;
+    zone_state_t *a = &st->zones[ZONE_A];
+    a->on = true;
+    a->temp_dc = DIAL_REL_MAX_DC;   // 420 -> level +15
+    a->actual_c = 26.0f;            // below setpoint: still warming
+    st->generation++;
+    ui_router_go(SCR_DIAL, (void *)(uintptr_t)ZONE_A, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(600);
+    snapshot("dial-relative-max");
+}
+
 // Also documents the M7 permanent "Update" row (replaces the M6 conditional
 // "Install X.Y.Z" row — confirmation moved into SCR_UPDATE itself, this row
 // is now pure navigation): sets the OTA status to available with a pending
@@ -432,6 +484,26 @@ static void scenario_update_prompt(void)
     snapshot("update-prompt");
 }
 
+// The Update submenu with the last check FAILED: "Check for updates" grows
+// its third line (the error, LONG_DOT, warning tint) under label + value --
+// the tallest state that row has, and the one the 2026-09-04 layout audit
+// (§5a) measured against the 76px row. No knob-walk: the rotor already
+// opens on that row (scr_update.c's dial_list_settle(s_list, 1); row order
+// Back(0)/Check for updates(1)/Installed(2)/Auto-update(3)/Beta builds(4)),
+// so the three lines render in the focused, unzoomed slot.
+static void scenario_update_failed(void)
+{
+    apply_baseline();
+    app_state_t *st = sim_state_ptr();
+    st->ota.status = OTA_FAILED;
+    snprintf(st->ota.err, sizeof(st->ota.err), "check failed (HTTP -1)");
+    st->generation++;
+    ui_router_go(SCR_UPDATE, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("update-failed");
+}
+
 static void scenario_settings(void)
 {
     apply_baseline();
@@ -440,22 +512,91 @@ static void scenario_settings(void)
     snapshot("settings");
 }
 
-// Knob-walked down to the new "Pad Address"/"Bed Mode" pair (Back(0)/
-// Adjustment mode(1)/Brightness(2)/Screen timeout(3)/Scale(4)/Units(5)/
-// Haptics(6)/Rotation(7)/Pad Address(8)/Bed Mode(9)/Factory reset(10)) —
-// the rotor opens on Adjustment mode (index 1, dial_list_settle in
-// scr_settings.c's create()), so +7 detents lands focus on Pad Address with
-// Rotation/Bed Mode as its zoomed/faded neighbors, putting both new rows in
-// frame at once.
+// Knob-walked down to the "Pad Address"/"Bed Mode" pair. Row order as of
+// 2026-09-02 (Adjustment mode hidden; Night mode / Night face / Screen
+// timeout added -- scr_settings.c's create(); Night face is present because
+// sim_state_reset() ships night_on = true): Back(0)/Brightness(1)/Night
+// mode(2)/Night face(3)/Screen timeout(4)/Scale(5)/Units(6)/Haptics(7)/
+// Rotation(8)/Timezone(9)/Pad Address(10)/Bed Mode(11)/Factory reset(12).
+// The rotor opens on Brightness (index 1, dial_list_settle in create()), so
+// +9 detents lands focus on Pad Address with Timezone/Bed Mode as its
+// zoomed/faded neighbors, putting both rows in frame at once. (The earlier
+// +7 dated from the pre-2026-09-02 list and had drifted onto Rotation --
+// docs/REPORT-screen-layout-audit.md's "Stale screenshots".)
 static void scenario_settings_pad(void)
 {
     apply_baseline();
     ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
-    sim_knob(7);
+    sim_knob(9);
     pump_ms(300);
     pump_until_idle(800);
     snapshot("settings-pad");
+}
+
+// Settings' Timezone row showing a RAW IANA name rather than a curated
+// label -- the state a Wi-Fi-portal-applied zone outside scr_timezone.c's
+// 11 rows leaves behind (docs/SPEC-timezone-source.md "Displaying the
+// current value"; docs/REPORT-screen-layout-audit.md §2b). The only
+// simulator hook that fakes a persisted zone is sim_set_fake_iana_tz()
+// (stubs.c); dial_time_valid() stays false, so the Night mode row's §7
+// annotation reads "no clock" here instead of "set timezone" -- both are
+// real states and both have to fit. The zone has to be one NOT in
+// dial_state.h's DIAL_TZ_IANA[] or the row shows the curated label instead
+// (the audit's "America/Los_Angeles" example is in the list, and renders as
+// "Pacific"); America/Mexico_City is a real portal-detectable zone of the
+// same 19-character width, so the audit's §2b overlap numbers still apply.
+// Same row indices as scenario_settings_pad: +8 from Brightness(1) is
+// Timezone(9). Bounces via SCR_MENU because the previous scenario ended on
+// (SCR_SETTINGS, NULL).
+static void scenario_settings_timezone_raw(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    sim_set_fake_iana_tz("America/Mexico_City");
+    ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(8);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("settings-timezone-raw");
+    sim_set_fake_iana_tz(NULL);   // back to "Not set" for every scenario after this one
+}
+
+// The curated timezone picker (scr_timezone.c), opened from Settings (arg 0
+// -- see that file's s_origin packing). Plain navigate-and-snapshot: the
+// list had no checked-in render before the 2026-09-04 layout audit.
+static void scenario_timezone(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_TIMEZONE, (void *)(uintptr_t)0 /* from Settings */, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("timezone");
+}
+
+// The night-window picker (scr_night_mode.c) with night on (sim_state_reset's
+// default) and the clock invalid (stubs.c's dial_time_valid() is false), so
+// the §7 note under the title renders -- the audit's §12 seam case.
+static void scenario_night_mode(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_NIGHT_MODE, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("night-mode");
+}
+
+// The night-face picker (scr_night_face.c), Number only / Full. Plain
+// navigate-and-snapshot, same reason as scenario_timezone.
+static void scenario_night_face(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_NIGHT_FACE, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("night-face");
 }
 
 // The Pad Address text-entry screen (scr_pad_address.c), opened straight
@@ -489,6 +630,47 @@ static void scenario_pad_unreachable(void)
     ui_router_go(SCR_CONNECTING, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
     snapshot("pad-unreachable");
+}
+
+// The subnet-scan progress screen (scr_pad_discovery.c), mid pass 2: the
+// phase is PH_PAD_DISCOVERY and phase_err carries dial_pad_discovery.c's
+// "<headline>\n<checked>/<total>" shape, with the longer pass-2 headline
+// that wraps to two lines (docs/REPORT-screen-layout-audit.md §14). Nothing
+// opens this screen on purpose in the firmware (nav_policy does, on the
+// phase); the simulator has no nav policy, so it navigates directly.
+static void scenario_pad_discovery(void)
+{
+    apply_baseline();
+    app_state_t *st = sim_state_ptr();
+    st->phase = PH_PAD_DISCOVERY;
+    snprintf(st->phase_err, sizeof(st->phase_err),
+             "Still looking (checking more slowly)...\n137/254");
+    st->generation++;
+    ui_router_go(SCR_PAD_DISCOVERY, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("pad-discovery");
+}
+
+// PH_DEGRADED with a REALISTIC reason, not scenario_pad_unreachable's short
+// "(simulated)" one: the subtitle then wraps to four lines (the echoed
+// dial_somnus error, "Retrying in 27s", "Swipe left for menu") -- the
+// tallest case scr_connecting.c's block has to centre (audit §13). Same
+// "unreachable" URL trick to get the phase, then the reason and countdown
+// overwritten with what main.c's supervisor would actually publish. The
+// address is the pad API spec's example, not any real network.
+static void scenario_pad_degraded_real(void)
+{
+    apply_baseline();
+    dial_state_set_pad_url("http://unreachable.invalid:8080");
+    app_state_t *st = sim_state_ptr();
+    snprintf(st->phase_err, sizeof(st->phase_err),
+             "Somnus pad at 192.168.1.100:8080 not responding (HTTP -1)");
+    st->retry_in_s = 27;
+    st->generation++;
+    ui_router_go(SCR_CONNECTING, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    snapshot("pad-degraded-real");
 }
 
 // The Adjustment mode choice screen, reached from Settings' "Adjustment
@@ -580,6 +762,30 @@ static void scenario_wifi_info(void)
     ui_router_go(SCR_WIFI, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
     snapshot("wifi-info");
+}
+
+// SCR_WIFI's CONFIRM MODE (the "Change network" tap): body copy, Continue,
+// Cancel. Knob-walked from the opening focus (Network, index 1) down three
+// rows to "Change network" (index 4: Back/Network/IP/Signal/Change
+// network), then tapped at the focused row's centre through the same
+// pointer indev scr_passkey's pre-fill uses -- the real
+// row_change_network_cb path, not a reach into the screen's statics. Had
+// no checked-in render before the 2026-09-04 audit (§6). Bounces via
+// SCR_MENU: the previous scenario ended on this same (SCR_WIFI, NULL).
+static void scenario_wifi_confirm(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    ui_router_go(SCR_WIFI, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(3);
+    pump_ms(300);
+    pump_until_idle(800);
+    sim_tap(180, 180);   // the focused "Change network" row
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("wifi-confirm");
 }
 
 static void scenario_about(void)
@@ -763,19 +969,29 @@ int main(void)
     scenario_dial();
     scenario_dial_update();
     scenario_dial_relative();
+    scenario_dial_celsius();
+    scenario_dial_relative_max();
     scenario_menu();
     scenario_update();
     scenario_update_prompt();
+    scenario_update_failed();
     scenario_settings();
     scenario_settings_pad();
+    scenario_settings_timezone_raw();
+    scenario_timezone();
+    scenario_night_mode();
+    scenario_night_face();
     scenario_pad_address();
     scenario_pad_unreachable();
+    scenario_pad_discovery();
+    scenario_pad_degraded_real();
     scenario_adjust_mode();
     scenario_brightness_menu();
     scenario_settings_brightness();
     scenario_settings_brightness_clock();
     scenario_settings_brightness_clock_off();
     scenario_wifi_info();
+    scenario_wifi_confirm();
     scenario_about();
     scenario_about_wifi_worst();
     scenario_about_wifi_real();

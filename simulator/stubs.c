@@ -25,8 +25,28 @@
 
 /* ---- dial_time ---------------------------------------------------------- */
 // Settings' Timezone row and the picker read these; the simulator has no
-// SNTP and no persisted zone, so it renders the honest "Not set" state.
-bool dial_time_get_iana_tz(char *out, size_t sz) { (void)out; (void)sz; return false; }
+// SNTP and no persisted zone, so it renders the honest "Not set" state --
+// except when a scenario has installed a fake zone via sim_set_fake_iana_tz()
+// (sim_state.h), the one hook that lets settings-timezone-raw.png show the
+// raw-IANA fallback. Default (no hook) is unchanged: false.
+static char s_fake_iana[48];
+static bool s_fake_iana_set;
+
+void sim_set_fake_iana_tz(const char *iana)
+{
+    if (!iana) { s_fake_iana_set = false; return; }
+    strncpy(s_fake_iana, iana, sizeof(s_fake_iana) - 1);
+    s_fake_iana[sizeof(s_fake_iana) - 1] = '\0';
+    s_fake_iana_set = true;
+}
+
+bool dial_time_get_iana_tz(char *out, size_t sz)
+{
+    if (!s_fake_iana_set || !out || sz == 0) return false;
+    strncpy(out, s_fake_iana, sz - 1);
+    out[sz - 1] = '\0';
+    return true;
+}
 bool dial_time_get_posix_tz(char *out, size_t sz) { (void)out; (void)sz; return false; }
 bool dial_time_set_iana_tz(const char *iana) { (void)iana; return true; }
 // No zone ever persisted here (see the two getters above), so this is
