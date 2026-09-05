@@ -14,19 +14,25 @@
  *                    tap opens SCR_BRIGHTNESS with packed arg 1. Governs the
  *                    backlight while the dial is actually in use at night
  *                    (ACTIVE/DIMMED tiers).
- *   Night (clock)    value = the current night-clock percent
- *                    (st->bri_night_clock_pct), shown as "Off" at 0 — for
- *                    the clock 0 is genuinely off (dial_power_night_clock_
- *                    duty), and naming that state is what tells someone
- *                    hunting "turn the screensaver off" that it exists. Tap
- *                    opens SCR_BRIGHTNESS with packed arg 2. Governs ONLY
- *                    the standby/screensaver clock face at night — the thing
- *                    that actually glows in a dark bedroom all night.
+ *   Night (standby)  value = the current night-standby percent
+ *                    (st->bri_night_clock_pct — the pref keeps its old
+ *                    "clock" name; only the label changed, docs/SPEC-
+ *                    standby-face.md §4b), shown as "Off" at 0 — 0 is
+ *                    genuinely off (dial_power_night_clock_duty), and naming
+ *                    that state is what tells someone hunting "turn the
+ *                    screensaver off" that it exists. Tap opens
+ *                    SCR_BRIGHTNESS with packed arg 2. Governs ONLY the
+ *                    STANDBY tier at night — whichever standby face is
+ *                    chosen (Settings' Standby face: the dimmed temperature
+ *                    dial, or the clock) — the thing that actually glows in
+ *                    a dark bedroom all night. Was "Night (clock)" until the
+ *                    Standby face setting made the temperature the default
+ *                    thing showing there.
  *
  * The two night rows share the "Night (…)" prefix on purpose (owner,
  * 2026-08-05, after a field report): a bare "Night" row read as the umbrella
- * for everything nocturnal, so it captured the tap meant for the clock glow
- * — a user dialed "Night" to 0 and the clock kept shining. The shared prefix
+ * for everything nocturnal, so it captured the tap meant for the standby
+ * glow — a user dialed "Night" to 0 and the clock kept shining. The shared prefix
  * plus qualifier makes the pair read as an explicit fork, and neither leg
  * can be mistaken for the whole.
  *
@@ -129,7 +135,10 @@ static void row_night_cb(lv_event_t *e)
     ui_router_go(SCR_BRIGHTNESS, (void *)(uintptr_t)1, LV_SCR_LOAD_ANIM_NONE);
 }
 
-// Packed arg 2 = the night-clock (standby-only) picker — see scr_brightness.c.
+// Packed arg 2 = the night-standby picker — see scr_brightness.c. 0 % here
+// means the standby face is OFF at night whichever face is chosen
+// (temperature dial or clock); a touch or a detent still wakes the dial to
+// the night ACTIVE duty to see by.
 static void row_night_clock_cb(lv_event_t *e)
 {
     (void)e;
@@ -143,7 +152,7 @@ static void sync_night_rows(bool want)
 {
     if (want && !s_row_night) {
         s_row_night       = make_row(s_list, "Night (in use)", row_night_cb,       &s_val_night);
-        s_row_night_clock = make_row(s_list, "Night (clock)",  row_night_clock_cb, &s_val_night_clock);
+        s_row_night_clock = make_row(s_list, "Night (standby)", row_night_clock_cb, &s_val_night_clock);
         lv_obj_update_layout(s_list);
         lv_event_send(s_list, LV_EVENT_SCROLL, NULL);   // re-run dial_list's zoom/fade pass
     } else if (!want && s_row_night) {

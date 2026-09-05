@@ -57,6 +57,13 @@
  * — same idiom as Rotation below, not a submenu; four values don't need
  * one).
  *
+ * "Standby face" (docs/SPEC-standby-face.md §3/§4) sits directly under
+ * Screen timeout because it describes what the timeout leads to:
+ * Temperature (the dial face, dimmed) or Clock (scr_standby.c). Opens the
+ * two-choice picker sub-screen (scr_standby_face.c) in Night face's shape.
+ * Always present, unlike Night face — the standby tier is reached by day
+ * and by night alike, so there is no state in which the row would lie.
+ *
  * "Timezone" (docs/SPEC-timezone-source.md) sits right after Rotation, still
  * inside the install-once display-prefs group (Scale/Units/Haptics/Rotation)
  * rather than mixed in with Pad Address/Bed Mode below: it's a device/display
@@ -97,6 +104,7 @@ static lv_obj_t *s_val_night_mode;
 static lv_obj_t *s_row_night_face;
 static lv_obj_t *s_val_night_face;
 static lv_obj_t *s_val_screen_timeout;
+static lv_obj_t *s_val_standby_face;
 static lv_obj_t *s_val_timezone;
 static lv_obj_t *s_val_pad_address, *s_val_bed_mode;
 
@@ -321,8 +329,19 @@ static void sync_night_face_row(bool want)
     }
 }
 
+// Opens the Temperature/Clock picker (scr_standby_face.c, docs/SPEC-
+// standby-face.md §4) — plain navigation like Night face above. Always
+// present (see this file's header comment).
+static void row_standby_face_cb(lv_event_t *e)
+{
+    (void)e;
+    dial_haptics_play(HAPTIC_TICK);
+    ui_router_go(SCR_STANDBY_FACE, NULL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
 // Screen (lock/standby) timeout: how long the dial sits idle before
-// dial_power drops the display into its dim standby clock face. Cycles
+// dial_power drops the display to its dim standby face (the dial itself or
+// the clock — Standby face, the next row). Cycles
 // through the five values dial_state.h's DIAL_SCR_TIMEOUT_CHOICES offers
 // (30s/1m/2m/5m/10m — no "Never", see that table's comment), same
 // tap-to-advance idiom as Rotation above. Applies immediately with nothing
@@ -451,6 +470,7 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_align(s_val_night_mode, LV_ALIGN_LEFT_MID, 0, 16);
     sync_night_face_row(st_now.night_on);   // present only while night_on (see that function's comment)
     make_row(s_list, "Screen timeout", row_screen_timeout_cb, &s_val_screen_timeout);
+    make_row(s_list, "Standby face",  row_standby_face_cb,  &s_val_standby_face);
     make_row(s_list, "Scale",         row_scale_cb,         &s_val_scale);
     make_row(s_list, "Units",         row_units_cb,         &s_val_units);
     make_row(s_list, "Haptics",       row_haptics_cb,       &s_val_haptics);
@@ -511,6 +531,7 @@ static void create(lv_obj_t *scr, void *arg)
 
 static void destroy(void)
 {
+    s_val_standby_face = NULL;
     if (s_confirm_timer) { lv_timer_del(s_confirm_timer); s_confirm_timer = NULL; }
     s_list = NULL;
     s_title_lbl = NULL;
@@ -559,6 +580,8 @@ static void on_state(const app_state_t *st)
         lv_label_set_text(s_val_night_mode, buf);
     }
     lv_label_set_text(s_val_screen_timeout, dial_scr_timeout_label(st->screen_timeout_s));
+    lv_label_set_text(s_val_standby_face,
+                      st->standby_face == DIAL_SB_FACE_CLOCK ? "Clock" : "Temperature");
     // Indexed directly by the stored value (see app_state_t.haptics_level):
     // 0=Off, 1=Auto, 2=Low, 3=High.
     static const char *HAPTICS_TXT[] = { "Off", "Low", "Auto", "High" };   // index == haptic_level_t

@@ -8,6 +8,7 @@
 #include "freertos/queue.h"
 #include "esp_timer.h"
 #include "nvs.h"
+#include "esp_log.h"
 
 #define NVS_NS "ui"
 
@@ -95,6 +96,16 @@ static inline bool clamp_night_face_min(uint8_t raw)
     return (raw <= 1) ? (raw != 0) : true;
 }
 
+// Same shape again for the standby-face preference (docs/SPEC-standby-
+// face.md §4): an out-of-range byte snaps to Temperature (1), this pref's
+// own default on a fresh device and on upgrade.
+static inline uint8_t clamp_standby_face(uint8_t raw)
+{
+    return (raw <= 1) ? raw : DIAL_SB_FACE_TEMP;
+}
+
+static const char *TAG = "dial_state";
+
 static SemaphoreHandle_t s_mux;
 static QueueHandle_t     s_cmd_q;
 static app_state_t       s_state;
@@ -140,6 +151,8 @@ void dial_state_init(void)
     s_state.night_end_min    =  7 * 60;   // firmware hardcoded before this setting existed
     s_state.night_face_min   = true;      // fresh-device default: Number only, deliberately
                                            // (see app_state_t.night_face_min)
+    s_state.standby_face     = DIAL_SB_FACE_TEMP;   // fresh-device AND no-key default: Temperature
+                                                    // (see app_state_t.standby_face)
     s_state.beta          = false;    // fresh-device default: stable channel only
     s_state.sched_follow  = true;     // fresh-device default: Follow schedule (owner decision)
     s_state.ota_auto      = 0;        // fresh-device default: Off (explicit consent required)
@@ -212,6 +225,8 @@ void dial_state_restore_prefs(void)
     bool have_night_e  = nvs_get_u16(h, "night_e", &night_e) == ESP_OK;
     uint8_t  night_face_raw = 1;   // matches init's fresh-device default (Number only)
     bool have_night_face = nvs_get_u8(h, "night_face", &night_face_raw) == ESP_OK;
+    uint8_t  sb_face_raw = DIAL_SB_FACE_TEMP;   // matches init's default (Temperature)
+    bool have_sb_face = nvs_get_u8(h, "sb_face", &sb_face_raw) == ESP_OK;
     bool have_beta      = nvs_get_u8(h, "beta", &beta) == ESP_OK;
     bool have_sched_follow = nvs_get_u8(h, "sched_follow", &sched_follow) == ESP_OK;
     bool have_ota_auto  = nvs_get_u8(h, "ota_auto", &ota_auto) == ESP_OK;
@@ -225,9 +240,13 @@ void dial_state_restore_prefs(void)
     uint8_t  pad_1zone  = 1;
     bool have_pad_1zone = nvs_get_u8(h, "pad_1zone", &pad_1zone) == ESP_OK;
     nvs_close(h);
+    // One line so a bench capture shows which way this went on a dial that
+    // predates the key (docs/SPEC-standby-face.md §6 commit 2).
+    if (have_sb_face) ESP_LOGI(TAG, "sb_face: stored %u -> %u", sb_face_raw, clamp_standby_face(sb_face_raw));
+    else              ESP_LOGI(TAG, "sb_face: no key -> default %u", DIAL_SB_FACE_TEMP);
     if (!have_zone && !have_units && !have_haptics && !have_rot && !have_rel
         && !have_bri_day && !have_bri_night && !have_bri_nclk && !have_scr_to && !have_beta
-        && !have_night_on && !have_night_s && !have_night_e && !have_night_face
+        && !have_night_on && !have_night_s && !have_night_e && !have_night_face && !have_sb_face
         && !have_sched_follow
         && !have_ota_auto && !have_ota_defer && !have_ota_shown && !have_ota_skip
         && !have_pad_url && !have_pad_1zone) return;
@@ -308,6 +327,7 @@ void dial_state_restore_prefs(void)
     }
     if (have_night_on) s_state.night_on = clamp_night_on(night_on_raw);
     if (have_night_face) s_state.night_face_min = clamp_night_face_min(night_face_raw);
+    if (have_sb_face)    s_state.standby_face   = clamp_standby_face(sb_face_raw);
     if (have_beta)       s_state.beta         = (beta != 0);
     if (have_sched_follow) s_state.sched_follow = (sched_follow != 0);
     if (have_ota_auto)   s_state.ota_auto  = (ota_auto <= 1) ? ota_auto : 0;
@@ -640,6 +660,30 @@ void dial_state_set_night_face_min(bool minimal)
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
         nvs_set_u8(h, "night_face", minimal ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+uint8_t dial_state_get_standby_face(void)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    uint8_t v = s_state.standby_face;
+    xSemaphoreGive(s_mux);
+    return v;
+}
+
+void dial_state_set_standby_face(uint8_t face)
+{
+    face = clamp_standby_face(face);
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.standby_face = face;
+    s_state.generation++;
+    xSemaphoreGive(s_mux);
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "sb_face", face);
         nvs_commit(h);
         nvs_close(h);
     }

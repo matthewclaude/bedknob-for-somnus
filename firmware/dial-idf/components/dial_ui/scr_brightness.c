@@ -1,6 +1,6 @@
 /*
- * SCR_BRIGHTNESS — full-screen day/night/night-clock backlight percent
- * picker, reached from SCR_BRIGHTNESS_MENU's Day/Night/Night clock rows.
+ * SCR_BRIGHTNESS — full-screen day/night/night-standby backlight percent
+ * picker, reached from SCR_BRIGHTNESS_MENU's Day/Night/Night standby rows.
  * Replaces the old tap-to-edit-in-place on those rows (owner field
  * feedback: it was an unintuitive, one-off micro-pattern) — every other
  * "adjust a value with the knob" control in this UI is a full-screen face
@@ -8,12 +8,14 @@
  * brightness now matches that vocabulary: same caption styling, same big
  * numeral font, same display-only rim arc, same detent/zoom-bump/range-stop
  * feel. `arg` packs which row opened it: 0 = day, 1 = night in-use, 2 =
- * night clock (the standby/screensaver face at night — see dial_state.h's
- * bri_night_clock_pct comment). Captions echo the menu rows' "(IN USE)/
- * (CLOCK)" naming — the disambiguation has to hold at the point of
- * adjustment too, or a wrong tap on the menu goes uncorrected here.
+ * night standby (the standby face at night, temperature dial or clock per
+ * Settings' Standby face — see dial_state.h's bri_night_clock_pct comment;
+ * the pref keeps its old "clock" name, docs/SPEC-standby-face.md §4b).
+ * Captions echo the menu rows' "(IN USE)/(STANDBY)" naming — the
+ * disambiguation has to hold at the point of adjustment too, or a wrong tap
+ * on the menu goes uncorrected here.
  *
- * The night-clock row previews and commits the NIGHT table's STANDBY duty
+ * The night-standby row previews and commits the NIGHT table's STANDBY duty
  * (dial_power's DPWR_STANDBY), not ACTIVE like the other two rows — see
  * preview_current() below and dial_power_preview's header comment. That
  * duty is very dim by design (it's the whole point of the setting), so
@@ -43,15 +45,16 @@ LV_FONT_DECLARE(dial_font_num_88)
 #define CY 180
 #define ARC_R 165
 
-// All three rows (Day, Night, Night clock) move in 1% steps from both the
+// All three rows (Day, Night, Night standby) move in 1% steps from both the
 // knob and the drag handle — the owner asked for uniform granularity across
 // all of them. Only the FLOOR differs, and that's a safety rail, not an
-// inconsistency: the night clock may legitimately go to 0 (a dark bedroom;
+// inconsistency: night standby may legitimately go to 0 (a dark bedroom —
+// the standby face is then off whichever face is chosen;
 // a touch or a knob detent still wakes the dial to the night ACTIVE duty to
 // see by), but Day and Night govern the screen you're looking at WHILE
 // using the dial — at 0 those would render the very picker you'd need to
 // undo it invisible. So Day/Night keep a 10% floor; the clock runs 0-100.
-#define BRI_MIN_PCT   0    // all three rows: 0 is dimmest-legible for Day/Night, off for the clock
+#define BRI_MIN_PCT   0    // all three rows: 0 is dimmest-legible for Day/Night, off for night standby
 #define BRI_MAX_PCT  100
 #define BRI_STEP_PCT   1
 
@@ -74,8 +77,8 @@ static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_num_box, *s_num_lbl;
 static lv_obj_t *s_unit_lbl;
 
-static bool s_night;   // true for BOTH night rows (Night and Night clock)
-static bool s_clock;   // true only for the Night clock row (arg 2)
+static bool s_night;   // true for BOTH night rows (Night and Night standby)
+static bool s_clock;   // true only for the Night standby row (arg 2; the name follows the pref, bri_night_clock_pct)
 static int  s_pct;
 
 // This visit's value range: 0-100 for the night clock, BRI_MIN_PCT-100
@@ -348,16 +351,16 @@ static void create(lv_obj_t *scr, void *arg)
     // Caption.
     s_title_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_title_lbl, &lv_font_montserrat_16, 0);
-    lv_label_set_text(s_title_lbl, s_clock ? "NIGHT (CLOCK)"
+    lv_label_set_text(s_title_lbl, s_clock ? "NIGHT (STANDBY)"
                                   : s_night ? "NIGHT (IN USE)"
                                             : "DAY BRIGHTNESS");
     // 84, not scr_boost's 64: tuned when the widest caption here was
     // "NIGHT BRIGHTNESS" (~155px at this font), whose corners nearly touched
     // the arc's inner edge (r=149) at y=54, where the chord is only ~159px;
     // 20px lower it opens to ~209px. The night captions have since shortened
-    // to the "(IN USE)/(CLOCK)" forms, leaving "DAY BRIGHTNESS" (~140px) the
-    // widest, but the offset stays — it still clears with margin, and one
-    // shared offset beats a per-row one.
+    // to the "(IN USE)/(STANDBY)" forms — "NIGHT (STANDBY)" (~150px) is now
+    // the widest, still under the old 155px that the offset was tuned for,
+    // so it clears with margin, and one shared offset beats a per-row one.
     lv_obj_align(s_title_lbl, LV_ALIGN_CENTER, 0, 84 - CY);
 
     // Percent numeral — fixed anchor box, same slot as scr_boost's duration.

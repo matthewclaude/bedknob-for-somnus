@@ -7,7 +7,9 @@
  * to another screen mid-write. nav_policy (main.c) now forces this screen
  * the moment ota.status actually becomes OTA_DOWNLOADING (the same
  * first-run-phase forced-navigation trick SCR_WELCOME uses), the same way
- * it would force SCR_STANDBY or SCR_ERROR — see nav_policy's OTA block.
+ * it would force SCR_ERROR, or the chosen standby face (SCR_STANDBY or
+ * SCR_DIAL, Settings' Standby face) at DPWR_STANDBY — see nav_policy's OTA
+ * block and its standby_screen() helper.
  *
  * LOCKED: no touch targets at all, and on_knob/on_gesture consume every
  * input without acting on it — an OTA write in progress must never be

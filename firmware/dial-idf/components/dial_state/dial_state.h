@@ -603,6 +603,18 @@ typedef struct {
     // same defensive shape as night_on's own clamp -- see
     // dial_state_get_night_face_min/set_night_face_min below.
     bool     night_face_min;
+    // Standby face (docs/SPEC-standby-face.md §4, Settings' "Standby face"
+    // row): what nav_policy shows once the screen timeout drops dial_power
+    // to DPWR_STANDBY. DIAL_SB_FACE_TEMP (1) = the dial face itself, dimmed
+    // to the standby duty; DIAL_SB_FACE_CLOCK (0) = scr_standby's clock.
+    // Consumed by exactly one place, main.c's standby_screen(). Default
+    // TEMPERATURE on a fresh device AND on upgrade (no key) -- the owner's
+    // 2026-09-05 ruling (§3), knowingly against the "an OTA changes nothing"
+    // convention: the clock is a second clock on the nightstand, and the
+    // Clock row is the one-tap way back. Persisted to NVS "ui"/"sb_face"
+    // (u8); clamp-on-read snaps anything outside {0,1} to 1, same shape as
+    // night_face_min -- see dial_state_get_standby_face/set_standby_face.
+    uint8_t  standby_face;
     // Beta OTA channel opt-in (SCR_UPDATE's "Beta builds" toggle), persisted
     // to NVS "ui"/"beta". dial_state has no business knowing about dial_ota,
     // so this is just the stored preference -- the worker (main.c) reads it
@@ -933,6 +945,18 @@ void     dial_state_set_night_end_min(uint16_t min);
 // consumer (dial_night_active, re-read every steady-state tick).
 bool     dial_state_get_night_face_min(void);
 void     dial_state_set_night_face_min(bool minimal);
+
+// Standby face preference (see app_state_t.standby_face above for the
+// default/NVS key/clamp contract). Getter/setter copied from night_face's
+// exact shape -- direct mutex mutate + generation bump + immediate NVS
+// commit: the generation bump is what makes ui_router's dispatcher re-run
+// nav_policy, so main.c's standby_screen() reads the new value on the very
+// next tick. The setter clamps too, so no caller can store a byte the
+// reader would have to snap.
+#define DIAL_SB_FACE_CLOCK 0
+#define DIAL_SB_FACE_TEMP  1
+uint8_t  dial_state_get_standby_face(void);
+void     dial_state_set_standby_face(uint8_t face);
 
 // Beta OTA channel preference (see app_state_t.beta above). Same
 // getter+setter shape as the brightness pair; setter persists immediately to

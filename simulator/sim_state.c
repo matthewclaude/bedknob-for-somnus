@@ -11,7 +11,7 @@
  * get/set_bri_night_pct, get/set_bri_night_clock_pct,
  * get/set_screen_timeout_s, set_beta,
  * get/set_night_on, get/set_night_start_min, get/set_night_end_min,
- * get/set_night_face_min,
+ * get/set_night_face_min, get/set_standby_face,
  * set_sched_follow, get/set_pad_url, get/set_zone_mode, set_ota_auto,
  * set_ota_defer, set_ota_skip, clear_ota_prompt_due, and dial_cmd_post (a
  * logging no-op — there is no worker task here to drain the queue).
@@ -59,6 +59,7 @@ void sim_state_reset(void)
     s_state.night_start_min = 21 * 60;
     s_state.night_end_min   =  7 * 60;
     s_state.night_face_min  = true;
+    s_state.standby_face    = DIAL_SB_FACE_TEMP;   // matches dial_state.c's no-key default
     // ota_defer/ota_shown/ota_skip/ota_prompt_due all default to 0/""/false
     // via the memset above, same as dial_state_init.
     strncpy(s_state.pad_base_url, DIAL_PAD_DEFAULT_BASE_URL, sizeof(s_state.pad_base_url) - 1);
@@ -182,6 +183,13 @@ bool dial_state_get_night_face_min(void) { return s_state.night_face_min; }
 void dial_state_set_night_face_min(bool minimal)
 {
     s_state.night_face_min = minimal;
+    s_state.generation++;
+}
+
+uint8_t dial_state_get_standby_face(void) { return s_state.standby_face; }
+void dial_state_set_standby_face(uint8_t face)
+{
+    s_state.standby_face = (face <= 1) ? face : DIAL_SB_FACE_TEMP;
     s_state.generation++;
 }
 

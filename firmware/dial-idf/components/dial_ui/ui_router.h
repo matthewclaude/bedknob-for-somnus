@@ -23,7 +23,7 @@ typedef enum {
     SCR_PASSKEY,          // type its password with the knob (arg: network index)
     SCR_DIAL,             // the temperature dial (arg: zone_idx_t)
     SCR_MENU,             // vertical menu, third face of the swipe chain (arg: unused/NULL)
-    SCR_STANDBY,          // always-on clock face (arg: zone_idx_t to wake to)
+    SCR_STANDBY,          // clock face (arg: zone_idx_t to wake to) — what DPWR_STANDBY shows only while Settings' Standby face is Clock; Temperature keeps SCR_DIAL up (main.c standby_screen(), docs/SPEC-standby-face.md)
     SCR_ERROR,            // offline / degraded, with retry countdown
     SCR_WELCOME,          // fresh-device onboarding splash (M4)
     SCR_SIDEPICK,         // "which side of the bed?" (M4, reused from Settings)
@@ -35,6 +35,7 @@ typedef enum {
     SCR_BRIGHTNESS,       // day/night backlight percent picker (arg: 0=day, 1=night — returns to SCR_BRIGHTNESS_MENU)
     SCR_NIGHT_MODE,       // Off / preset / preset night-window picker (docs/SPEC-night-window.md; arg: unused/NULL — returns to SCR_SETTINGS)
     SCR_NIGHT_FACE,       // Number only / Full night-face picker (docs/SPEC-night-face.md §4; arg: unused/NULL — returns to SCR_SETTINGS)
+    SCR_STANDBY_FACE,     // Temperature / Clock standby-face picker (docs/SPEC-standby-face.md §4; arg: unused/NULL — returns to SCR_SETTINGS)
     SCR_WIFI,             // Wi-Fi status + change-network (arg: unused/NULL)
     SCR_ABOUT,            // versions, serial (read-only; arg: unused/NULL)
     SCR_UPDATE,           // update submenu: check for updates + beta builds toggle (arg: unused/NULL — returns to SCR_MENU)

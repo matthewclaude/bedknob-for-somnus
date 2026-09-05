@@ -62,6 +62,7 @@ set(DIAL_UI_SRCS
   ${DIAL_UI_DIR}/scr_brightness.c
   ${DIAL_UI_DIR}/scr_night_mode.c
   ${DIAL_UI_DIR}/scr_night_face.c
+  ${DIAL_UI_DIR}/scr_standby_face.c
   ${DIAL_UI_DIR}/dial_palette.c
   ${DIAL_UI_DIR}/dial_list.c
 )

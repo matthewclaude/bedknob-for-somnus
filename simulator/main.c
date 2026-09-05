@@ -672,10 +672,12 @@ static void scenario_settings(void)
 // 2026-09-02 (Adjustment mode hidden; Night mode / Night face / Screen
 // timeout added -- scr_settings.c's create(); Night face is present because
 // sim_state_reset() ships night_on = true): Back(0)/Brightness(1)/Night
-// mode(2)/Night face(3)/Screen timeout(4)/Scale(5)/Units(6)/Haptics(7)/
-// Rotation(8)/Timezone(9)/Pad Address(10)/Bed Mode(11)/Factory reset(12).
+// mode(2)/Night face(3)/Screen timeout(4)/Standby face(5)/Scale(6)/Units(7)/
+// Haptics(8)/Rotation(9)/Timezone(10)/Pad Address(11)/Bed Mode(12)/Factory
+// reset(13) — Standby face added 2026-09-05 (docs/SPEC-standby-face.md),
+// which is why every detent count below grew by one that day.
 // The rotor opens on Brightness (index 1, dial_list_settle in create()), so
-// +9 detents lands focus on Pad Address with Timezone/Bed Mode as its
+// +10 detents lands focus on Pad Address with Timezone/Bed Mode as its
 // zoomed/faded neighbors, putting both rows in frame at once. (The earlier
 // +7 dated from the pre-2026-09-02 list and had drifted onto Rotation --
 // docs/REPORT-screen-layout-audit.md's "Stale screenshots".)
@@ -684,7 +686,7 @@ static void scenario_settings_pad(void)
     apply_baseline();
     ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
-    sim_knob(9);
+    sim_knob(10);
     pump_ms(300);
     pump_until_idle(800);
     snapshot("settings-pad");
@@ -713,7 +715,7 @@ static void scenario_settings_timezone_raw(void)
     sim_set_fake_iana_tz("America/Mexico_City");
     ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
-    sim_knob(8);
+    sim_knob(9);   // Timezone is row 10 since the Standby face row (see scenario_settings_pad)
     pump_ms(300);
     pump_until_idle(800);
     snapshot("settings-timezone-raw");
@@ -753,6 +755,36 @@ static void scenario_night_face(void)
     pump_ms(300);
     pump_until_idle(800);
     snapshot("night-face");
+}
+
+// The standby-face picker (scr_standby_face.c), Temperature / Clock —
+// docs/SPEC-standby-face.md §4. Checkmark on Temperature (the default).
+// No `standby-temperature` scenario: the sim's dial_power stub always
+// reports DPWR_ACTIVE and there is no nav_policy here (main.c is not
+// linked), so the STANDBY-tier routing is hardware-only.
+static void scenario_standby_face(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_STANDBY_FACE, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("standby-face");
+}
+
+// Settings knob-walked onto the new "Standby face" row (index 5, directly
+// under Screen timeout — see scenario_settings_pad's row list): +4 from
+// Brightness. scenario_settings' own frame opens on Brightness with the
+// list's top four rows in view, so the row is off-frame there by design;
+// this is the render that shows it, value "Temperature".
+static void scenario_settings_standby_face(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_SETTINGS, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(4);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("settings-standby-face");
 }
 
 // The Pad Address text-entry screen (scr_pad_address.c), opened straight
@@ -1141,6 +1173,8 @@ int main(void)
     scenario_timezone();
     scenario_night_mode();
     scenario_night_face();
+    scenario_standby_face();
+    scenario_settings_standby_face();
     scenario_pad_address();
     scenario_pad_unreachable();
     scenario_pad_discovery();

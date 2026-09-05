@@ -22,6 +22,7 @@ void ui_screens_register_all(void)
     ui_router_register(SCR_BRIGHTNESS, &scr_brightness);
     ui_router_register(SCR_NIGHT_MODE, &scr_night_mode);
     ui_router_register(SCR_NIGHT_FACE, &scr_night_face);
+    ui_router_register(SCR_STANDBY_FACE, &scr_standby_face);
     ui_router_register(SCR_WIFI, &scr_wifi);
     ui_router_register(SCR_ABOUT, &scr_about);
     ui_router_register(SCR_UPDATE, &scr_update);

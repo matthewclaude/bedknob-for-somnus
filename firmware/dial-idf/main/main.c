@@ -148,17 +148,16 @@ static void knob_init(void)
 
 /* ---- navigation policy (runs in the LVGL task) ------------------------ */
 
-// Standby face (docs/SPEC-standby-face.md): the screen the router shows
-// while dial_power_level() == DPWR_STANDBY. Both STANDBY sites in nav_policy
-// read this one rule. Commit 1 (§6) hard-wires Temperature — the dial face,
-// which dial_power dims to the STANDBY duty like any other screen, so a wake
-// is a brightness change and not a screen transition. Commit 2 makes this
-// read the ui/sb_face pref — default Temperature (SCR_DIAL) per the spec's
-// 2026-09-05 ruling, with SCR_STANDBY (the clock) as the other value.
+// Standby face (docs/SPEC-standby-face.md §3/§4): the screen the router
+// shows while dial_power_level() == DPWR_STANDBY. Both STANDBY sites in
+// nav_policy read this one rule, off the ui/sb_face pref (Settings ->
+// Standby face): Temperature (the default) is the dial face itself, which
+// dial_power dims to the STANDBY duty like any other screen, so a wake is a
+// brightness change and not a screen transition; Clock is scr_standby's
+// clock face, with today's clock -> dial transition on wake.
 static screen_id_t standby_screen(const app_state_t *st)
 {
-    (void)st;   // commit 2 reads the pref off st here
-    return SCR_DIAL;
+    return st->standby_face == DIAL_SB_FACE_CLOCK ? SCR_STANDBY : SCR_DIAL;
 }
 
 static screen_id_t nav_policy(const app_state_t *st, void **arg)
@@ -397,9 +396,14 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             // protects the gate-raised visit -- that one never reaches this
             // line, because the gate above returns before the phase switch
             // for as long as it is active (docs/REVIEW-2026-09-02.md F7).
+            // SCR_STANDBY_FACE (docs/SPEC-standby-face.md §4): a Settings
+            // sub-screen reached by a deliberate tap, same category as
+            // Pad Address / Timezone — a poll landing mid-choice must not
+            // yank the user off the picker.
             if (passive || cur == SCR_SETTINGS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE ||
-                cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE) return cur;
+                cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
+                cur == SCR_STANDBY_FACE) return cur;
             // First link on a fresh device: pick a default side before showing
             // the dial (SCR_SIDEPICK). Nothing to pick on a single-zone topper,
             // so that device goes straight to its one face. The `cur` half of
@@ -430,7 +434,7 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
                 cur == SCR_WIFI || cur == SCR_BRIGHTNESS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_UPDATE ||
                 cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
-                cur == SCR_ADJUST_MODE)
+                cur == SCR_ADJUST_MODE || cur == SCR_STANDBY_FACE)
                 return cur;
         }
         // PH_PAD_DISCOVERY gets its own screen (live scan progress); every
