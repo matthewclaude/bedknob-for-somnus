@@ -8,9 +8,10 @@ supported by Somnus Lab or Waveshare.
 **This repo holds binaries, a manifest, and this flasher page only — it is
 not the firmware's source.** The source lives in a private repository.
 That's a deliberate choice about this project's development, not a
-statement about the license below: the firmware is open under the same
-terms it always has been, this repo just isn't where the buildable source
-happens to live. If you want the source, ask the maintainer.
+statement about the license below: the firmware is source-available
+under the same PolyForm Noncommercial terms it always has been, this repo
+just isn't where the buildable source happens to live. If you want the
+source, ask the maintainer.
 
 ## Install
 
@@ -46,6 +47,6 @@ This firmware is a fork of
 [chris023/orion-waveshare-rotary-dial](https://github.com/chris023/orion-waveshare-rotary-dial),
 licensed under the **PolyForm Noncommercial License 1.0.0** — free for
 personal, noncommercial use. See [`LICENSE`](LICENSE) for the full terms
-and required notice, and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)
+and required notice, and [`THIRD_PARTY_LICENSES`](THIRD_PARTY_LICENSES)
 for the hardware bring-up code, fonts, data, and libraries this project
 builds on, each under its own terms.
