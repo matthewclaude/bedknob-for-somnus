@@ -399,11 +399,16 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             // SCR_STANDBY_FACE (docs/SPEC-standby-face.md §4): a Settings
             // sub-screen reached by a deliberate tap, same category as
             // Pad Address / Timezone — a poll landing mid-choice must not
-            // yank the user off the picker.
+            // yank the user off the picker. SCR_NIGHT_MODE / SCR_NIGHT_FACE
+            // added 2026-09-05 (docs/REPORT-standby-face-c2.md, Findings 1):
+            // the same category, never listed here or below — the same
+            // class of gap the 2026-09-01 audit closed for Timezone and
+            // Adjust mode.
             if (passive || cur == SCR_SETTINGS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE ||
                 cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
-                cur == SCR_STANDBY_FACE) return cur;
+                cur == SCR_STANDBY_FACE ||
+                cur == SCR_NIGHT_MODE || cur == SCR_NIGHT_FACE) return cur;
             // First link on a fresh device: pick a default side before showing
             // the dial (SCR_SIDEPICK). Nothing to pick on a single-zone topper,
             // so that device goes straight to its one face. The `cur` half of
@@ -434,7 +439,8 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
                 cur == SCR_WIFI || cur == SCR_BRIGHTNESS ||
                 cur == SCR_BRIGHTNESS_MENU || cur == SCR_UPDATE ||
                 cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
-                cur == SCR_ADJUST_MODE || cur == SCR_STANDBY_FACE)
+                cur == SCR_ADJUST_MODE || cur == SCR_STANDBY_FACE ||
+                cur == SCR_NIGHT_MODE || cur == SCR_NIGHT_FACE)
                 return cur;
         }
         // PH_PAD_DISCOVERY gets its own screen (live scan progress); every
