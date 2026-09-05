@@ -711,13 +711,14 @@ static void apply_palette_and_state(const app_state_t *st)
         lv_obj_set_style_opa(s_stale_dot, stale_target, 0);
     }
 
-    // Battery / plug-in glyph (§10.4) — one of the things the night face
-    // keeps in both layouts (minimal and full), at the same night opacity as
-    // the stale dot just above (LV_OPA_40, not tied to `minimal`: it stays
-    // through the full-layout night face too, exactly like the dot).
-    lv_obj_set_style_text_color(s_batt_glyph.label, pal->ink_secondary, 0);
-    lv_obj_set_style_text_opa(s_batt_glyph.label, night ? LV_OPA_40 : LV_OPA_COVER, 0);
-    power_glyph_apply(&s_batt_glyph, &s_batt_glyph_last, st->power_src);
+    // Battery / plug-in badge (§10.4, fill upgrade §11.3) — one of the things
+    // the night face keeps in both layouts (minimal and full), at the same
+    // night opacity as the stale dot just above (LV_OPA_40, not tied to
+    // `minimal`: it stays through the full-layout night face too, exactly
+    // like the dot). ink_secondary always -- this face never swaps ink at
+    // night the way scr_standby.c's clock ink does.
+    power_glyph_apply(&s_batt_glyph, &s_batt_glyph_last, st->power_src, st->power_pct,
+                       pal->ink_secondary, night ? LV_OPA_40 : LV_OPA_COVER, night, pal);
 
     // Page dots — one per face, in the order the chain walks them (see
     // on_gesture): Dial(B) - Dial(A) - Menu on a dual topper, and just

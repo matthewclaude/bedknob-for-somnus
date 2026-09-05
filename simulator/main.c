@@ -203,6 +203,14 @@ static void apply_baseline(void)
     st->clock_valid = true;
     st->serial[0] = '\0';   // real hardware never sets one; About shows "--"
 
+    // Undoes scenario_pad_unreachable()'s dial_state_set_pad_url() so a
+    // scenario running after it (there's no reset between scenarios other
+    // than what apply_baseline itself does) doesn't inherit a stuck
+    // "unreachable.invalid:8080"/PH_DEGRADED into an unrelated screen's
+    // About/Pad row -- sim_state_reset()'s own fresh-device default,
+    // reapplied the same way it's seeded there.
+    dial_state_set_pad_url(DIAL_PAD_DEFAULT_BASE_URL);   // also restores PH_READY
+
     st->zone_present[ZONE_A] = true;
     st->zone_present[ZONE_B] = true;
     st->units_c = false;
@@ -582,6 +590,96 @@ static void scenario_about(void)
     snapshot("about");
 }
 
+// Evidence for the About screen's Wi-Fi row overlap fix (found on hardware
+// bench test, docs/REPORT-battery-pct-about-redesign.md's addendum): both
+// scenarios knob-walk from the rotor's opening focus (Firmware, index 1 --
+// scr_about.c's own dial_list_settle(s_list, 1)) down two rows to Wi-Fi
+// (index 3: Back/Firmware/IDF/Wi-Fi/Pad/Battery), so the row under test is
+// centered in frame instead of the opening screenshot's partially-cropped one.
+//
+// Worst case: a full 32-character SSID (the real maximum) at the longest
+// signal_word()/rssi combination ("Weak (-99 dBm)") -- must clip via
+// LV_LABEL_LONG_DOT, never collide with the "Wi-Fi" label.
+//
+// ui_router_go() no-ops on an identical (id, arg) pair (ui_router.c) --
+// scenario_about() just navigated to this same (SCR_ABOUT, NULL), so without
+// bouncing through another screen first, this scenario's own navigation
+// below would be swallowed and never re-render with the new fake AP.
+static void scenario_about_wifi_worst(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    sim_set_fake_ap("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef", -99);   // 32 chars, "Weak"
+    ui_router_go(SCR_ABOUT, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(2);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("about-wifi-worst");
+}
+
+// Real case: the exact SSID/RSSI from the hardware bench report that
+// triggered this fix ("TT5CiDPi2 - Weak (-73 dBm)", 26 chars) -- must show
+// in full, un-truncated, since it already fits comfortably at the chosen
+// width. Same SCR_MENU bounce as above, for the same reason.
+static void scenario_about_wifi_real(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    sim_set_fake_ap("TT5CiDPi2", -73);
+    ui_router_go(SCR_ABOUT, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(2);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("about-wifi-real");
+    sim_set_fake_ap(NULL, 0);   // back to FAKE_SCAN[0] for every scenario after this one
+}
+
+// Evidence for the About screen's block redesign (docs/REPORT-battery-pct-
+// about-redesign.md's "block redesign" addendum): the Battery row is the
+// other 3-line (title/value/detail) row besides Wi-Fi, so it gets the same
+// tightest-fit scrutiny. Two states, two scenarios -- on-battery (value =
+// percentage, detail = voltage) and on-USB (value = "On USB", detail =
+// voltage) -- knob-walked from the rotor's opening focus (Firmware, index 1)
+// down four rows to Battery (index 5: Back/Firmware/IDF/Wi-Fi/Pad/Battery).
+static void scenario_about_battery_pct(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    app_state_t *st = sim_state_ptr();
+    st->power_src = PWR_BATTERY;
+    st->power_pct = 78;
+    st->power_mv = 4050;
+    st->generation++;
+    ui_router_go(SCR_ABOUT, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(4);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("about-battery-pct");
+}
+
+static void scenario_about_battery_usb(void)
+{
+    apply_baseline();
+    ui_router_go(SCR_MENU, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(100);
+    app_state_t *st = sim_state_ptr();
+    st->power_src = PWR_PLUGGED;
+    st->power_mv = 4610;
+    st->generation++;
+    ui_router_go(SCR_ABOUT, NULL, LV_SCR_LOAD_ANIM_NONE);
+    pump_ms(300);
+    sim_knob(4);
+    pump_ms(300);
+    pump_until_idle(800);
+    snapshot("about-battery-usb");
+}
+
 // Full-screen OTA install takeover (M6 UX hardening) — nav_policy forces this
 // in the real firmware the moment ota.status becomes OTA_DOWNLOADING, but the
 // simulator doesn't run a nav policy at all (every scenario navigates
@@ -679,6 +777,10 @@ int main(void)
     scenario_settings_brightness_clock_off();
     scenario_wifi_info();
     scenario_about();
+    scenario_about_wifi_worst();
+    scenario_about_wifi_real();
+    scenario_about_battery_pct();
+    scenario_about_battery_usb();
     scenario_updating();
     scenario_standby();
     scenario_standby_update();

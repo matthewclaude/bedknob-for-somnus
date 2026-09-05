@@ -10,6 +10,8 @@
  * clear_wifi_join_failed, set_phase, stamp_input, get/set_bri_day_pct,
  * get/set_bri_night_pct, get/set_bri_night_clock_pct,
  * get/set_screen_timeout_s, set_beta,
+ * get/set_night_on, get/set_night_start_min, get/set_night_end_min,
+ * get/set_night_face_min,
  * set_sched_follow, get/set_pad_url, get/set_zone_mode, set_ota_auto,
  * set_ota_defer, set_ota_skip, clear_ota_prompt_due, and dial_cmd_post (a
  * logging no-op — there is no worker task here to drain the queue).
@@ -51,6 +53,12 @@ void sim_state_reset(void)
     s_state.haptics_level = 1;    // HAPTIC_LEVEL_LOW — matches dial_state_init's default
     s_state.sched_follow = true;  // "Dial adjusts" default — matches dial_state_init's default
     s_state.ota_auto = 0;         // Off — matches dial_state_init's fresh-device default
+    // Night window + night face (docs/SPEC-night-window.md/-night-face.md) —
+    // matches dial_state_init's fresh-device defaults exactly.
+    s_state.night_on = true;
+    s_state.night_start_min = 21 * 60;
+    s_state.night_end_min   =  7 * 60;
+    s_state.night_face_min  = true;
     // ota_defer/ota_shown/ota_skip/ota_prompt_due all default to 0/""/false
     // via the memset above, same as dial_state_init.
     strncpy(s_state.pad_base_url, DIAL_PAD_DEFAULT_BASE_URL, sizeof(s_state.pad_base_url) - 1);
@@ -148,6 +156,32 @@ uint16_t dial_state_get_screen_timeout_s(void) { return s_state.screen_timeout_s
 void dial_state_set_screen_timeout_s(uint16_t seconds)
 {
     s_state.screen_timeout_s = seconds;
+    s_state.generation++;
+}
+
+bool dial_state_get_night_on(void) { return s_state.night_on; }
+void dial_state_set_night_on(bool on)
+{
+    s_state.night_on = on;
+    s_state.generation++;
+}
+uint16_t dial_state_get_night_start_min(void) { return s_state.night_start_min; }
+void dial_state_set_night_start_min(uint16_t min)
+{
+    s_state.night_start_min = min;
+    s_state.generation++;
+}
+uint16_t dial_state_get_night_end_min(void) { return s_state.night_end_min; }
+void dial_state_set_night_end_min(uint16_t min)
+{
+    s_state.night_end_min = min;
+    s_state.generation++;
+}
+
+bool dial_state_get_night_face_min(void) { return s_state.night_face_min; }
+void dial_state_set_night_face_min(bool minimal)
+{
+    s_state.night_face_min = minimal;
     s_state.generation++;
 }
 

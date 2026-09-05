@@ -23,6 +23,17 @@
 
 typedef enum { DPWR_ACTIVE, DPWR_DIMMED, DPWR_STANDBY } dial_power_level_t;
 
+// Low-battery threshold, percent (docs/SPEC-power-sensing.md §11.1/§11.2,
+// upstream's DIAL_BATTERY_PCT_LOW from chris023/orion-waveshare-rotary-dial
+// PR #4 -- adopted as a plain constant, not their detector). At or below
+// this, dial_ui's shared battery badge (ui_screens_internal.h's
+// power_glyph_apply, §11.3) breathes pal->warning instead of showing steady.
+// Public here (not dial_power.c-local) because dial_ui needs the same number
+// -- dial_ui already PRIV_REQUIRES dial_power for the level/inhibit API
+// above, so this is one definition, not the leaf-component duplicate pattern
+// dial_state.h's DIAL_PAD_DEFAULT_* uses.
+#define DIAL_BATTERY_PCT_LOW 15
+
 // Start the idle timer task. Requires dial_display + dial_state up.
 void dial_power_start(void);
 

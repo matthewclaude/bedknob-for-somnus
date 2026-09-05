@@ -452,6 +452,20 @@ typedef struct {
     // diagnostic only (About's Power row); not itself state that decides
     // anything on the face.
     uint16_t         power_mv;
+    // Battery percentage (docs/SPEC-power-sensing.md §11.2), from
+    // dial_power.c's BATT_CURVE applied to a short median of recent
+    // samples (not the single power_mv reading above) and held non-
+    // increasing until the next plug-in, so it neither flickers nor ticks
+    // upward while discharging. 0..100 while power_src == PWR_BATTERY;
+    // -1 (unknown) while PLUGGED or UNKNOWN --
+    // there is no cell reading to give while the rail is the charger (§9.5's
+    // "two regimes, one pin"), and inventing one is worse than admitting
+    // there isn't one. Same diagnostic-only, no-commit pattern as power_mv
+    // just above (dial_state_set_power_pct, called right alongside
+    // dial_state_set_power_mv from dial_power.c's pwr_sample_and_classify);
+    // also drives the dial-face/standby badge's fill width and low-battery
+    // breathe (ui_screens_internal.h's power_glyph_apply).
+    int8_t           power_pct;
 
     // UI intent (optimistic layer, kept apart from device truth). Canonical
     // unit tenths of °C (see the block comment above zone_idx_t) -- NOT °F,
@@ -807,6 +821,14 @@ void dial_state_set_phase(conn_phase_t phase, const char *err);
 // bump or not). power_src changes go through dial_state_commit() instead, so
 // a real transition still wakes every screen.
 void dial_state_set_power_mv(uint16_t mv);
+
+// Same shape as dial_state_set_power_mv above, for app_state_t.power_pct
+// (docs/SPEC-power-sensing.md §11.2) -- dial_power.c calls this right
+// alongside the power_mv setter, on every sample, with -1 whenever
+// power_src isn't PWR_BATTERY. No commit here either; About's Battery row
+// and the dial-face/standby badge pick up the new value on whatever
+// on_state a power_src commit (or anything else) next triggers.
+void dial_state_set_power_pct(int8_t pct);
 
 // Hot-path setter used by the dial screen during knob/drag interaction.
 // temp_dc is the canonical unit, tenths of °C — see the block comment above

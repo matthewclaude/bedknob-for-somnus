@@ -21,6 +21,7 @@
 #include "dial_time.h"
 #include "esp_wifi.h"
 #include "esp_app_desc.h"
+#include "sim_state.h"
 
 /* ---- dial_time ---------------------------------------------------------- */
 // Settings' Timezone row and the picker read these; the simulator has no
@@ -28,6 +29,10 @@
 bool dial_time_get_iana_tz(char *out, size_t sz) { (void)out; (void)sz; return false; }
 bool dial_time_get_posix_tz(char *out, size_t sz) { (void)out; (void)sz; return false; }
 bool dial_time_set_iana_tz(const char *iana) { (void)iana; return true; }
+// No zone ever persisted here (see the two getters above), so this is
+// honestly false — the same "set timezone" reason a real fresh device with
+// no zone shows (dial_night_clock_reason(), ui_screens_internal.h).
+bool dial_time_valid(void) { return false; }
 
 /* ---- dial_haptics ------------------------------------------------------ */
 
@@ -97,12 +102,33 @@ bool dial_net_ip(char *out, size_t sz)
     return true;
 }
 
+// Test-only override (sim_state.h) for a scenario that needs an SSID/RSSI
+// combination beyond FAKE_SCAN[0] -- e.g. About's Wi-Fi row layout check
+// against a worst-case 32-char SSID. NULL ssid = back to the fixed default.
+static char    s_fake_ap_ssid[33];
+static int8_t  s_fake_ap_rssi;
+static bool    s_fake_ap_set;
+
+void sim_set_fake_ap(const char *ssid, int8_t rssi)
+{
+    if (!ssid) { s_fake_ap_set = false; return; }
+    strncpy(s_fake_ap_ssid, ssid, sizeof(s_fake_ap_ssid) - 1);
+    s_fake_ap_ssid[sizeof(s_fake_ap_ssid) - 1] = '\0';
+    s_fake_ap_rssi = rssi;
+    s_fake_ap_set = true;
+}
+
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info)
 {
     if (!ap_info) return ESP_FAIL;
     memset(ap_info, 0, sizeof(*ap_info));
-    strncpy((char *)ap_info->ssid, FAKE_SCAN[0].ssid, sizeof(ap_info->ssid) - 1);
-    ap_info->rssi = FAKE_SCAN[0].rssi;
+    if (s_fake_ap_set) {
+        strncpy((char *)ap_info->ssid, s_fake_ap_ssid, sizeof(ap_info->ssid) - 1);
+        ap_info->rssi = s_fake_ap_rssi;
+    } else {
+        strncpy((char *)ap_info->ssid, FAKE_SCAN[0].ssid, sizeof(ap_info->ssid) - 1);
+        ap_info->rssi = FAKE_SCAN[0].rssi;
+    }
     return ESP_OK;
 }
 

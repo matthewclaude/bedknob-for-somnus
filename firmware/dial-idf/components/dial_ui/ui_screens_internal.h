@@ -6,6 +6,7 @@
 #include "dial_state.h"
 #include "dial_palette.h"
 #include "dial_time.h"
+#include "dial_power.h"   // DIAL_BATTERY_PCT_LOW (§11.3's badge breathe threshold)
 
 // Screen vtables defined one per file, gathered by ui_screens_register_all().
 extern const ui_screen_t scr_connecting;
@@ -119,29 +120,68 @@ static inline lv_color_t dial_zone_accent(zone_kind_t k, const dial_palette_t *p
 }
 
 /*
- * Battery / plug-in glyph (docs/SPEC-power-sensing.md §10.4), shared by
- * scr_dial.c and scr_standby.c so the two can't drift out of agreement about
- * which glyph shows on which transition. One label, one slot, two symbols,
- * never both:
- *   power_src == BATTERY            -> LV_SYMBOL_BATTERY_EMPTY, persistent.
+ * Battery / plug-in badge (docs/SPEC-power-sensing.md §10.4, upgraded to a
+ * custom-drawn fill by §11.3), shared by scr_dial.c and scr_standby.c so the
+ * two can't drift out of agreement about which visual shows on which
+ * transition. One slot, never more than one thing showing:
+ *   power_src == BATTERY  -> the drawn assembly (`wrap`: outline `body` +
+ *     `nub` + a `fill` bar whose WIDTH tracks power_pct continuously, not
+ *     LVGL's five-bucket LV_SYMBOL_BATTERY_EMPTY rounding this replaces --
+ *     same "percent of the slot's own width" idea scr_dial.c's `s_level` arc
+ *     already applies to a partial fill, just measured in px instead of
+ *     degrees since a battery reads as a bar, not a ring). Persistent.
  *   BATTERY -> PLUGGED (a real transition, not a screen re-create) -> a 3s
- *     LV_SYMBOL_CHARGE flash, then hidden.
- *   otherwise (PLUGGED at steady state, UNKNOWN)                   -> hidden.
- * No confirmation on UNPLUG beyond the battery glyph itself appearing.
+ *     LV_SYMBOL_CHARGE flash on `label` (untouched by §11.3), then hidden.
+ *   otherwise (PLUGGED at steady state, UNKNOWN) -> everything hidden.
+ * No confirmation on UNPLUG beyond the fill assembly itself appearing.
  *
- * Callers own create (position/font/color) and destroy (delete the timer);
- * this owns only the symbol/visibility/timer decision, driven off the
+ * At or below DIAL_BATTERY_PCT_LOW the whole assembly breathes pal->warning
+ * (the existing "faults only, never thermal" token -- this qualifies, and
+ * it's already night-safe/RGB565-quantized, so no new color is invented).
+ * `wrap` is a plain lv_obj containing `body`/`nub`/`fill` as children with
+ * NO drawing of its own (bg_opa TRANSP, border_width 0) purely so its own
+ * opa can dim/breathe the whole trio in one animation -- LVGL8 composites a
+ * child-bearing object to an offscreen "simple layer" whenever its own opa
+ * is below COVER (lv_obj_style.c's layer-type decision), which is exactly
+ * the every-part-fades-together behavior scr_dial.c's chevron pulse gets
+ * from a single label; this is the same trick applied to three objects
+ * instead of one.
+ *
+ * Callers own create (position/palette) and destroy (delete the timer/anim);
+ * this owns the symbol/fill/breathe/visibility decision, driven off the
  * caller's own "last power_src this screen instance has rendered" — same
  * edge-triggered idiom scr_dial.c's s_stale_shown already uses, folded into
  * power_glyph_apply() so both screens share the transition logic exactly
  * rather than each re-deriving "was that a real transition" from scratch.
  */
 typedef struct {
-    lv_obj_t   *label;
+    lv_obj_t   *label;          // CHARGE flash text only (§11.3 moves the
+                                 // persistent BATTERY visual to `wrap` below)
+    lv_obj_t   *wrap;           // fill-assembly container; its own opa is the
+                                 // one thing that dims/breathes body+nub+fill
+    lv_obj_t   *body;           // battery outline
+    lv_obj_t   *nub;            // battery terminal nub
+    lv_obj_t   *fill;           // charge level; width tracks power_pct
     lv_timer_t *charge_timer;   // NULL except during the 3s CHARGE flash
+    bool        breathing;      // low-battery breathe anim currently running
+    bool        breathe_night;  // which period/range it's running at, so a
+                                 // day/night flip mid-breathe restarts it
 } power_glyph_t;
 
-#define POWER_GLYPH_CHARGE_MS 3000
+#define POWER_GLYPH_CHARGE_MS   3000
+// Body is 20px wide, not the 16px of the LV_SYMBOL_BATTERY_EMPTY glyph it
+// replaced: with a 2px inset each side the fill has 16px to cover 0..100%,
+// i.e. one pixel per ~6%. At 16px the usable span was 12px and, with the
+// old 2px floor and floor-rounding, everything from 0% to 24% drew as the
+// same 2px bar -- the 15% low threshold sat inside a band the bar could
+// not move in, leaving the red breathe as the only signal. Still ~1.8mm
+// wide at this panel's 281ppi, well inside the caption above the arc.
+#define POWER_GLYPH_BODY_W        20   // outline, px
+#define POWER_GLYPH_BODY_H         9
+#define POWER_GLYPH_NUB_W          2
+#define POWER_GLYPH_NUB_H          4
+#define POWER_GLYPH_FILL_INSET     2   // border + gap, each side of `fill`
+#define POWER_GLYPH_FILL_MIN_W     1   // visible floor even at 0% (§11.3)
 
 static inline void power_glyph_charge_timer_cb(lv_timer_t *t)
 {
@@ -150,51 +190,183 @@ static inline void power_glyph_charge_timer_cb(lv_timer_t *t)
     pg->charge_timer = NULL;
 }
 
-// Create the shared label at LV_ALIGN_CENTER (0, y_off) -- callers pass
+static inline void power_glyph_set_wrap_opa(void *obj, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
+}
+
+// Low-battery breathe (§11.3): same primitive as scr_dial.c's chevron_start
+// (lv_anim_path_ease_in_out, ping-pong, LV_ANIM_REPEAT_INFINITE) but
+// CONTINUOUS -- this answers a standing state, not power_hint_pulse()'s
+// finite two-breathe acknowledgment of one input. Period matches the chevron
+// exactly (1.2s day / 2.4s night); the OPACITY RANGE deliberately does not --
+// this badge already sits at a lower night ceiling than its day steady-state
+// (LV_OPA_40 vs LV_OPA_COVER, scr_dial.c's own call site), because a
+// full-brightness red breathe next to someone's face at 2am is wrong for a
+// bedside device even as a battery warning.
+#define POWER_GLYPH_BREATHE_DAY_LO   LV_OPA_60
+#define POWER_GLYPH_BREATHE_DAY_HI   LV_OPA_100
+#define POWER_GLYPH_BREATHE_NIGHT_LO LV_OPA_20
+#define POWER_GLYPH_BREATHE_NIGHT_HI LV_OPA_50
+
+static inline void power_glyph_breathe_start(power_glyph_t *pg, bool night)
+{
+    lv_anim_del(pg->wrap, power_glyph_set_wrap_opa);
+    uint32_t half = night ? 2400 : 1200;
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, pg->wrap);
+    lv_anim_set_exec_cb(&a, power_glyph_set_wrap_opa);
+    lv_anim_set_values(&a, night ? POWER_GLYPH_BREATHE_NIGHT_LO : POWER_GLYPH_BREATHE_DAY_LO,
+                            night ? POWER_GLYPH_BREATHE_NIGHT_HI : POWER_GLYPH_BREATHE_DAY_HI);
+    lv_anim_set_time(&a, half);
+    lv_anim_set_playback_time(&a, half);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_start(&a);
+    pg->breathing = true;
+    pg->breathe_night = night;
+}
+
+static inline void power_glyph_breathe_stop(power_glyph_t *pg, lv_opa_t restore_opa)
+{
+    if (pg->breathing) lv_anim_del(pg->wrap, power_glyph_set_wrap_opa);
+    pg->breathing = false;
+    lv_obj_set_style_opa(pg->wrap, restore_opa, 0);
+}
+
+// `fill`'s width, px: the usable interior scaled by pct and rounded to the
+// NEAREST pixel (floor-rounding drew 78% as 75%), with a 1px floor even at
+// 0% (§11.3 -- an empty outline reads as broken, not "nearly empty"). With
+// a 16px usable span: 5% -> 1px, 15% -> 2px, 20% -> 3px, 50% -> 8px,
+// 100% -> 16px.
+static inline void power_glyph_set_fill_pct(power_glyph_t *pg, int8_t pct)
+{
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    int usable = POWER_GLYPH_BODY_W - 2 * POWER_GLYPH_FILL_INSET;
+    int w = (usable * pct + 50) / 100;
+    if (w < POWER_GLYPH_FILL_MIN_W) w = POWER_GLYPH_FILL_MIN_W;
+    lv_obj_set_width(pg->fill, w);
+}
+
+// Create the shared assembly at LV_ALIGN_CENTER (0, y_off) -- callers pass
 // their own (46 - CY) the same way every other element on these faces
-// computes its offset. font montserrat_16 / color ink_secondary per §10.4;
-// callers may re-tint per render (scr_standby.c's night-ink override) the
-// same way they already do for every other label on the face. Starts
+// computes its offset. `label` keeps the old font/slot for the CHARGE flash
+// text only; `wrap`+children are the new drawn fill, same slot, initially
 // hidden -- power_glyph_apply's first call (power_src still UNKNOWN at
-// boot) leaves it that way until there is something to show.
+// boot) leaves everything hidden until there is something to show. Colors
+// seeded from `pal` here; callers re-tint (and re-dim/breathe) every render
+// via power_glyph_apply's own ink/opa/night arguments below.
 static inline void power_glyph_create(power_glyph_t *pg, lv_obj_t *scr, lv_coord_t y_off, const dial_palette_t *pal)
 {
     pg->label = lv_label_create(scr);
     lv_obj_set_style_text_font(pg->label, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(pg->label, pal->ink_secondary, 0);
-    lv_label_set_text(pg->label, LV_SYMBOL_BATTERY_EMPTY);
+    lv_label_set_text(pg->label, LV_SYMBOL_CHARGE);   // the only text this label shows now
     lv_obj_clear_flag(pg->label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(pg->label, LV_ALIGN_CENTER, 0, y_off);
     lv_obj_add_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
-    pg->charge_timer = NULL;
+
+    pg->wrap = lv_obj_create(scr);
+    lv_obj_set_size(pg->wrap, POWER_GLYPH_BODY_W + POWER_GLYPH_NUB_W, POWER_GLYPH_BODY_H);
+    lv_obj_set_style_bg_opa(pg->wrap, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(pg->wrap, 0, 0);
+    lv_obj_set_style_pad_all(pg->wrap, 0, 0);
+    lv_obj_clear_flag(pg->wrap, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(pg->wrap, LV_ALIGN_CENTER, 0, y_off);
+    lv_obj_add_flag(pg->wrap, LV_OBJ_FLAG_HIDDEN);
+
+    pg->body = lv_obj_create(pg->wrap);
+    lv_obj_set_size(pg->body, POWER_GLYPH_BODY_W, POWER_GLYPH_BODY_H);
+    lv_obj_set_style_radius(pg->body, 1, 0);
+    lv_obj_set_style_bg_opa(pg->body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(pg->body, 1, 0);
+    lv_obj_set_style_border_color(pg->body, pal->ink_secondary, 0);
+    lv_obj_set_style_pad_all(pg->body, 0, 0);
+    lv_obj_clear_flag(pg->body, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(pg->body, LV_ALIGN_LEFT_MID, 0, 0);
+
+    pg->nub = lv_obj_create(pg->wrap);
+    lv_obj_set_size(pg->nub, POWER_GLYPH_NUB_W, POWER_GLYPH_NUB_H);
+    lv_obj_set_style_radius(pg->nub, 0, 0);
+    lv_obj_set_style_border_width(pg->nub, 0, 0);
+    lv_obj_set_style_bg_color(pg->nub, pal->ink_secondary, 0);
+    lv_obj_clear_flag(pg->nub, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(pg->nub, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    pg->fill = lv_obj_create(pg->body);
+    lv_obj_set_size(pg->fill, POWER_GLYPH_FILL_MIN_W, POWER_GLYPH_BODY_H - 2 * POWER_GLYPH_FILL_INSET);
+    lv_obj_set_style_radius(pg->fill, 0, 0);
+    lv_obj_set_style_border_width(pg->fill, 0, 0);
+    lv_obj_set_style_bg_color(pg->fill, pal->ink_secondary, 0);
+    lv_obj_clear_flag(pg->fill, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(pg->fill, LV_ALIGN_LEFT_MID, POWER_GLYPH_FILL_INSET, 0);
+
+    pg->charge_timer  = NULL;
+    pg->breathing     = false;
+    pg->breathe_night = false;
 }
 
 static inline void power_glyph_destroy(power_glyph_t *pg)
 {
     if (pg->charge_timer) { lv_timer_del(pg->charge_timer); pg->charge_timer = NULL; }
+    if (pg->wrap) lv_anim_del(pg->wrap, power_glyph_set_wrap_opa);
     pg->label = NULL;
+    pg->wrap = pg->body = pg->nub = pg->fill = NULL;   // deleted with their screen (children of `scr`/`wrap`)
+    pg->breathing = false;
 }
 
 // Call once per on_state with the screen's own persisted "last power_src
 // rendered" (reset to PWR_UNKNOWN in create(), same as s_stale_shown is
-// reset there) and the current snapshot's power_src. Idempotent: safe to
-// call on every on_state regardless of whether power_src actually moved --
-// *last only differs from cur on a genuine transition, which is exactly
-// when the CHARGE flash and the BATTERY glyph are allowed to (re)trigger.
-static inline void power_glyph_apply(power_glyph_t *pg, dial_power_src_t *last, dial_power_src_t cur)
+// reset there), the current snapshot's power_src/power_pct, the ink color
+// and steady-state opa the CALLER wants at non-low battery (each screen's
+// own day/night tinting -- scr_dial.c is always ink_secondary at LV_OPA_40
+// night dim, scr_standby.c swaps to neutral_holding at night instead and
+// never dims its opa; see each call site), whether night mode is active
+// (for the breathe's period/range), and the active palette (source of
+// pal->warning for the breathe color). Idempotent: safe to call on every
+// on_state regardless of whether power_src actually moved -- *last only
+// differs from cur on a genuine transition, which is exactly when the
+// CHARGE flash and the fill assembly are allowed to (re)trigger.
+static inline void power_glyph_apply(power_glyph_t *pg, dial_power_src_t *last, dial_power_src_t cur,
+                                      int8_t pct, lv_color_t ink, lv_opa_t opa, bool night,
+                                      const dial_palette_t *pal)
 {
     dial_power_src_t prev = *last;
     *last = cur;
 
+    lv_obj_set_style_text_color(pg->label, ink, 0);
+    lv_obj_set_style_text_opa(pg->label, opa, 0);
+
     if (cur == PWR_BATTERY) {
-        // Persistent battery glyph. An unplug mid-flash must not leave a
+        // Persistent fill assembly. An unplug mid-flash must not leave a
         // stale CHARGE glyph on screen -- cancel any in-flight timer.
         if (pg->charge_timer) { lv_timer_del(pg->charge_timer); pg->charge_timer = NULL; }
-        lv_label_set_text(pg->label, LV_SYMBOL_BATTERY_EMPTY);
-        lv_obj_clear_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(pg->wrap, LV_OBJ_FLAG_HIDDEN);
+        power_glyph_set_fill_pct(pg, pct);
+
+        // No hysteresis needed here: dial_power.c holds power_pct non-
+        // increasing while on battery, so once low it stays low until the
+        // next plug-in resets it -- the boundary can't flap on noise.
+        bool low = pct >= 0 && pct <= DIAL_BATTERY_PCT_LOW;
+        if (low) {
+            lv_obj_set_style_border_color(pg->body, pal->warning, 0);
+            lv_obj_set_style_bg_color(pg->nub, pal->warning, 0);
+            lv_obj_set_style_bg_color(pg->fill, pal->warning, 0);
+            if (!pg->breathing || pg->breathe_night != night) power_glyph_breathe_start(pg, night);
+        } else {
+            power_glyph_breathe_stop(pg, opa);
+            lv_obj_set_style_border_color(pg->body, ink, 0);
+            lv_obj_set_style_bg_color(pg->nub, ink, 0);
+            lv_obj_set_style_bg_color(pg->fill, ink, 0);
+        }
         return;
     }
     if (cur == PWR_PLUGGED) {
+        power_glyph_breathe_stop(pg, opa);
+        lv_obj_add_flag(pg->wrap, LV_OBJ_FLAG_HIDDEN);
         if (prev == PWR_BATTERY && !pg->charge_timer) {
             // The one real transition that gets a confirmation (§10.4).
             lv_label_set_text(pg->label, LV_SYMBOL_CHARGE);
@@ -206,11 +378,13 @@ static inline void power_glyph_apply(power_glyph_t *pg, dial_power_src_t *last, 
         // no glyph at PLUGGED steady state.
         return;
     }
-    // UNKNOWN: no glyph, and no leftover flash from a state that can't
-    // legitimately follow it (defensive -- power_src never actually
-    // reverts to UNKNOWN post-boot, see dial_power.c).
+    // UNKNOWN: nothing shown, and no leftover flash/breathe from a state
+    // that can't legitimately follow it (defensive -- power_src never
+    // actually reverts to UNKNOWN post-boot, see dial_power.c).
+    power_glyph_breathe_stop(pg, opa);
     if (pg->charge_timer) { lv_timer_del(pg->charge_timer); pg->charge_timer = NULL; }
     lv_obj_add_flag(pg->label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(pg->wrap, LV_OBJ_FLAG_HIDDEN);
 }
 
 /*

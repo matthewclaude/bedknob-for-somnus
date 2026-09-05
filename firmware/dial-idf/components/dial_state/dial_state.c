@@ -114,6 +114,7 @@ void dial_state_init(void)
     memset(&s_state, 0, sizeof(s_state));
     s_state.phase = PH_BOOT;
     s_state.wifi_join_idx = -1;   // no on-device join attempted yet
+    s_state.power_pct = -1;       // unknown until a BATTERY sample computes one (§11.2)
     s_state.haptics_level = 1;        // HAPTIC_LEVEL_LOW — the default feel (see dial_haptics.h)
     // Fresh-device brightness defaults, chosen by the owner after living with
     // the dial on a nightstand (2026-07-29): full brightness is uncomfortable
@@ -913,6 +914,13 @@ void dial_state_set_power_mv(uint16_t mv)
 {
     xSemaphoreTake(s_mux, portMAX_DELAY);
     s_state.power_mv = mv;
+    xSemaphoreGive(s_mux);
+}
+
+void dial_state_set_power_pct(int8_t pct)
+{
+    xSemaphoreTake(s_mux, portMAX_DELAY);
+    s_state.power_pct = pct;
     xSemaphoreGive(s_mux);
 }
 

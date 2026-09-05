@@ -86,11 +86,15 @@ static void apply_palette_and_state(const app_state_t *st)
     // Deliberately dimmer than the ember ink at night so the room stays dark.
     lv_obj_set_style_text_color(s_clock_lbl, night ? pal->neutral_holding : pal->ink_primary, 0);
 
-    // Battery / plug-in glyph (§10.4): the clock's own night ink at night
-    // (same reasoning as s_clock_lbl just above -- this face is otherwise
-    // ink_secondary, scr_dial.c's own color), ink_secondary by day.
-    lv_obj_set_style_text_color(s_batt_glyph.label, night ? pal->neutral_holding : pal->ink_secondary, 0);
-    power_glyph_apply(&s_batt_glyph, &s_batt_glyph_last, st->power_src);
+    // Battery / plug-in badge (§10.4, fill upgrade §11.3): the clock's own
+    // night ink at night (same reasoning as s_clock_lbl just above -- this
+    // face is otherwise ink_secondary, scr_dial.c's own color), ink_secondary
+    // by day. Unlike scr_dial.c this face never dims its opa at night (the
+    // ink swap alone already reads as dim against neutral_holding), so opa
+    // stays LV_OPA_COVER always -- only the low-battery breathe below ever
+    // touches this badge's opacity.
+    power_glyph_apply(&s_batt_glyph, &s_batt_glyph_last, st->power_src, st->power_pct,
+                       night ? pal->neutral_holding : pal->ink_secondary, LV_OPA_COVER, night, pal);
 
     // Ambient "Update available" (owner reassessment,
     // docs/SPEC-update-prompt.md) — unconditional on status + night, same

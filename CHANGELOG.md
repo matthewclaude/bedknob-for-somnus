@@ -21,6 +21,28 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.5-beta.5 — 2026-09-04 (beta)
+
+### Added
+
+- **Battery percentage.** The battery mark on the dial face and clock is
+  now a small fill that tracks charge level continuously, not just an
+  on/off icon. Below 15% it breathes red so a low battery is hard to miss
+  at a glance, day or night.
+- **Menu → About** gains two rows: **Wi-Fi** (network name, signal
+  strength, dBm) and **Pad** (the bed's address, was "Serial"). **Power**
+  is renamed **Battery** and now shows percent as the main line with the
+  voltage under it while on battery ("78%" / "4.05 V"), or "On USB" /
+  "4.61 V" while plugged in. Every About row is now a centred stack
+  (small title, large value, optional detail line) instead of label-left/
+  value-right, and the ABOUT heading no longer prints over row text once
+  the list scrolls.
+- **Steadier battery reading.** The percentage is read from a few seconds
+  of samples instead of one, and never ticks upward while on battery, so
+  the number and the low-battery red don't flicker. The battery mark on
+  the face is slightly wider so its fill can actually show the difference
+  between 5%, 15% and 25%.
+
 ## 0.1.5-beta.4 — 2026-09-04 (beta)
 
 ### Added

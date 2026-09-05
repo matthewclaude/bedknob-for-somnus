@@ -207,3 +207,98 @@ Two glyphs, one slot, never both. Neither has a setting.
 ### 10.7 Bench
 
 With `screen` open: plug/unplug five times and watch the transition lines and the glyph; count seconds from plug-in to the CHARGE glyph on a charged cell and on a ~3.5 V cell. Wiggle the cable. Leave it on battery through a night window and confirm the glyph is visible but dim on the night face and on the standby clock. Read the About row against the factory firmware's number if you ever swap back.
+
+## 11. Revised Sep 4 2026 (later) — percentage + low-battery styling + About redesign, adopted from upstream PR #4
+
+**Supersedes §9.5's "no percentage, no low warning, no setting" and §10.6's matching exclusions.** Those were the right call with only this project's own measurements in hand. Overtaken by finding [chris023/orion-waveshare-rotary-dial#4](https://github.com/chris023/orion-waveshare-rotary-dial/pull/4) (author: borski, unmerged as of this writing) — an independent battery implementation on the same board, same pin, same divider, whose measured thresholds land within noise of this project's own (§9.5, §10.2). Full PR content fetched read-only and kept for reference at `reference/upstream-pr4-battery-diag/` (not tracked, not built against directly — see that folder's own README). Owner's decision: adopt the percentage curve and the low-battery visual treatment; do not adopt their detector, their separate diagnostics screen, or their new dial_battery component wholesale.
+
+### 11.1 What carries over from upstream, and what doesn't
+
+**Keep this port's own detector as-is (`dial_power.c`, §10.2).** It is already more robust than PR #4's: hysteresis (4280/4180 mV vs. their 4400/4300), a 5-sample debounce, and a slope tiebreak inside the band that theirs lacks entirely. Both were arrived at independently and land within ~100 mV of each other, which is good cross-confirmation, but this port's version has been bench-verified on this exact board (§10, beta.4) and theirs hasn't been verified against this fork's hardware at all. **Do not replace `dial_power.c`'s classifier with `dial_battery.c`'s.**
+
+**Adopt upstream's percentage curve.** Their `BATT_CURVE` table is LiPo-chemistry data (the 3.9–3.75 V knee holding most of the usable capacity), not detector logic, and it's expressed in the same units this port already uses — rail mV, i.e. the calibrated pin reading ×2, matching `power_mv`'s existing convention exactly. Use it as-is:
+
+```c
+// Ascending by mV. Full is a resting LiPo off the charger; empty is where
+// this board's TLV62569 buck gives up, not where the cell is flat (§9.5).
+// Source: chris023/orion-waveshare-rotary-dial PR #4, dial_battery.c —
+// reused verbatim as curve data, not as a component.
+static const struct { int mv, pct; } BATT_CURVE[] = {
+    { 3500,   0 }, { 3550,   5 }, { 3650,  10 }, { 3700,  15 },
+    { 3750,  20 }, { 3790,  30 }, { 3820,  40 }, { 3850,  50 },
+    { 3900,  60 }, { 3950,  70 }, { 4000,  80 }, { 4100,  90 },
+    { 4200, 100 },
+};
+```
+
+**Cross-check against this project's own §9.5 observations before trusting the bottom of the curve on the bench.** Factory firmware's low-batt blink at ~3450 mV is already below this table's 3500 mV floor (clamps to 0%, so this port's 15% warning at ~3700 mV fires about a quarter volt earlier than the factory one), and its full-screen takeover at ~3200 mV is further below it still. Plausible, not yet confirmed on this port's own hardware — bench-verify per §11.6 before shipping, same standard every other number in this document was held to.
+
+**LOW threshold: 15%**, upstream's `DIAL_BATTERY_PCT_LOW`. Matches this project's own curve position for the ~3700 mV region, comfortably above the factory-firmware blink point (~3%) so the warning fires with real runway left, not at the last minute.
+
+**Do not adopt:** their separate `SCR_DIAG` swipe-triggered screen (dead entry point on this port too — same `touch_filter`-swallows-the-standby-gesture problem their own commit message names, and this port doesn't want a new screen anyway, see §11.3), their `dial_battery` component structure, or their exact USB-detect thresholds.
+
+### 11.2 State — extends §10.3, does not replace it
+
+```c
+dial_power_src_t power_src;   // unchanged (§10.3)
+uint16_t         power_mv;    // unchanged (§10.3)
+int8_t            power_pct;   // NEW. 0..100 while power_src == PWR_BATTERY;
+                                // -1 (UNKNOWN) while PLUGGED or PWR_UNKNOWN —
+                                // there is no cell reading to give while the
+                                // rail is the charger (§9.5's "two regimes,
+                                // one pin"), and inventing one is worse than
+                                // admitting there isn't one (PR #4's own
+                                // framing, and correct).
+```
+
+Computed in `dial_power.c`'s existing `pwr_sample_and_classify()`, from the curve above, on every classified BATTERY sample. Rides the same commit as `power_src`/`power_mv` — no new commit path, no new task.
+
+### 11.3 UI — About redesign, no new screen
+
+**Decision: the diagnostics content (Wi-Fi, battery, build) becomes new/changed rows on the existing `SCR_ABOUT`, not a new screen.** `SCR_ABOUT` is already in `nav_policy`'s sticky set, already reached from Menu, already the scrollable-row-list pattern (`scr_settings.c`'s row factory, ported verbatim per `scr_about.c`'s own comment) that every other read-only info screen in this port uses. Upstream's separate tap-to-dismiss visual face is a different UI paradigm for the same job; adopting it means a second navigation pattern in a UI that has exactly one everywhere else. Not adopting their swipe-down entry point either — it doesn't work on this port for the same reason it didn't on theirs (`touch_filter` consumes the standby wake before the gesture reaches the screen), and this port doesn't want a new gesture to solve that when Menu → About already exists.
+
+**Rows, in order (extends the existing Back / Firmware / IDF / Serial / Power list):**
+
+- **Firmware, IDF** — unchanged. Already "build" per the user's ask; no new row needed.
+- **Serial → Pad** — this is `START-HERE.md`'s already-queued beta.5 item (`app_state_t.serial` is an unwritten Orion fossil; replace with the pad address, scheme stripped). Do in the same pass since this touches the same screen — don't leave two half-migrated rows.
+- **Wi-Fi** *(new)* — reuse `scr_wifi.c`'s existing pattern verbatim rather than inventing a second one: `esp_wifi_sta_get_ap_info()` + its `signal_word()` helper (`Strong` ≥ -60 dBm, `Good` ≥ -70 dBm, else weaker). Row value e.g. `MyNetwork · Good (-58 dBm)`. `esp_wifi_sta_get_ap_info()` is documented thread-safe (`scr_wifi.c`'s own comment already establishes this), so About can call it directly from `on_state` the same way `scr_wifi.c` does — no new plumbing through `dial_state`.
+- **Power → Battery** *(renamed from upstream's plain "Power", extended)* — `USB  4.61 V` unchanged while plugged; while on battery, `Battery  78%  (4.05 V)` — percentage **and** the raw voltage this port already shows, per the owner's call to add rather than replace. `--` while UNKNOWN, unchanged.
+
+**Dial-face / standby badge — upgraded, not replaced.** Same slot as §10.4 (`(180, 46)`, top center inside the arc, night-face-visible at `LV_OPA_40`), same two-states-only rule (nothing shown while plugged past the 3 s CHARGE confirmation — an always-on percentage on an instrument face is exactly what §10.4 already argued against). What changes:
+
+- **Shared code location, confirmed by reading the actual source (not guessed):** the glyph is NOT duplicated per-screen. `scr_dial.c` and `scr_standby.c` both call into one shared implementation in `ui_screens_internal.h` — `power_glyph_t` / `power_glyph_create()` / `power_glyph_apply()` / `power_glyph_destroy()` — specifically so the two screens can't drift out of agreement on the transition logic. The badge upgrade extends THAT shared component (swap its `LV_SYMBOL_BATTERY_EMPTY` label for a custom-drawn fill, add the breathing behavior inside `power_glyph_apply()`), not two separate per-screen implementations.
+- The badge is **custom-drawn** rather than an `LV_SYMBOL_BATTERY_EMPTY` glyph, so the fill actually tracks `power_pct` instead of LVGL's five-bucket rounding (PR #4's own reasoning for drawing it, and correct — a five-bucket icon at 78%, 65%, and 52% all draw identically).
+- **At or below `DIAL_BATTERY_PCT_LOW` (15%): breathes red.** Resolved Sep 4 2026 (owner, after a scoping question — this was underspecified in the first pass of this section):
+  - **Color:** `pal->warning` (`dial_palette.h`'s existing "faults only — never thermal" token — low battery qualifies, and it's already night-safe: day `0xE82818`, night `0xC83010`, blue channel `0x10` satisfies this project's own checkable night rule of blue ≤ `0x18`). Not a new/invented red.
+  - **Animation mechanism:** ping-pong opacity on the label, same primitive as `scr_dial.c`'s `chevron_start()` (`lv_anim_path_ease_in_out`, infinite repeat) — reuse that exact curve, don't write a third animation implementation. Continuous while the condition holds (not finite like `power_hint_pulse()`'s two-breathe acknowledgment — this is a standing state, not a one-shot response to input).
+  - **Opacity range — day vs. night are DIFFERENT, deliberately:** day `LV_OPA_60 ↔ LV_OPA_100` (identical to the chevron pulse's own range). Night `LV_OPA_20 ↔ LV_OPA_50` — NOT the same range as day with only the period changed. This badge already has its own separate, lower night ceiling today (`LV_OPA_40` steady, vs `LV_OPA_COVER` by day, `scr_dial.c` ~line 719) specifically because this is a bedside device; breathing a red warning glyph up to full brightness inches from someone's face at 2am would contradict that existing decision and the palette's whole blue-capped/dim night design. Period stays the existing 1.2s day / 2.4s night split either way.
+- **Fill keeps a visible floor even near-empty** (PR #4's 2px-minimum reasoning) — an empty outline reads as a broken widget, not a warning.
+- **Check the AWAY badge slot before building.** `somnus-dial-project-summary.md` records the AWAY badge as "kept dormant, not deleted — wired but hidden," and PR #4's own commit message notes their badge shares AWAY's slot on their layout, splitting the row when both show. This port's AWAY badge is currently hidden, so there is no live conflict today — but if AWAY is ever revived, this is exactly the recurring "does the new setting collide with a dormant one" shape this project checks for every time (`HARDWARE-bringup-log.md` §12). Note it in the commit, don't silently ignore it.
+
+### 11.4 What stays out, still
+
+- Upstream's separate `SCR_DIAG` screen and its swipe-down entry point (§11.3).
+- Their `dial_battery` component and detector (§11.1) — this port's `dial_power.c` classifier stays authoritative.
+- Anything that takes over the full face — §9.5's design rule is untouched by this revision. The badge stays a badge.
+- Build info beyond Firmware/IDF (upstream's "build" row is redundant with what About already shows).
+
+### 11.5 Sequencing
+
+One feature per beta (owner's standing rule, `START-HERE.md`). This is a new beta on top of beta.4, not a re-spin of it. Reads and writes: `dial_power.c` (curve + `power_pct`), `dial_state.h`/`.c` (new field), `scr_about.c` (Wi-Fi row, Power→Battery row rework, Serial→Pad in the same pass since it's the same screen), `ui_screens_internal.h` (the shared `power_glyph_t`/`power_glyph_apply()` — badge draw + breathing, same slot as beta.4's glyph, replacing it not adding a second one; `scr_dial.c` and `scr_standby.c` only own each call site's position/color pass-through, unchanged).
+
+### 11.6 Bench, before tag
+
+Everything in §10.7 still applies (plug/unplug cycling, cable wiggle, night-face visibility). Added: percentage reads sanely across a full discharge if one is available, or at minimum spot-checked against the factory-firmware comparison points (~3450 mV ≈ low-batt blink, ~3200 mV ≈ factory takeover) per §11.1's caveat; the red breathing state is reachable and stops breathing once back above 15% (recharge or a fresh cell); the About Wi-Fi row matches what `scr_wifi.c`'s own screen reports for the same network at the same time (two independent readers of `esp_wifi_sta_get_ap_info()` should never disagree); Serial→Pad row shows the pad address correctly (beta.5 item, done here instead of separately).
+
+### 11.7 Revised Sep 4 2026 (evening) — badge resolution and percentage smoothing, after review
+
+Built and flashed the same evening; full write-up in `docs/REPORT-about-layout-battery-glyph.md`. Owner asked for an independent review of the badge and the discharge curve, approved every finding, then approved the changes.
+
+- **Badge body 20 px wide (was 16), fill rounds to nearest pixel (was floor), fill floor 1 px (was 2).** At 16 px the usable span was 12 px and everything from 0 % to 24 % drew as the same 2 px bar — the §11.1 15 % threshold sat inside a band the bar could not move in. Now ~6 % per pixel; 5/15/20/50/100 % → 1/2/3/8/16 px.
+- **Percentage reads the median of the newest 5 samples**, not the single 1 s reading. On BATT_CURVE's 3.75–3.85 V plateau one percent is 3–5 mV, so a lone reading's ADC noise plus a Wi-Fi TX sag was a 5–10 point swing. Median (not mean) so a single sag sample is discarded rather than averaged in. The 5-sample window is the same set that just voted BATTERY through the debounce, so no plugged-in reading leaks in after an unplug.
+- **Held non-increasing while on battery.** A cell only discharges while unplugged; any upward tick is noise, a sag ending, or surface charge relaxing. Reset to −1 (unknown) whenever `power_src != PWR_BATTERY`, i.e. on plug-in. Consequence: the ≤ 15 % breathe cannot flap at the boundary, so no separate hysteresis on the low flag was added.
+- **Detector untouched** — `pwr_classify()`, hysteresis, debounce, slope tiebreak are byte-identical to §10.2.
+- **§11.1 correction:** the factory firmware's ~3450 mV blink is *below* this table's 3500 mV floor (0 %), not "roughly 3 %". This port's warning at ~3700 mV therefore fires about a quarter volt earlier than the factory one — deliberate runway.
+- **USB-only boards (no cell):** the pin reads the USB rail, PLUGGED for the unit's whole life, battery branch unreachable; no error path. The firmware cannot tell "charging a cell" from "no cell" — hardware fact.
+
+**Bench still owed (§11.6 stands):** the hold/median on a real discharge — About's number should sit still and only step down while unplugged, and the badge should visibly narrow between 25 % and 5 % before turning red. Serial cannot capture this (§7); it is an eyes-on check.

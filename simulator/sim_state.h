@@ -18,3 +18,9 @@ app_state_t *sim_state_ptr(void);
 // Reset to a blank-but-valid baseline (zero, generation 0). main.c calls this
 // between scenarios so nothing bleeds across screenshots.
 void sim_state_reset(void);
+
+// Test-only override for esp_wifi_sta_get_ap_info()'s fake result (stubs.c
+// normally always returns FAKE_SCAN[0], "Home"/-48) -- lets a scenario render
+// an SSID/RSSI combination beyond that fixed default, e.g. a worst-case
+// 32-char SSID for a layout check. Pass ssid=NULL to go back to FAKE_SCAN[0].
+void sim_set_fake_ap(const char *ssid, int8_t rssi);

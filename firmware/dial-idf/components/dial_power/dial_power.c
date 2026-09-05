@@ -52,6 +52,53 @@ static const char *TAG = "power";
 #define PWR_ENTER_PLUGGED_MV    4280    // hysteresis: enter PLUGGED at >= 4.28V
 #define PWR_LEAVE_PLUGGED_MV    4180    // hysteresis: leave PLUGGED at <= 4.18V
 #define PWR_SLOPE_TIEBREAK_MV      20   // mean(newest5) - mean(oldest5), mV
+#define PWR_PCT_WINDOW_N            5   // newest samples the percentage is read from
+
+/*
+ * Battery percentage curve (docs/SPEC-power-sensing.md §11.1/§11.2), adopted
+ * from chris023/orion-waveshare-rotary-dial PR #4's dial_battery.c --
+ * reused VERBATIM as curve data only, not as a component: this port's own
+ * classifier above (pwr_classify) is untouched, and this table plays no part
+ * in the PLUGGED/BATTERY decision. Ascending by mV, same rail-mV convention
+ * power_mv already uses (calibrated pin reading x2 for the divider). Full is
+ * a resting LiPo off the charger; empty is where this board's TLV62569 buck
+ * gives up, not where the cell is actually flat (§9.5).
+ */
+static const struct { int mv, pct; } BATT_CURVE[] = {
+    { 3500,   0 }, { 3550,   5 }, { 3650,  10 }, { 3700,  15 },
+    { 3750,  20 }, { 3790,  30 }, { 3820,  40 }, { 3850,  50 },
+    { 3900,  60 }, { 3950,  70 }, { 4000,  80 }, { 4100,  90 },
+    { 4200, 100 },
+};
+#define BATT_CURVE_N (sizeof(BATT_CURVE) / sizeof(BATT_CURVE[0]))
+
+// Linear-interpolate a rail-mV reading onto BATT_CURVE's mV->percent shape.
+// Clamps outside the table's ends (§11.1: <=3500mV -> 0%, >=4200mV -> 100%)
+// rather than extrapolating past a curve that's only defined over this
+// range. Only ever called for a BATTERY-classified sample (see
+// pwr_sample_and_classify) -- the curve has no meaning while the rail is the
+// USB/charger node (§9.5's "two regimes, one pin").
+static int8_t batt_curve_pct(uint16_t mv)
+{
+    if ((int)mv <= BATT_CURVE[0].mv)              return (int8_t)BATT_CURVE[0].pct;
+    if ((int)mv >= BATT_CURVE[BATT_CURVE_N - 1].mv) return (int8_t)BATT_CURVE[BATT_CURVE_N - 1].pct;
+    for (size_t i = 1; i < BATT_CURVE_N; i++) {
+        if ((int)mv <= BATT_CURVE[i].mv) {
+            int mv0 = BATT_CURVE[i - 1].mv, mv1 = BATT_CURVE[i].mv;
+            int p0  = BATT_CURVE[i - 1].pct, p1  = BATT_CURVE[i].pct;
+            return (int8_t)(p0 + (mv - mv0) * (p1 - p0) / (mv1 - mv0));
+        }
+    }
+    return (int8_t)BATT_CURVE[BATT_CURVE_N - 1].pct;   // unreachable, belt-and-braces
+}
+
+// The percentage shown while on battery. Held, not recomputed from scratch
+// every sample: a cell only discharges while unplugged, so the displayed
+// value never goes UP between plug-ins -- any upward tick is ADC noise, a
+// Wi-Fi TX sag ending, or surface charge relaxing after an unplug, none of
+// which is real capacity returning. -1 whenever power_src != BATTERY, which
+// is also what resets the hold on the next plug-in.
+static int8_t s_pwr_pct_held = -1;
 
 static adc_oneshot_unit_handle_t s_pwr_adc;
 static adc_cali_handle_t         s_pwr_cali;
@@ -122,6 +169,26 @@ static bool pwr_ring_slope_mv(int *out_slope)
     return true;
 }
 
+// Median of the newest `n` ring samples (fewer if the ring is shorter).
+// Feeds the percentage curve: on BATT_CURVE's 3.75-3.85 V plateau one
+// percent is 3-5 mV, so a single 1 s reading's ADC noise plus a Wi-Fi
+// transmit sag (tens of mV, §9.5) would swing the displayed number 5-10
+// points sample to sample. A median over PWR_PCT_WINDOW_N seconds throws a
+// lone sag sample away outright instead of letting it drag a mean down.
+static uint16_t pwr_ring_median_mv(int n)
+{
+    if (n > s_pwr_ring_n) n = s_pwr_ring_n;
+    uint16_t tmp[PWR_RING_N];
+    memcpy(tmp, &s_pwr_ring[s_pwr_ring_n - n], n * sizeof(uint16_t));
+    for (int i = 1; i < n; i++) {            // insertion sort, n <= 10
+        uint16_t v = tmp[i];
+        int j = i - 1;
+        while (j >= 0 && tmp[j] > v) { tmp[j + 1] = tmp[j]; j--; }
+        tmp[j + 1] = v;
+    }
+    return tmp[n / 2];
+}
+
 // This sample's vote: PLUGGED/BATTERY by threshold outside the hysteresis
 // band, the slope tiebreak inside it, or PWR_UNKNOWN if inconclusive (inside
 // the band with no full ring yet, or a slope within +-PWR_SLOPE_TIEBREAK_MV).
@@ -153,6 +220,24 @@ static void pwr_sample_and_classify(void)
 
     pwr_ring_push(mv);
     dial_state_set_power_mv(mv);
+    // §11.2: a percentage only means anything while the rail IS the cell
+    // (s_power_src, the last CONFIRMED/debounced classification -- not
+    // `vote` below, which for most samples inside the hysteresis band is
+    // still pending or inconclusive). -1 otherwise, same "admit there isn't
+    // one" rule power_mv's UNKNOWN case already follows. Read off the
+    // median of the newest PWR_PCT_WINDOW_N samples (the same ones that
+    // just voted BATTERY through the debounce, so no plugged-in reading
+    // leaks in right after an unplug), and held non-increasing until the
+    // next plug-in -- see s_pwr_pct_held. Because it can't rise while on
+    // battery, the badge's <= DIAL_BATTERY_PCT_LOW state can't flap either;
+    // no separate hysteresis on the low flag is needed.
+    if (s_power_src == PWR_BATTERY) {
+        int8_t p = batt_curve_pct(pwr_ring_median_mv(PWR_PCT_WINDOW_N));
+        if (s_pwr_pct_held < 0 || p < s_pwr_pct_held) s_pwr_pct_held = p;
+    } else {
+        s_pwr_pct_held = -1;
+    }
+    dial_state_set_power_pct(s_pwr_pct_held);
     // Bench-only instrumentation (§10.2's "open measurement, before
     // building": capture the plug-in curve with the log level raised).
     // Silent by default at ESP_LOGD -- removed from any future commit past
