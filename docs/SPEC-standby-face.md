@@ -1,6 +1,6 @@
 # Spec: Standby face — Clock or Temperature
 
-Status: **PROPOSAL, owner-approved in shape 2026-09-05; default Temperature per owner. Not built.** Target: its own beta after `0.1.6-beta.1` (one feature per beta). Replaces the earlier "screen-timeout Off" idea, which was rejected on 2026-09-05 for the reasons in §1.
+Status: **Commit 1 BUILT (`03e6259`) and VERIFIED ON HARDWARE 2026-09-05 — owner: "exactly my vision." Commit 2 (the setting) next.** Default Temperature per owner. Target: its own beta after `0.1.6-beta.1` (one feature per beta). Replaces the earlier "screen-timeout Off" idea, which was rejected on 2026-09-05 for the reasons in §1.
 
 > **Note for an on-disk reader:** `V1-scope.md`, `START-HERE.md`, `HARDWARE-bringup-log.md`, `LICENSING.md` and `somnus-dial-project-summary.md` are **not in this repo** — they live only in the Claude Project. Everything this spec needs is restated here.
 
@@ -43,6 +43,10 @@ Pref `ui/sb_face` (u8, 0 = clock, 1 = temperature), clamp-on-read to `{0,1}` →
 
 **The two questions.** Changeable from the state it needs changing in: yes — Settings, at steady state and inside the connect loop. Read by anything: `nav_policy()`'s two STANDBY sites, and commit 1 (§6) proves the consumer before the row exists.
 
+## 4b. The "Night clock" brightness row (found by commit 1, `docs/REPORT-standby-face-c1.md`)
+
+The night STANDBY duty is `bri_night_clock_pct` — the Settings → Brightness row labelled **Night clock**, whose picker previews the STANDBY duty and allows **0 % = off**. With Standby face = Temperature that pref now sets how bright the *temperature* is at night. Behaviour is right; the name is not. Commit 2 renames the row to **Night standby** (label and preview caption only — pref key, range and default unchanged, so an OTA changes nothing). 0 % stays allowed: a dark room is a legitimate choice, and it means the standby face is off whichever face is chosen — say so in the row's own comment. Also fix the two stale comments the report lists (`ui_router.h` SCR_STANDBY entry, `scr_updating.c` header) that still describe STANDBY as "the clock is showing".
+
 ## 5. Things to check on hardware, not assume
 
 1. `scr_dial.c` under STANDBY duty: the night-face alternation timer keeps running while the tier is STANDBY (it is keyed on heating/cooling, not on the tier) — confirm the swap is visible at the dim floor and the water word is legible.
@@ -54,7 +58,7 @@ Pref `ui/sb_face` (u8, 0 = clock, 1 = temperature), clamp-on-read to `{0,1}` →
 ## 6. Commits
 
 1. **The consumer, no setting.** `standby_screen()` helper in `main.c`, both call sites use it, hard-wired to Temperature for this commit only. Build, flash, let it time out by day and (Tokyo-timezone trick) at night; wake it; confirm §5 items 1–3 and 5.
-2. **The setting.** Pref, getter/setter, clamp, `SCR_STANDBY_FACE` + `scr_standby_face.c`, the Settings row under Screen timeout, and `standby_screen()` reads the pref (default Temperature). Simulator scenario `settings` re-rendered (new row) plus `standby-temperature` if the harness can force the tier; otherwise hardware only.
+2. **The setting.** Pref, getter/setter, clamp, `SCR_STANDBY_FACE` + `scr_standby_face.c`, the Settings row under Screen timeout, `standby_screen()` reads the pref (default Temperature), the Night clock → Night standby rename (§4b) and the two comment fixes. Simulator scenario `settings` re-rendered (new row) plus `standby-temperature` if the harness can force the tier; otherwise hardware only.
 3. **Release** as the next beta after hardware verification of commit 2: `CHANGELOG.md` section, `PROJECT_VER` bump, tag, push to `somnus` only.
 
 ## 7. Not in this spec
