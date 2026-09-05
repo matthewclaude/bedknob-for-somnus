@@ -21,6 +21,34 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.6-beta.1 — 2026-09-05 (beta)
+
+### Fixed
+
+- **In °C, turning past 42 no longer lands on 42.3** and drags every later
+  value off by a tenth; the dial stops at 42, the same top as the Somnus
+  app. A setpoint set to a half degree from the app snaps to a whole degree
+  on the first knob click or drag.
+- **Dragging the temperature handle** now lands on whole degrees too, so
+  the pad is never asked for a tenth.
+- **The °C setpoint reads "34", not "34.0"** (every Somnus setpoint is a
+  whole degree). The unit no longer sits on the ring or under the handle in
+  °C, and relative mode shows just the level ("+15") with no suffix.
+- **The unit follows the number** instead of a fixed spot, so nothing
+  overlaps at any value.
+- **Settings:** the Night mode and Timezone rows stack their value on a
+  second line instead of running into the label.
+- **Lists:** the rows farthest from the selection shrink a bit more so
+  their text stays fully inside the round display.
+- **The "Update available" line** on the dial face sits clear of the page
+  dots.
+
+### Internal
+
+- Simulator scenarios for every screen state the layout audit measured,
+  including knob- and drag-driven ones; 47 reference screenshots
+  regenerated.
+
 ## 0.1.5 — 2026-09-05
 
 The first stable release since `0.1.4`. Everything below shipped incrementally
