@@ -21,6 +21,31 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.6-beta.3 — 2026-09-06 (beta)
+
+### Fixed
+
+- **Screen layout audit, Tier B.** The Update row's "tap to install" text no
+  longer overflows the row with a long version number; network picker rows
+  are sized to the row width and ellipsize long network names instead of
+  running off both ends; the wrong-password message is shortened so it
+  fits on one line whole; the Adjust mode, Night mode and Wi-Fi confirm
+  screens have their vertical spacing corrected (the Back pill no longer
+  touches the bezel, the Night mode note clears the row under it, the
+  Wi-Fi confirm text clears the Continue button); and the standby clock
+  block is recentred on the screen.
+- **Screen layout audit, Tier C.** The Update row is rebuilt as a flex block
+  (the same approach the About screen rows use) so its lines centre in the
+  row in every state. The Connecting/error screen's offsets are fixed so
+  multi-line degraded text no longer overlaps the headline, and its colours
+  now come from the palette — the background matches the chassis colour
+  instead of pure black, so booting no longer flashes from black into the
+  dial face, and the text follows the night palette.
+- Pad discovery no longer floods the serial log with per-host connection
+  errors during a subnet scan.
+- Stale comments corrected (screen timeout choices, auto-update window,
+  simulator update scenario). No behaviour change.
+
 ## 0.1.6-beta.2 — 2026-09-06 (beta)
 
 ### Added
