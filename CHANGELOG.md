@@ -21,6 +21,28 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.6-beta.2 — 2026-09-06 (beta)
+
+### Added
+
+- **Settings → Standby face.** Choose what the dial shows after the screen
+  timeout: **Temperature** (the default) keeps the dial face on screen,
+  dimmed — at night with Night face set to Number only that's the big
+  setpoint alternating with the water temperature; by day it's the dial
+  itself. **Clock** is the previous behaviour. Everything else about standby
+  is unchanged: the timeout, night dimming, automatic overnight updates and
+  the update prompt all work the same whichever face you pick.
+- The Brightness row for the night standby level is now called
+  **Night (standby)** instead of "Night (clock)", since it applies to
+  whichever standby face you choose. Same setting, same value; 0 % still
+  means the standby face is off at night.
+
+### Fixed
+
+- The Night mode, Night face and brightness pickers no longer get kicked
+  back to the dial face by a routine background refresh while you're on
+  them.
+
 ## 0.1.6-beta.1 — 2026-09-05 (beta)
 
 ### Fixed
