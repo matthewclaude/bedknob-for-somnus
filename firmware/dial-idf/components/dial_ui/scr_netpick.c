@@ -51,6 +51,13 @@ static lv_obj_t *make_row(lv_obj_t *parent, const char *label_txt, lv_event_cb_t
     lv_obj_t *lbl = lv_label_create(row);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
     lv_label_set_text(lbl, label_txt);
+    // Full content width + LONG_DOT, not a bare centred label: an SSID can be
+    // 32 bytes (~400px at this font against the row's 288px content width),
+    // and a width-less label overflowed both ends and was hard-clipped by the
+    // row with no ellipsis (docs/REPORT-screen-layout-audit.md §8).
+    lv_obj_set_width(lbl, LV_PCT(100));
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(lbl);
 
     return row;

@@ -9,18 +9,37 @@
 static lv_obj_t *s_label;
 static lv_obj_t *s_sub;
 
+// Palette tokens, not the pure-black / fixed-grey literals this screen used
+// to carry: every other screen paints pal->bg, so boot (this screen -> dial)
+// and every PH_DEGRADED transition flashed from #000000 to the chassis
+// colour, and at night the fixed light grey ignored the ember palette's
+// blue-channel rule (docs/REPORT-screen-layout-audit.md §13). Re-applied
+// from on_state so a night swap takes effect on the next render, same as
+// everywhere else.
+static void apply_palette(lv_obj_t *scr)
+{
+    const dial_palette_t *pal = PAL();
+    lv_obj_set_style_bg_color(scr, pal->bg, 0);
+    lv_obj_set_style_text_color(s_label, pal->ink_primary, 0);
+    lv_obj_set_style_text_color(s_sub, pal->ink_secondary, 0);
+}
+
 static void create(lv_obj_t *scr, void *arg)
 {
     (void)arg;
-    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
+    // Block offsets -24 / +24 (were -12 / +28): PH_DEGRADED's subtitle wraps
+    // to 4 lines (72px) with a realistic pad error + "Retrying in Ns" +
+    // "Swipe left for menu", and at -12/+28 the main label's box (169-191)
+    // overlapped the subtitle's top (172) by 7px while the whole block sat
+    // 20px below the panel centre. At -24/+24 the 4-line case is main
+    // 145-167, sub 168-240: no box overlap, block centred at 192.
     s_label = lv_label_create(scr);
     lv_obj_set_width(s_label, 300);
     lv_label_set_long_mode(s_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(s_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(s_label, lv_color_hex(0xe0e0e0), 0);
     lv_obj_set_style_text_font(s_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(s_label, LV_ALIGN_CENTER, 0, -12);
+    lv_obj_align(s_label, LV_ALIGN_CENTER, 0, -24);
     lv_label_set_text(s_label, "");
 
     s_sub = lv_label_create(scr);
@@ -31,10 +50,11 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_width(s_sub, 320);
     lv_label_set_long_mode(s_sub, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(s_sub, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(s_sub, lv_color_hex(0x808080), 0);
     lv_obj_set_style_text_font(s_sub, &lv_font_montserrat_16, 0);
-    lv_obj_align(s_sub, LV_ALIGN_CENTER, 0, 28);
+    lv_obj_align(s_sub, LV_ALIGN_CENTER, 0, 24);
     lv_label_set_text(s_sub, "");
+
+    apply_palette(scr);
 }
 
 static void destroy(void) { s_label = s_sub = NULL; }
@@ -42,9 +62,10 @@ static void destroy(void) { s_label = s_sub = NULL; }
 static void on_state(const app_state_t *st)
 {
     if (!s_label) return;
+    apply_palette(lv_obj_get_parent(s_label));
     const char *main_txt = "";
     char sub_txt[160] = "";
-    lv_color_t main_color = lv_color_hex(0xe0e0e0);   // this screen's usual fixed tone
+    lv_color_t main_color = PAL()->ink_primary;   // this screen's usual tone; PH_DEGRADED overrides
 
     switch (st->phase) {
     case PH_BOOT:              main_txt = "Starting up..."; break;

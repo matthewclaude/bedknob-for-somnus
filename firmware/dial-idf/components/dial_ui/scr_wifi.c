@@ -214,7 +214,11 @@ static void create(lv_obj_t *scr, void *arg)
     lv_label_set_text(s_confirm_body,
                       "The dial restarts into setup, where you can choose a new "
                       "network on the dial or from your phone.");
-    lv_obj_align(s_confirm_body, LV_ALIGN_CENTER, 0, 126 - CY);
+    // 116 (was 126): the body wraps to 4 lines (72px) at this width, and at
+    // 126 it ended 4px above the Continue button (166). At 116 it spans
+    // 80-152 for a 14px gap; the chord at y 80 is 300px, so the 240px label
+    // still clears the bezel.
+    lv_obj_align(s_confirm_body, LV_ALIGN_CENTER, 0, 116 - CY);
 
     s_confirm_btn = dial_btn_create(s_confirm);
     lv_obj_set_size(s_confirm_btn, 200, 88);   // primary action: >=88px (round-screen DLS)

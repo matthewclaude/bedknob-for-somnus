@@ -136,7 +136,11 @@ static void render_readout(void)
         // and this is the line their eye is already on.
         lv_obj_set_style_text_color(s_pw_lbl, s_last_failed ? PAL()->warning : PAL()->ink_primary, 0);
         lv_obj_set_style_text_opa(s_pw_lbl, s_last_failed ? LV_OPA_COVER : LV_OPA_50, 0);
-        lv_label_set_text(s_pw_lbl, s_last_failed ? "That password didn't work. Try again."
+        // "Wrong password, try again" is 276px at this font -- it fits the
+        // 280px LONG_DOT label whole. The earlier "That password didn't
+        // work. Try again." was 380px and ellipsized mid-sentence, on the
+        // one message a stuck user most needs to read in full.
+        lv_label_set_text(s_pw_lbl, s_last_failed ? "Wrong password, try again"
                                                   : "Spin the knob, then tap " LV_SYMBOL_OK);
         return;
     }

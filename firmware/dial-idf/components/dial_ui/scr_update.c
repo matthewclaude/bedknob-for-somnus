@@ -30,6 +30,10 @@
 #define CY 180
 #define ROW_H             76
 #define CONFIRM_WINDOW_MS 3000
+// Gap between the "Check for updates" row's stacked lines -- scr_about.c's
+// INFO_ROW_PAD_ROW, same measured font heights (Mont 24 = 27px, Mont 16 =
+// 18px, Mont 12 = 15px); see that file's comment for the slack arithmetic.
+#define OTA_ROW_PAD_ROW   4
 
 static lv_obj_t *s_title_lbl;
 static lv_obj_t *s_list;
@@ -281,7 +285,13 @@ static void render_ota_row(const app_state_t *st)
 
     const dial_palette_t *pal = PAL();
     lv_obj_set_style_text_color(s_val_ota, pal->ink_secondary, 0);
-    if (s_ota_err_lbl) lv_label_set_text(s_ota_err_lbl, "");
+    // Hidden, not emptied: the row is a flex column (see create()), so an
+    // empty-but-present third line would still take its 15px + PAD_ROW and
+    // push the two-line block off the row's centre. Shown only by FAILED.
+    if (s_ota_err_lbl) {
+        lv_label_set_text(s_ota_err_lbl, "");
+        lv_obj_add_flag(s_ota_err_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
 
     char buf[48];
     switch ((dial_ota_status_t)st->ota.status) {
@@ -289,7 +299,7 @@ static void render_ota_row(const app_state_t *st)
         lv_label_set_text(s_val_ota, "Checking...");
         break;
     case OTA_AVAILABLE:
-        snprintf(buf, sizeof(buf), "v%s available - tap to install", st->ota.latest);
+        snprintf(buf, sizeof(buf), "v%s - tap to install", st->ota.latest);
         lv_label_set_text(s_val_ota, buf);
         break;
     case OTA_DOWNLOADING:
@@ -305,6 +315,7 @@ static void render_ota_row(const app_state_t *st)
         if (s_ota_err_lbl) {
             lv_label_set_text(s_ota_err_lbl, st->ota.err);
             lv_obj_set_style_text_color(s_ota_err_lbl, pal->warning, 0);
+            lv_obj_clear_flag(s_ota_err_lbl, LV_OBJ_FLAG_HIDDEN);
         }
         break;
     case OTA_IDLE:
@@ -332,28 +343,49 @@ static void create(lv_obj_t *scr, void *arg)
 
 
     // Unlike a plain label+value row, this one carries worker-driven prose
-    // that can run long ("Tap again to confirm", "v1.2.3 available - tap to
-    // install", the ~40-char dial_ota_set_blocked reasons) — too long to sit
-    // beside "Check for updates" on one line without running into it (same
-    // overlap scr_about.c's identical row used to have). So this row alone
-    // drops make_row's label-left/value-right split and stacks three
-    // left-aligned lines instead, each capped to the row's own content width
-    // with LONG_DOT so a pathological string ellipsizes rather than
-    // overlapping anything.
+    // that can run long ("Tap again to confirm", "v1.2.3 - tap to install",
+    // the ~40-char dial_ota_set_blocked reasons) — too long to sit beside
+    // "Check for updates" on one line without running into it (same overlap
+    // scr_about.c's identical row used to have). So this row alone drops
+    // make_row's label-left/value-right split and stacks up to three left-
+    // aligned lines instead, each capped to the row's own content width with
+    // LONG_DOT so a pathological string ellipsizes rather than overlapping
+    // anything.
+    //
+    // Stacked as a flex column (scr_about.c's make_info_row() shape, main
+    // axis CENTER) rather than the earlier hand-computed -20/+6/+26 offsets,
+    // which top-anchored the block: the usual two-line state (label 27px +
+    // PAD_ROW + value 18px = 49px) sat 4.5-53 of 76 with 23px dead band
+    // below, 11px above the row's centre (docs/REPORT-screen-layout-audit.md
+    // §5a). Centring on the main axis puts 13.5px of slack above and below
+    // instead; cross axis START keeps the lines left-aligned, unlike About's
+    // centred blocks. The FAILED-only error line is a third flex child that
+    // is HIDDEN (not empty) outside FAILED so it takes no space and the two-
+    // line block stays centred; with it shown the block is 27+18+15 plus two
+    // 4px gaps = 68 of 76.
     lv_obj_t *ota_row = make_row(s_list, "Check for updates", row_ota_cb, &s_val_ota);
-    lv_obj_t *ota_lbl = lv_obj_get_child(ota_row, 0);
-    lv_obj_align(ota_lbl, LV_ALIGN_LEFT_MID, 0, -20);
-
-    lv_obj_set_width(s_val_ota, LV_PCT(100));
-    lv_label_set_long_mode(s_val_ota, LV_LABEL_LONG_DOT);
-    lv_obj_align(s_val_ota, LV_ALIGN_LEFT_MID, 0, 6);
+    lv_obj_set_flex_flow(ota_row, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(ota_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_ver(ota_row, 0, 0);
+    lv_obj_set_style_pad_row(ota_row, OTA_ROW_PAD_ROW, 0);
 
     s_ota_err_lbl = lv_label_create(ota_row);
     lv_obj_set_style_text_font(s_ota_err_lbl, &lv_font_montserrat_12, 0);
     lv_label_set_text(s_ota_err_lbl, "");
-    lv_obj_set_width(s_ota_err_lbl, LV_PCT(100));
+    lv_obj_add_flag(s_ota_err_lbl, LV_OBJ_FLAG_HIDDEN);
+
+    // Row content width resolved now (same lv_obj_update_layout idiom
+    // scr_about.c uses) so the value/error lines get an explicit width to
+    // ellipsize against rather than an LV_PCT that a flex child resolves
+    // late.
+    lv_obj_update_layout(ota_row);
+    lv_coord_t ota_content_w = lv_obj_get_width(ota_row)
+                             - lv_obj_get_style_pad_left(ota_row, LV_PART_MAIN)
+                             - lv_obj_get_style_pad_right(ota_row, LV_PART_MAIN);
+    lv_obj_set_width(s_val_ota, ota_content_w);
+    lv_label_set_long_mode(s_val_ota, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_ota_err_lbl, ota_content_w);
     lv_label_set_long_mode(s_ota_err_lbl, LV_LABEL_LONG_DOT);
-    lv_obj_align(s_ota_err_lbl, LV_ALIGN_LEFT_MID, 0, 26);
 
 
     // What this dial is running right now, above the row that offers to

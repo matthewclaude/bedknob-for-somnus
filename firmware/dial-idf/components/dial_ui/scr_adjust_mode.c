@@ -22,7 +22,8 @@
  * nothing to offer a two-item choice and would fight a fixed description
  * anchored beneath it. The two options sit side by side instead of stacked
  * so there's still headroom left for that description AND a Back pill
- * inside the round panel's safe band (see the y-offsets below).
+ * inside the round panel's safe band (see the y-offsets below: options
+ * 114-186, description centred at 228, Back pill 264-336).
  *
  * Knob semantics: "Schedule" is index 0 (left), "Hold" is index 1 (right).
  * A detent moves the CURRENT selection by one slot, clamped at both ends
@@ -242,7 +243,10 @@ static void create(lv_obj_t *scr, void *arg)
     lv_label_set_long_mode(s_desc_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(s_desc_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_desc_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_desc_lbl, LV_ALIGN_CENTER, 0, 235 - CY);
+    // 228 (was 235): keeps the gaps even after the Back pill moved up to 300
+    // -- option pills end at 186, the 30px description sits 213-243, Back
+    // starts at 264.
+    lv_obj_align(s_desc_lbl, LV_ALIGN_CENTER, 0, 228 - CY);
 
     // Back pill: same 140x72 slot and pill look this project's other
     // hand-laid sub-screens use — the gesture alone wasn't discoverable
@@ -252,7 +256,11 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_size(s_back, 140, 72);
     lv_obj_set_style_radius(s_back, 36, 0);
     lv_obj_set_style_border_width(s_back, 1, 0);
-    lv_obj_align(s_back, LV_ALIGN_CENTER, 0, 310 - CY);
+    // 300 (was 310): at 310 the pill's bottom edge (346) was exactly tangent
+    // to the round panel's chord at its own 140px width -- 0px of margin,
+    // under the physical bezel. At 300 the bottom is 336, where the chord is
+    // 180px wide: 20px of margin per side.
+    lv_obj_align(s_back, LV_ALIGN_CENTER, 0, 300 - CY);
     lv_obj_add_event_cb(s_back, back_event_cb, LV_EVENT_CLICKED, NULL);
 
     s_back_lbl = lv_label_create(s_back);

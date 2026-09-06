@@ -117,15 +117,15 @@ static void apply_palette_and_state(const app_state_t *st)
     if (dial_state_is_dual(st)) {
         lv_obj_clear_flag(s_dot_left, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_dot_right, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_align(s_dot_left,  LV_ALIGN_CENTER, 164 - CX, 104 - CY);
-        lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 196 - CX, 104 - CY);
+        lv_obj_align(s_dot_left,  LV_ALIGN_CENTER, 164 - CX, 112 - CY);
+        lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 196 - CX, 112 - CY);
         set_presence_dot(s_dot_left,  dial_zone_kind(&st->zones[ZONE_B], st->device_online), pal);
         set_presence_dot(s_dot_right, dial_zone_kind(&st->zones[ZONE_A], st->device_online), pal);
     } else {
         zone_idx_t p = dial_state_primary_zone(st);
         lv_obj_add_flag(s_dot_left, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_dot_right, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 0, 104 - CY);
+        lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 0, 112 - CY);
         set_presence_dot(s_dot_right, dial_zone_kind(&st->zones[p], st->device_online), pal);
     }
 }
@@ -161,29 +161,34 @@ static void create(lv_obj_t *scr, void *arg)
     lv_obj_set_style_bg_opa(s_ring, LV_OPA_TRANSP, LV_PART_KNOB);
     lv_obj_clear_flag(s_ring, LV_OBJ_FLAG_CLICKABLE);
 
+    // Block geometry: presence dots 112, clock 176, date 240 (each +8 from
+    // the original 104/168/232). Measured, the old block's ink spanned
+    // 100-237 -- centred 11.5px above the panel's centre for no reason
+    // (docs/REPORT-screen-layout-audit.md §16). +8 centres it at 176; the
+    // date's chord at y 249 is still 332px wide.
     s_clock_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_clock_lbl, &dial_font_num_88, 0);
     lv_label_set_text(s_clock_lbl, "--:--");
-    lv_obj_align(s_clock_lbl, LV_ALIGN_CENTER, 0, 168 - CY);
+    lv_obj_align(s_clock_lbl, LV_ALIGN_CENTER, 0, 176 - CY);
 
     s_date_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_date_lbl, &lv_font_montserrat_16, 0);
     lv_label_set_text(s_date_lbl, "");
-    lv_obj_align(s_date_lbl, LV_ALIGN_CENTER, 0, 232 - CY);
+    lv_obj_align(s_date_lbl, LV_ALIGN_CENTER, 0, 240 - CY);
 
     s_dot_left = lv_obj_create(scr);
     lv_obj_set_size(s_dot_left, 8, 8);
     lv_obj_set_style_radius(s_dot_left, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(s_dot_left, 2, 0);
     lv_obj_clear_flag(s_dot_left, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(s_dot_left, LV_ALIGN_CENTER, 164 - CX, 104 - CY);
+    lv_obj_align(s_dot_left, LV_ALIGN_CENTER, 164 - CX, 112 - CY);
 
     s_dot_right = lv_obj_create(scr);
     lv_obj_set_size(s_dot_right, 8, 8);
     lv_obj_set_style_radius(s_dot_right, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(s_dot_right, 2, 0);
     lv_obj_clear_flag(s_dot_right, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 196 - CX, 104 - CY);
+    lv_obj_align(s_dot_right, LV_ALIGN_CENTER, 196 - CX, 112 - CY);
 
     // Battery / plug-in glyph (docs/SPEC-power-sensing.md §10.4) -- same slot
     // scr_dial.c uses (0, 46 - CY).

@@ -188,16 +188,22 @@ static void create(lv_obj_t *scr, void *arg)
 
     // Title + §7 annotation, created AFTER the list so both draw over rows
     // scrolling beneath them (same fixed-slot idiom every other menu
-    // sub-screen uses).
+    // sub-screen uses). Title at 56, not the shared 64 slot every other list
+    // uses: this is the one list screen with a second fixed line (the note)
+    // under its title, and at 64/84 the note's box (76.5-91.5) touched the
+    // row-above-focus label's box (91.7-116.3) with 0.2px to spare
+    // (docs/REPORT-screen-layout-audit.md §12). 56/74 puts the note at
+    // 66.5-81.5, 10px clear of that label; the chord at y 47 is 242px, so
+    // "NIGHT MODE" (108px) has plenty of room.
     s_title_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_title_lbl, &lv_font_montserrat_16, 0);
     lv_label_set_text(s_title_lbl, "NIGHT MODE");
-    lv_obj_align(s_title_lbl, LV_ALIGN_CENTER, 0, 64 - CY);
+    lv_obj_align(s_title_lbl, LV_ALIGN_CENTER, 0, 56 - CY);
 
     s_note_lbl = lv_label_create(scr);
     lv_obj_set_style_text_font(s_note_lbl, &lv_font_montserrat_12, 0);
     lv_label_set_text(s_note_lbl, "");
-    lv_obj_align(s_note_lbl, LV_ALIGN_CENTER, 0, 84 - CY);
+    lv_obj_align(s_note_lbl, LV_ALIGN_CENTER, 0, 74 - CY);
 
     apply_palette();
     dial_list_settle(s_list, focus_idx_for(&st));
