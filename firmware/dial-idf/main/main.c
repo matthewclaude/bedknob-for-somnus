@@ -404,8 +404,12 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
             // the same category, never listed here or below — the same
             // class of gap the 2026-09-01 audit closed for Timezone and
             // Adjust mode.
+            // SCR_BRIGHTNESS (the percent picker under Brightness menu) was
+            // in the no-state set below but not here — same gap, closed
+            // 2026-09-05 (docs/REPORT-sticky-night-pickers.md's table).
             if (passive || cur == SCR_SETTINGS ||
-                cur == SCR_BRIGHTNESS_MENU || cur == SCR_ADJUST_MODE ||
+                cur == SCR_BRIGHTNESS_MENU || cur == SCR_BRIGHTNESS ||
+                cur == SCR_ADJUST_MODE ||
                 cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
                 cur == SCR_STANDBY_FACE ||
                 cur == SCR_NIGHT_MODE || cur == SCR_NIGHT_FACE) return cur;
