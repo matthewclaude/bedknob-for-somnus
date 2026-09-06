@@ -582,21 +582,24 @@ static void mut_ota_unattended(app_state_t *st, void *arg) { st->ota.unattended 
 static void mut_ota_prompt_due(app_state_t *st, void *arg) { st->ota_prompt_due = *(bool *)arg; }
 
 // Auto-update two-strikes tracking (spec): worker-only, deliberately NOT
-// persisted to NVS or mirrored into app_state_t — a device that fails an
-// overnight install doesn't reboot (only a SUCCESSFUL apply does, via
+// persisted to NVS or mirrored into app_state_t — a device that fails a
+// post-wake install doesn't reboot (only a SUCCESSFUL apply does, via
 // esp_restart() below), so this naturally survives every retry across many
-// nights within one boot session; a rare manual power cycle just re-arms
+// days within one boot session; a rare manual power cycle just re-arms
 // it, which is fine either way ("retry the next day" already covers it).
 // The failure itself still surfaces on SCR_UPDATE — see the idle loop's
 // stale-failure auto-clear gate below — by simply leaving dial_ota's own
 // OTA_FAILED/.err alone (no new UI surface needed).
 static char s_ota_auto_fail_ver[16];
 static int  s_ota_auto_fail_count;
-// At most one auto-install attempt per overnight-window OCCURRENCE (success
+// At most one auto-install attempt per install-window OCCURRENCE (success
 // or fail): latched the instant an attempt starts, re-armed when the clock
 // walks back outside the window so tomorrow's occurrence gets its own try —
 // without this, a failed attempt would retry every ~300ms for the rest of
-// the ~2h window instead of "the next day" (spec).
+// the 2h window instead of "the next day" (spec). The window is the post-
+// wake one dial_auto_update_window derives from the user's Night mode
+// setting (two hours after night ends, two hours wide; fixed 09:00-11:00
+// only when night is off) — see the idle loop below.
 static bool s_ota_auto_attempted;
 // Live "is the prompt sheet currently raised" flag, mirrored into
 // app_state_t.ota_prompt_due only on a false<->true transition — same
@@ -907,7 +910,7 @@ static void handle_immediate_cmd(const app_cmd_t *cmd)
         }
         // This command only ever arrives from a deliberate, confirmed user
         // tap (scr_update.c's tap-twice, or scr_update_prompt.c's "Update
-        // now") — never from the unattended overnight path below, which
+        // now") — never from the unattended post-wake path below, which
         // calls dial_ota_download_and_apply() directly. A human actively
         // watching this install is exactly the case the auto-updater's
         // two-failed-attempts brake (docs/SPEC-update-prompt.md) doesn't

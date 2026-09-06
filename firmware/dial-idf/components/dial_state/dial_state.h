@@ -188,11 +188,11 @@ static inline bool dial_parse_hhmm(const char *s, int *out_min)
  * of the firmware is built to avoid.
  *
  * app_state_t.screen_timeout_s (below) holds this preference; its own
- * default (90) is deliberately NOT one of these five — see that field's
+ * default (90) is deliberately NOT one of these four — see that field's
  * comment for why. dial_scr_timeout_label treats any value that isn't an
  * exact member (today only that 90s default) as "nearest to one of these
- * five, ties toward the LONGER one", so the row always shows one of its own
- * five labels (a fresh device reads "2m", the nearest to the true 90s).
+ * four, ties toward the LONGER one", so the row always shows one of its own
+ * four labels (a fresh device reads "1m", the nearest to the true 90s).
  * dial_scr_timeout_next always advances one step PAST that nearest choice —
  * never just snaps onto it — so even a device's very first tap visibly
  * changes the label instead of silently reproducing the same nearest choice
@@ -224,7 +224,7 @@ static inline int dial_scr_timeout_nearest_idx(uint16_t s)
     return idx;
 }
 
-// Display label for the Screen timeout row — always one of the five choices'
+// Display label for the Screen timeout row — always one of the four choices'
 // own strings (see the block comment above for how an off-menu value like
 // the 90s default maps onto one).
 static inline const char *dial_scr_timeout_label(uint16_t s)
@@ -560,7 +560,7 @@ typedef struct {
     // brightness prefs above). Settings' "Screen timeout" row offers exactly
     // DIAL_SCR_TIMEOUT_CHOICES above (5s/15s/30s/1m — deliberately no
     // "Never", see that table's comment). Default 90 is deliberately NOT one
-    // of those five: it's the exact value this firmware hardcoded as
+    // of those four: it's the exact value this firmware hardcoded as
     // STANDBY_AFTER_US before this preference existed, so introducing it
     // changes zero devices' behavior until the user taps the row — see
     // dial_scr_timeout_label/_next for how the row displays and steps off

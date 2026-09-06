@@ -33,6 +33,38 @@ static const char *TAG = "pad_discovery";
 static bool s_ever_attempted;
 static int64_t s_last_attempt_us;
 
+/* ---- scan-time log quieting ---------------------------------------------
+ * A per-host probe failing is the normal outcome of a subnet sweep (~250 of
+ * 254 hosts have nothing on :8080), and every failed esp_http_client_perform
+ * makes the HTTP stack itself log three ERROR lines under its own tags:
+ * esp-tls ("[sock=N] select() timeout" / "connect() error"), transport_base
+ * ("Failed to open a new connection") and HTTP_CLIENT ("Connection failed,
+ * sock < 0") -- ~3,000 lines per scan, drowning this component's own five
+ * INFO lines. They are the library's own ESP_LOGE calls, so they can't be
+ * re-levelled to DEBUG from here; instead those three tags are muted for the
+ * duration of the scan and restored on every exit path. Scoped, not global:
+ * the scan runs on (and blocks) the worker task, which is the only
+ * esp_http_client user in this firmware (dial_somnus, dial_ota), so no other
+ * request's failure can land in the muted window. This component's own
+ * lines are untouched.
+ */
+static const char *const QUIET_TAGS[] = { "esp-tls", "transport_base", "HTTP_CLIENT" };
+#define QUIET_TAGS_N (sizeof(QUIET_TAGS) / sizeof(QUIET_TAGS[0]))
+
+static void quiet_http_logs(esp_log_level_t saved[QUIET_TAGS_N])
+{
+    for (size_t i = 0; i < QUIET_TAGS_N; i++) {
+        saved[i] = esp_log_level_get(QUIET_TAGS[i]);
+        esp_log_level_set(QUIET_TAGS[i], ESP_LOG_NONE);
+    }
+}
+
+static void restore_http_logs(const esp_log_level_t saved[QUIET_TAGS_N])
+{
+    for (size_t i = 0; i < QUIET_TAGS_N; i++)
+        esp_log_level_set(QUIET_TAGS[i], saved[i]);
+}
+
 bool dial_pad_discovery_should_attempt(void)
 {
     if (!s_ever_attempted) return true;
@@ -355,19 +387,26 @@ bool dial_pad_discovery_scan(const char *failed_url, char *out_url, size_t out_s
         return false;
     }
 
+    esp_log_level_t saved_levels[QUIET_TAGS_N];
+    quiet_http_logs(saved_levels);
+
     ESP_LOGI(TAG, "scan: %d candidates, pass 1 (%dms)", n, TIMEOUT_PASS1_MS);
     uint32_t found_ip;
-    if (run_pass(s_candidates, n, TIMEOUT_PASS1_MS, "Looking for your Somnus pad...", &found_ip)) {
+    bool found = run_pass(s_candidates, n, TIMEOUT_PASS1_MS, "Looking for your Somnus pad...", &found_ip);
+    if (!found) {
+        ESP_LOGI(TAG, "scan: pass 1 found nothing, pass 2 (%dms)", TIMEOUT_PASS2_MS);
+        found = run_pass(s_candidates, n, TIMEOUT_PASS2_MS, "Still looking (checking more slowly)...", &found_ip);
+    }
+
+    restore_http_logs(saved_levels);
+
+    if (found) {
         format_url(found_ip, out_url, out_sz);
         return true;
     }
-
-    ESP_LOGI(TAG, "scan: pass 1 found nothing, pass 2 (%dms)", TIMEOUT_PASS2_MS);
-    if (run_pass(s_candidates, n, TIMEOUT_PASS2_MS, "Still looking (checking more slowly)...", &found_ip)) {
-        format_url(found_ip, out_url, out_sz);
-        return true;
-    }
-
-    ESP_LOGW(TAG, "scan: no pad found");
+    // INFO, not WARN: an absent pad is one of the two ordinary outcomes of a
+    // scan (the caller already surfaces it on screen as PH_DEGRADED), not a
+    // fault in the scan itself.
+    ESP_LOGI(TAG, "scan: no pad found");
     return false;
 }

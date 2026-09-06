@@ -604,14 +604,17 @@ static void scenario_update(void)
     ui_router_go(SCR_UPDATE, NULL, LV_SCR_LOAD_ANIM_NONE);
     pump_ms(300);
 
-    // Knob-walked one row past the rotor's opening focus, onto "Check for
-    // updates" (Back(0) / Installed(1) / Check for updates(2) / Auto-update(3)
-    // / Skip this version(4) / Beta builds(5)) — brings docs/SPEC-update-prompt.md's
-    // two new rows into the neighbor band below it, so this one shot still
-    // documents the OTA-available status AND proves the new rows actually
-    // render (rather than adding a second persisted screenshot just for
-    // them). Auto-update set to Overnight and the version left unskipped so
-    // both show a real, non-blank value rather than their empty defaults.
+    // Knob-walked one row past the rotor's opening focus. scr_update.c's
+    // create() builds Back(0) / Check for updates(1) / Installed(2) / Skip
+    // <version>(3, present only while OTA_AVAILABLE) / Auto-update(4) / Beta
+    // builds(5) and settles on row 1, so +1 detent lands focus on Installed
+    // with Check for updates in the band above and Skip / Auto-update below
+    // — this one shot still documents the OTA-available status AND proves
+    // docs/SPEC-update-prompt.md's rows actually render (rather than adding
+    // a second persisted screenshot just for them). Auto-update On (its
+    // value renders the derived post-wake window) and the version left
+    // unskipped so both show a real, non-blank value rather than their
+    // empty defaults.
     st->ota_auto = 1;
     st->generation++;
     sim_knob(1);
