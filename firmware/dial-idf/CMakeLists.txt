@@ -19,5 +19,5 @@ add_compile_options("-Wno-format")
 # downgrade (is_newer() has no concept of a renumbering, only "older").
 # 1.0.0 is reserved for when docs/V1-scope.md is actually complete -- see
 # CHANGELOG.md's Somnus section header.
-set(PROJECT_VER "0.1.6-beta.3")
+set(PROJECT_VER "0.1.6")
 project(somnus-dial)

@@ -21,6 +21,75 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 0.1.6 — 2026-09-07
+
+The first stable release since `0.1.5`. Everything below shipped incrementally
+on the beta channel (`0.1.6-beta.1` through `-beta.3`); this collects it for
+anyone upgrading straight from stable.
+
+### Added
+
+- **Settings → Standby face.** Choose what the dial shows after the screen
+  timeout: **Temperature** (the default) keeps the dial face on screen,
+  dimmed — at night with Night face set to Number only that's the big
+  setpoint alternating with the water temperature; by day it's the dial
+  itself. **Clock** is the previous behaviour. Everything else about standby
+  is unchanged: the timeout, night dimming, automatic overnight updates and
+  the update prompt all work the same whichever face you pick.
+- The Brightness row for the night standby level is now called
+  **Night (standby)** instead of "Night (clock)", since it applies to
+  whichever standby face you choose. Same setting, same value; 0 % still
+  means the standby face is off at night.
+
+### Fixed
+
+- **In °C, turning past 42 no longer lands on 42.3** and drags every later
+  value off by a tenth; the dial stops at 42, the same top as the Somnus
+  app. A setpoint set to a half degree from the app snaps to a whole degree
+  on the first knob click or drag.
+- **Dragging the temperature handle** now lands on whole degrees too, so
+  the pad is never asked for a tenth.
+- **The °C setpoint reads "34", not "34.0"** (every Somnus setpoint is a
+  whole degree). The unit no longer sits on the ring or under the handle in
+  °C, and relative mode shows just the level ("+15") with no suffix.
+- **The unit follows the number** instead of a fixed spot, so nothing
+  overlaps at any value.
+- **Settings:** the Night mode and Timezone rows stack their value on a
+  second line instead of running into the label.
+- **Lists:** the rows farthest from the selection shrink a bit more so
+  their text stays fully inside the round display.
+- **The "Update available" line** on the dial face sits clear of the page
+  dots.
+- The Night mode, Night face and brightness pickers no longer get kicked
+  back to the dial face by a routine background refresh while you're on
+  them.
+- **Screen layout audit, Tier B.** The Update row's "tap to install" text no
+  longer overflows the row with a long version number; network picker rows
+  are sized to the row width and ellipsize long network names instead of
+  running off both ends; the wrong-password message is shortened so it
+  fits on one line whole; the Adjust mode, Night mode and Wi-Fi confirm
+  screens have their vertical spacing corrected (the Back pill no longer
+  touches the bezel, the Night mode note clears the row under it, the
+  Wi-Fi confirm text clears the Continue button); and the standby clock
+  block is recentred on the screen.
+- **Screen layout audit, Tier C.** The Update row is rebuilt as a flex block
+  (the same approach the About screen rows use) so its lines centre in the
+  row in every state. The Connecting/error screen's offsets are fixed so
+  multi-line degraded text no longer overlaps the headline, and its colours
+  now come from the palette — the background matches the chassis colour
+  instead of pure black, so booting no longer flashes from black into the
+  dial face, and the text follows the night palette.
+- Pad discovery no longer floods the serial log with per-host connection
+  errors during a subnet scan.
+- Stale comments corrected (screen timeout choices, auto-update window,
+  simulator update scenario). No behaviour change.
+
+### Internal
+
+- Simulator scenarios for every screen state the layout audit measured,
+  including knob- and drag-driven ones; 47 reference screenshots
+  regenerated.
+
 ## 0.1.6-beta.3 — 2026-09-06 (beta)
 
 ### Fixed
