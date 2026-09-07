@@ -48,3 +48,4 @@ reference/sleep_temps.csv
 # spec, and scratch viewers. Not part of the firmware; never publish.
 reference/
 Claude outputs/
+docs/dial-audit-run.log
