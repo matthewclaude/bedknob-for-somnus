@@ -1,72 +1,85 @@
-# Handoff — Sep 5 2026 (UTC), end of session
+# Handoff — Sep 7 2026, end of session
 
 ## State of the tree
 
-Branch `firmware/somnus-port`, HEAD `1f527bb` (release: 0.1.5). Tags
-`somnus-v0.1.5-beta.5` (`afd23ff`) and `somnus-v0.1.5` (`1f527bb`) both
-exist locally and on the `somnus` remote. `PROJECT_VER` = `0.1.5`.
+Branch `main`, HEAD `53fc0c9` (release: somnus-v0.1.6-beta.3, unchanged by
+this session — this session made no firmware change, per the audit task's
+own scope gate). `git --no-optional-locks diff --stat` against HEAD is
+empty: nothing tracked was touched.
 
-Tracked modifications left uncommitted, for the owner to commit:
-
+Untracked, by convention never committed:
 ```
- M docs/SPEC-ota-readiness.md   (§9.7 update paragraph + §9.9 "Resolved" paragraph, session close)
+docs/REPORT-dial-display-audit.md
+docs/REPORT-release-0.1.6-beta.3.md   (carried from the beta.3 session, still uncommitted)
+docs/SPEC-standby-poll.md             (carried from the beta.3 session, still uncommitted)
+docs/dial-audit-run.log               (new this session — the live logger's output)
+tools/                                (new this session — tools/dial_display_audit.py)
 ```
-
-Untracked, by convention never committed: `docs/REPORT-*.md`,
-`docs/PLAN-screen-layout-fixes.md`, `"Claude outputs/"`. `bench-logs/` is
-gitignored and now holds the two serial captures from this session.
 
 ## What shipped this session
 
-1. **0.1.5-beta.5** — commit `afd23ff`, tag pushed, CI run 33932029987
-   success, prerelease published (`REPORT-beta5-commit.md`,
-   `REPORT-beta5-tag-push.md`, `REPORT-beta5-ci-check.md`).
-2. **0.1.5 stable** — commit `1f527bb` (PROJECT_VER, CHANGELOG rollup of
-   beta.1–5, SPEC §9.9), tag pushed, CI run 33935053719 success in 5m20s,
-   published non-prerelease; `/releases/latest` → `somnus-v0.1.5`; Pages
-   `firmware/latest/` serves the 0.1.5 merged image
-   (`REPORT-0.1.5-graduation-commit.md`, `REPORT-0.1.5-tag-push.md`,
-   `REPORT-0.1.5-ci-check.md`).
+**Nothing shipped.** This was a measurement/reporting-only task: audit the
+absolute-face °F setpoint display against the pad's actual API state and
+the Somnus app's own scale (`docs/REPORT-dial-display-audit.md`). No file
+under `components/`, `main/`, or `test/` was touched, per the task's own
+scope gate — the audit found the display design working as intended
+(the 2026-08-30 "Q1 units fix"), so there was nothing to recommend
+changing either.
 
-Why stable now: a serial capture showed the bench dial on 0.1.4 could not
-see beta.5 (`REPORT-ota-beta-not-found.md`); root cause is that the §9.7
-beta-discovery fix (`819f102`) post-dates the 0.1.4 tag and had only ever
-shipped in prereleases (SPEC §9.9). Shipping 0.1.5 stable is what closes
-that for every stable unit.
+Produced:
+- `docs/REPORT-dial-display-audit.md` — full trace (code citations for the
+  knob step, the °C→°F render, the `POST /api/target_t` write, and the
+  rails), a hand-computed 31-detent click table showing zero dead clicks
+  and zero dial/app °F disagreements, and Part D: results from a real
+  click session Matthew ran against the bench pad.
+- `tools/dial_display_audit.py` — new, untracked, read-only (**GET
+  `/api/state` only**, never a POST) 1 Hz logger. Takes the pad host from
+  `--host`/`PAD_HOST` only, no hardcoded default. Prints/logs a line on
+  every `side0.target_t` change plus a 30 s heartbeat, to
+  `docs/dial-audit-run.log`.
+- Verdict: **H1 confirmed, H2 not supported by the code.** The setpoint's
+  canonical unit is whole tenths-of-°C (1.0 °C per detent, 31 levels,
+  12.0–42.0 °C, level 0 = 27.0 °C); °F is a render-time-only
+  `round(°C×9/5+32)` with no round-trip into the write path. The
+  irregular +1/+2 °F stepping Matthew noticed (e.g. …72, 73, 75…) is
+  expected — 31 whole-°C steps span only 54 whole-°F degrees, and the
+  Somnus app's own ladder has the identical stutter at the identical
+  points. The live run (39 change-events, 20 of 31 grid points touched,
+  every value a whole °C) corroborates this on real hardware, not just in
+  source.
 
-## What is on the dial right now
+## What is on the pad right now — ⚠️ NEEDS MANUAL RESTORE
 
-**0.1.5, installed over the air.** The bench dial was wire-restored to
-0.1.4 (built in a temporary worktree at the tag, NVS untouched), then
-found and installed 0.1.5 on its first manual check: offer at 57 s,
-image verified at 88 s, rebooted, `App version: 0.1.5` (compile time
-matches the CI build), pad reconnected, rollback cancelled at 3.9 s
-(`REPORT-0.1.5-upgrade-path-verify.md`,
-`bench-logs/2026-09-05-upgrade-0.1.4-to-0.1.5.log`).
+**The pad was left powered ON at `target_t = 24 °C`.** It was `off` at
+`18 °C` before Matthew's click session
+(`docs/dial-audit-run.log` 12:36:50/12:40:52) and last observed `on` at
+`24 °C` at 12:42:33 (same log). This audit's tooling is read-only by
+design (rule 2 of the task) and has no restore capability — nothing in
+this session's tooling will undo it. **Matthew needs to set it back by
+hand** (dial or app) if `off @ 18 °C` was the bed's real prior state, not
+just this session's baseline.
 
 ## Tooling changes on this machine
 
-- `gh` 2.100.0 installed via Homebrew, authenticated as `matthewclaude`
-  (keyring). `gh run list/view`, `gh release view`, `gh api` all work
-  against both repos.
+- `tools/dial_display_audit.py` added — see above. Zero third-party deps
+  (stdlib `urllib`/`json` only), so it needs nothing installed to run.
 
 ## Still open (carried forward)
 
-- **Layout fixes** — `docs/PLAN-screen-layout-fixes.md` still awaiting the
-  owner's review; nothing implemented. Four open questions at its end.
-- **OTA paths not yet observed on hardware:** beta.N → stable graduation;
-  0.1.4 with Beta builds **on** → 0.1.5 (API shows 0.1.5 first in the
-  five-entry list so it should work); the 404/draft fallback.
-- **BATT_CURVE 100 % anchor** (4200 mV) may be unreachable on some
-  cell/charger combos — monitoring, not recalibrating yet.
-- Time from plug-in to 4280 mV on a depleted cell (SPEC-power-sensing §10.2).
-- CI annotation noise: actions pinned to Node 20 (checkout@v4,
-  upload/download-artifact@v4, action-gh-release@v2) are being forced onto
-  Node 24. Harmless today; bump when convenient.
+- **Pad restore** (see above — new, time-sensitive).
+- From the beta.3 session (2026-09-06), still not reported on: overnight
+  soak verdict on beta.3.
+- Layout audit Tier D (brightness "%" placement, pad-discovery relayout),
+  `SCR_SIDEPICK`/`side_picked` deletion, and 0.1.6 stable graduation are
+  all still open owner decisions (unchanged by this session).
+- This audit's own "NOT VERIFIABLE WITHOUT HARDWARE" section flags one
+  loose end worth knowing about but not urgent: whether the physical
+  encoder ever coalesces multiple detents into one `on_knob()` call before
+  posting — untested by design (needs `idf.py monitor` per-detent logging,
+  not an API poll), and not currently justified by any symptom.
 
-## Nothing in flight
+## Nothing else in flight
 
-No background jobs, no serial capture running (both pid files removed),
-no worktrees besides the main checkout (`git worktree list` verified),
-`/tmp/somnus-0.1.4-wt` gone. Main checkout HEAD and status unchanged by
-the hardware test.
+No background jobs from this session — the live click-session logger ran
+in Matthew's own terminal, not as a tracked background task here. No
+worktrees besides the main checkout.
