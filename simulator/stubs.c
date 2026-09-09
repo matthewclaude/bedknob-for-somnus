@@ -214,12 +214,18 @@ struct tm *localtime_r(const time_t *timep, struct tm *result)
 }
 
 /* ---- esp_app_desc --------------------------------------------------------
- * Fixed "v1.0.1 / v6.0" identity for scr_about.c's Firmware/IDF rows —
- * kept in step with firmware/dial-idf/CMakeLists.txt's PROJECT_VER so the
- * simulator's about.png never shows a version the real firmware doesn't. */
+ * Identity for scr_about.c's Firmware/IDF rows. The version is NOT written
+ * here: simulator/CMakeLists.txt reads PROJECT_VER out of
+ * firmware/dial-idf/CMakeLists.txt at configure time and passes it in as
+ * SIM_APP_VERSION, so about.png shows whatever the firmware would report and
+ * cannot drift from it. The IDF string is cosmetic and stays fixed. */
+
+#ifndef SIM_APP_VERSION
+#error "SIM_APP_VERSION must come from simulator/CMakeLists.txt (read from firmware/dial-idf/CMakeLists.txt PROJECT_VER)"
+#endif
 
 const esp_app_desc_t *esp_app_get_description(void)
 {
-    static const esp_app_desc_t desc = { .version = "0.1.4", .idf_ver = "v6.0" };
+    static const esp_app_desc_t desc = { .version = SIM_APP_VERSION, .idf_ver = "v6.0" };
     return &desc;
 }

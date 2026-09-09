@@ -42,8 +42,12 @@
 // than a literal per scenario, because it has to stay AHEAD of the version the
 // simulator reports as installed (stubs.c's esp_app_desc_t, which tracks
 // PROJECT_VER) — otherwise the screenshots show a dial offering to update
-// itself to something it already runs. Bump it with each release.
-#define SIM_OTA_LATEST "1.4.3"
+// itself to something it already runs. It is derived from PROJECT_VER by
+// simulator/CMakeLists.txt at build time (patch+1), so it is always ahead of
+// the installed version without anyone remembering to bump it.
+#ifndef SIM_OTA_LATEST
+#error "SIM_OTA_LATEST must come from simulator/CMakeLists.txt (PROJECT_VER with patch+1)"
+#endif
 
 /* ---- host framebuffer + LVGL display driver ----------------------------- */
 

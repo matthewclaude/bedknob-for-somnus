@@ -7,6 +7,36 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+# ---- firmware version, read from the firmware's own CMakeLists ----------
+# scr_about.c shows esp_app_get_description()->version and the Update
+# screens compare it against dial_ota's "latest"; the simulator stubs both
+# (stubs.c, main.c). Read PROJECT_VER from firmware/dial-idf/CMakeLists.txt
+# at configure time instead of hardcoding it here, so docs/screens can never
+# show a version the firmware doesn't ship. No fallback on purpose: a silent
+# default is exactly the stale-screenshot bug this replaces.
+set(DIAL_FW_CMAKE "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/dial-idf/CMakeLists.txt")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DIAL_FW_CMAKE}")
+file(STRINGS "${DIAL_FW_CMAKE}" DIAL_FW_VER_LINES REGEX "^set\\(PROJECT_VER")
+list(LENGTH DIAL_FW_VER_LINES DIAL_FW_VER_LINE_COUNT)
+if(NOT DIAL_FW_VER_LINE_COUNT EQUAL 1)
+  message(FATAL_ERROR "dial_sim: expected exactly one set(PROJECT_VER ...) line in ${DIAL_FW_CMAKE}, found ${DIAL_FW_VER_LINE_COUNT}")
+endif()
+string(REGEX REPLACE "^set\\(PROJECT_VER +\"([^\"]+)\"\\).*$" "\\1" DIAL_FW_VERSION "${DIAL_FW_VER_LINES}")
+if(NOT DIAL_FW_VERSION OR DIAL_FW_VERSION STREQUAL DIAL_FW_VER_LINES)
+  message(FATAL_ERROR "dial_sim: could not extract PROJECT_VER from '${DIAL_FW_VER_LINES}'")
+endif()
+
+# OTA scenarios advertise the next patch release -- same major.minor, patch+1
+# -- so the Update screens always offer something newer than what is
+# installed. A -beta.N suffix is dropped before the arithmetic.
+string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" DIAL_FW_VERSION_CORE "${DIAL_FW_VERSION}")
+if(NOT DIAL_FW_VERSION_CORE)
+  message(FATAL_ERROR "dial_sim: PROJECT_VER '${DIAL_FW_VERSION}' is not MAJOR.MINOR.PATCH[-suffix]")
+endif()
+math(EXPR DIAL_FW_PATCH_NEXT "${CMAKE_MATCH_3} + 1")
+set(DIAL_SIM_OTA_LATEST "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${DIAL_FW_PATCH_NEXT}")
+message(STATUS "dial_sim: firmware version ${DIAL_FW_VERSION}, OTA scenarios advertise ${DIAL_SIM_OTA_LATEST}")
+
 # ---- LVGL 8.4.0 --------------------------------------------------------
 # firmware/dial-idf pins lvgl/lvgl at exactly 8.4.0 (managed_components/ is
 # gitignored, so a fresh clone won't have it). Use that local checkout
@@ -103,6 +133,11 @@ target_include_directories(dial_sim PRIVATE
 target_link_libraries(dial_sim PRIVATE lvgl::lvgl m)
 
 target_compile_options(dial_sim PRIVATE -Wall -Wno-unused-parameter)
+
+# Installed / advertised versions, from the block at the top of this file.
+target_compile_definitions(dial_sim PRIVATE
+  SIM_APP_VERSION="${DIAL_FW_VERSION}"
+  SIM_OTA_LATEST="${DIAL_SIM_OTA_LATEST}")
 
 # Where the PNGs land — always the repo's docs/screens/, regardless of the
 # build directory's location or the binary's working directory at run time.
