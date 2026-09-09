@@ -66,8 +66,8 @@ and from `show --stat HEAD`, and still present as untracked after the commit):
 - `docs/REPORT-handoff.md`
 - `docs/REPORT-night-face.md`
 - `docs/REPORT-power-indicator.md`
-- `docs/REPORT-release-beta3.md`
-- `docs/REPORT-release-beta4.md`
+- `docs/REPORT-0.1.5-beta.3-release.md` (then named `REPORT-release-beta3.md`)
+- `docs/REPORT-0.1.5-beta.4-release.md` (then named `REPORT-release-beta4.md`)
 - `docs/REPORT-screen-layout-audit.md`
 - `Claude outputs/`
 
@@ -89,7 +89,7 @@ deliberately excluded untracked paths remain:
 ?? docs/REPORT-screen-layout-audit.md
 ```
 
-(This file, `docs/REPORT-beta5-commit.md`, is now also untracked, per report convention.)
+(This file, `docs/REPORT-0.1.5-beta.5-commit.md` — then named `REPORT-beta5-commit.md` — is now also untracked, per report convention.)
 
 ## Not done (by instruction)
 

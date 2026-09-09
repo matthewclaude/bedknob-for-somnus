@@ -88,7 +88,7 @@ taps on "Check for updates" during the window.
   units in earlier sessions.
 - The OTA client resolved `latest 0.1.4`. At capture time the public releases repo held
   `somnus-v0.1.5-beta.5` as a prerelease (published 2026-09-05T00:14:40Z, see
-  `docs/REPORT-beta5-ci-check.md`). GitHub's `releases/latest` endpoint excludes
+  `docs/REPORT-0.1.5-beta.5-ci-check.md`). GitHub's `releases/latest` endpoint excludes
   prereleases by definition, which matches what the device printed. Whether this unit is
   meant to be on the beta channel, and how the client selects a channel, was not examined
   here (read-only task).
@@ -112,7 +112,7 @@ copied from the request. What was checked, and how:
 | Old path still in 0.1.4 code | `git show somnus-v0.1.4:.../dial_ota.c \| grep per_page` | line 44 `releases?per_page=5`, line 61 `RELEASES_LIST_SCAN_CAP 5` |
 | Fix exists only in beta.2–beta.5, no stable | `git tag --contains 819f102`; `--is-ancestor` against every `somnus-v*` tag | contains: beta.2, beta.3, beta.4, beta.5 only. Lacking: v0.1.0–v0.1.4 and beta.1 |
 | Flasher's unchecked option installs stable from `firmware/latest/` | `web-flasher/index.html`, `web-flasher/manifest.json`, `release.yml` channel-dir step | checkbox label is "Install beta build instead" (**wording corrected** from "Install beta build"); default manifest -> `firmware/latest/somnus-dial-merged.bin`; non-beta tags deploy to `firmware/latest`, beta tags to `firmware/beta` |
-| Five stable releases fill the per_page=5 window | public releases API listing (this report, and `REPORT-beta5-ci-check.md`) | stable: 0.1.0, 0.1.1, 0.1.2, 0.1.3, 0.1.4 = 5; all betas listed after them |
+| Five stable releases fill the per_page=5 window | public releases API listing (this report, and `REPORT-0.1.5-beta.5-ci-check.md`) | stable: 0.1.0, 0.1.1, 0.1.2, 0.1.3, 0.1.4 = 5; all betas listed after them |
 | Unit logged `latest 0.1.4, running 0.1.4 -- up to date` on 2026-09-05 | this report, lines 2–9 of the capture | 8 occurrences, verbatim above |
 | "with Beta builds toggled on" | `dial_ota.c` @ v0.1.4, lines 272–340 | **Qualified:** both channels fall through to the same `ESP_LOGI("latest %s, running %s -- up to date")`. The capture cannot show which channel was active, and the toggle state was not recorded during capture. §9.9 states the code consequence for toggle-on and flags the capture as consistent-with, not proof-of, the toggle position. |
 

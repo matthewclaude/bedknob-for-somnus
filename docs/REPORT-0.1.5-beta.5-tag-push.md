@@ -89,4 +89,4 @@ via `SOMNUS_RELEASES_TOKEN`. Confirm manually at:
 
 Unchanged by this step. Still untracked (deliberately, per report convention):
 `Claude outputs/`, `docs/PLAN-screen-layout-fixes.md`, all `docs/REPORT-*.md` including
-`docs/REPORT-beta5-commit.md` and this file.
+`docs/REPORT-0.1.5-beta.5-commit.md` (then named `REPORT-beta5-commit.md`) and this file.
