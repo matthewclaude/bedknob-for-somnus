@@ -8,10 +8,11 @@ This project forked from `chris023/orion-waveshare-rotary-dial`. That
 project's own changelog (versions 1.0.0–1.4.2, tags `dial-v*`) is real
 lineage, kept in full at `CHANGELOG-orion.md` — but nothing has ever shipped
 under the Somnus name, so Somnus versioning starts fresh here at 0.1.0,
-unrelated to those numbers. **1.0.0 is reserved for when v1 scope is
-actually complete** — i.e. when a new user can genuinely buy a board,
-flash it from a URL, and add their pad without typing an IP. Everything
-before that is 0.x.
+unrelated to those numbers. **1.0.0 (2026-09-09) marks v1 scope complete** — a new user can buy a
+board, flash it from a URL, and add their pad without typing an IP.
+Everything before it was 0.x. Orion's own 1.x numbers never collide with
+ours: their tags are `dial-v*`, ours are `somnus-v*`, and the dial only
+ever compares against `somnus-v*` tags.
 
 This file is the source of the release notes on GitHub: the release
 workflow extracts the section matching the tag and publishes it as that
@@ -20,6 +21,35 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
+
+## 1.0.0 — 2026-09-09
+
+Bedknob for Somnus 1.0. This is the `0.1.6` build renumbered — no code
+changes — after it soaked in nightly use. `1.0.0` marks the point where a
+new user can buy a Waveshare ESP32-S3-Knob-Touch-LCD-1.8, flash it from
+the browser at https://matthewclaude.github.io/somnus-dial-releases/, join
+it to Wi-Fi from a phone, and have it find the Somnus Pad on its own —
+without typing an IP address — and then receive fixes over the air.
+
+If your dial is on `0.1.6`, it will offer `1.0.0` as an update (or install
+it automatically in the morning window if automatic updates are on).
+Nothing about how the dial behaves changes with this update.
+
+### What 1.0 includes
+
+- Pad discovery on the local network, with the address re-persisted when
+  the pad moves.
+- Setup from a phone: Wi-Fi captive portal, timezone captured from the
+  browser or picked on the dial.
+- The Somnus relative scale (−15 to +15, matching the Somnus app) or
+  absolute °C / °F.
+- Night mode, Night face, Standby face, and separate day / night / standby
+  brightness.
+- Over-the-air updates with bootloader rollback, an optional beta channel,
+  and optional automatic installs in a window after night ends.
+- Change network, Check for updates and Factory reset that work even when
+  the dial cannot reach the pad.
+- A power indicator that knows whether the dial is on USB or battery.
 
 ## 0.1.6 — 2026-09-07
 

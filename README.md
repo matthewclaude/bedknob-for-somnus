@@ -1,8 +1,8 @@
 # Bedknob for Somnus
 
 > **Not affiliated with, endorsed by, or supported by Somnus Lab or Waveshare.**
-> An independent, community-built project. **Beta** — current release
-> `somnus-v0.1.6`.
+> An independent, community-built project. Current release
+> `somnus-v1.0.0`.
 
 Turn a knob to change the temperature of your bed. This project turns a
 **Waveshare ESP32-S3 round touch-LCD knob** into a standalone bedside dial
@@ -215,9 +215,10 @@ which also hosts the browser flasher. Each release carries `somnus-dial.bin`
 image for manual flashing from offset `0x0`). Tags are `somnus-vX.Y.Z`;
 [CHANGELOG.md](CHANGELOG.md) is the source of every release's notes.
 
-**1.0.0 is reserved** for when a stranger can buy the board, flash it from
-the URL above and add their pad without help *and* the housekeeping this
-fork inherited is done. Until then, 0.x.
+**1.0.0 shipped 2026-09-09** — the `0.1.6` build renumbered, once a
+stranger could buy the board, flash it from the URL above and add their pad
+without help, and the housekeeping this fork inherited was done. Everything
+before it was a 0.x beta.
 
 ## Repo layout
 

@@ -195,17 +195,19 @@ about, update, updating, update prompt.
 ## Updates: `dial_ota`
 
 `dial_ota` checks the **public releases repo**
-`matthewclaude/somnus-dial-releases` over the GitHub API —
-`/releases/latest` normally, the `/releases?per_page=5` list when **Beta
-builds** is on so prereleases count — compares the tag (prefix `somnus-v`)
-against the running `esp_app_get_description()->version` semver-aware, and
-on a newer release records the `somnus-dial.bin` asset URL. Applying is
-`esp_https_ota` into the inactive OTA slot, following GitHub's redirect to
-`objects.githubusercontent.com`; TLS on both hosts verifies against an
-embedded multi-root PEM. The bootloader's rollback is enabled
+`matthewclaude/somnus-dial-releases` over the GitHub API — `/releases/latest`
+normally; with **Beta builds** on, the `/tags?per_page=50` list to find the
+newest `somnus-v*` tag and then `/releases/tags/<tag>` for that release's
+object, so prereleases count and a beta can never scroll out of a capped list
+(the `0.1.5` fix) — compares the tag (prefix `somnus-v`) against the running
+`esp_app_get_description()->version` semver-aware, and on a newer release
+records the `somnus-dial.bin` asset URL. Applying is `esp_https_ota` into the
+inactive OTA slot, following GitHub's redirect to
+`objects.githubusercontent.com`; TLS on both hosts verifies against an embedded
+multi-root PEM. The bootloader's rollback is enabled
 (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`): a freshly installed image stays
-provisional until the worker's first successful pad poll, or a 30 s
-stable-boot fallback timer, marks it valid; otherwise the next reset reverts.
+provisional until the worker's first successful pad poll, or a 30 s stable-boot
+fallback timer, marks it valid; otherwise the next reset reverts.
 
 The automatic check runs every 6 hours. Discovery is deliberately split: an
 ambient "Update available" line on the dial and standby faces, and a one-tap
