@@ -223,4 +223,21 @@ Changes to `docs/SPEC-repo-consolidation.md`: §1's parenthetical now records th
 
 ### Push and CI
 
-(appended after the push — see below)
+Correction commit `ecce808` pushed to `somnus` (`matthewclaude/bedknob-for-somnus`), branch `main` only, no tags:
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   2619c57..ecce808  main -> main
+```
+
+```
+$ gh run list --repo matthewclaude/bedknob-for-somnus --limit 3
+in_progress		docs: SPEC-repo-consolidation — gh-pages branch is upstream's, not th…	ci	main	push	34520740644	8s	2026-09-10T19:29:55Z
+completed	success	docs: post-public-sweep report — push and CI addendum	ci	main	push	34518371353	3m13s	2026-09-10T19:06:07Z
+completed	success	docs: post-publication sweep — dial_ota comment, SPEC-power-sensing p…	ci	main	push	34517958212	3m4s	2026-09-10T19:02:06Z
+```
+
+The ci.yml run for `ecce808` is **34520740644** (`headSha` `ecce808bff1e72008ff2171ad537131456fb4c90`, event `push`). `gh run watch 34520740644 --repo matthewclaude/bedknob-for-somnus --exit-status` exited 0. Final state: **completed, conclusion `success`** — single job `build` (ID 103017347923). One annotation, unrelated to this change and identical to the previous runs': the runner warns that `actions/checkout@v4` targets Node.js 20 and is being forced onto Node.js 24. There was no release run; nothing was tagged.
+
+This addendum's own commit ("docs: spec-repo-consolidation report — push and CI addendum") is pushed after it; that second push's output is not in this file.
