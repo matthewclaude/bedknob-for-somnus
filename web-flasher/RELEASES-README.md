@@ -6,12 +6,11 @@ temperature control for a Somnus Pad. Not affiliated with, endorsed by, or
 supported by Somnus Lab or Waveshare.
 
 **This repo holds binaries, a manifest, and this flasher page only — it is
-not the firmware's source.** The source lives in a private repository.
-That's a deliberate choice about this project's development, not a
-statement about the license below: the firmware is source-available
-under the same PolyForm Noncommercial terms it always has been, this repo
-just isn't where the buildable source happens to live. If you want the
-source, ask the maintainer.
+not the firmware's source.** The source is public at
+[matthewclaude/bedknob-for-somnus](https://github.com/matthewclaude/bedknob-for-somnus),
+source-available under the PolyForm Noncommercial terms described below.
+Releases are published here rather than alongside the source because the
+dial's over-the-air update client resolves them by this repo's URL.
 
 ## Install
 
