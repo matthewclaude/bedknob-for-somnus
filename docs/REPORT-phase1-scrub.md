@@ -245,3 +245,46 @@ Rewording is the owner's call. Not changed.
 - **`tools/dial_display_audit.py` still carries the home address** in a docstring, two usage lines and one runtime print (lines 12, 15, 16, 88). It is tracked and outside this task's `docs/SPEC-*.md` scope. Whether it should be scrubbed before the repo goes public is the owner's call; a follow-up would also need to decide about the ten report files.
 - **Whether `192.168.1.100` occurs in the release binary** (the now-rewritten claim at `SPEC-ota-readiness.md:989`). Not checked; would need a `strings` pass over `somnus-dial.bin` at `somnus-v1.0.0`.
 - **CI at the time of writing** — see addendum.
+
+## Post-push addendum (written after commit C, committed separately)
+
+Commit C (this report + its `docs/REPORTS.md` line): **`f77e7eede38aad818187f34526c3d4d92b81171b`** — "docs: phase1-scrub report"
+
+```
+ docs/REPORT-phase1-scrub.md | 247 ++++++++++++++++++++++++++++++++++++++++++++
+ docs/REPORTS.md             |   1 +
+ 2 files changed, 248 insertions(+)
+```
+
+Push:
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   0b6c62f..f77e7ee  main -> main
+```
+
+Commits carried (`git log --oneline 0b6c62f..HEAD`, `somnus/main` before the push was `0b6c62f`):
+
+```
+f77e7ee docs: phase1-scrub report
+c7d23e0 docs: untrack reference/, move the API spec to docs/, scrub the example pad address
+eb12e99 docs: track the readme-license-fix report
+3cc247e docs: track the docs-amend report
+```
+
+`git ls-remote somnus refs/heads/main` after the push: `f77e7eede38aad818187f34526c3d4d92b81171b`. `origin` was not touched (push URL is `no_push`).
+
+CI (`gh run list --repo matthewclaude/bedknob-for-somnus --limit 3`, columns: id, workflow, sha, event, status, conclusion, created):
+
+```
+34503940658 ci f77e7ee push queued  2026-09-10T16:44:31Z
+34486443265 ci 0b6c62f push completed success 2026-09-10T14:02:26Z
+34418027434 ci 11a00da push completed success 2026-09-09T23:41:23Z
+```
+
+`gh run watch 34503940658 --exit-status` returned 0. Final state: **ci.yml run 34503940658 on `f77e7ee` — completed, conclusion `success`** (single job `build`, success). One annotation only, the runner's generic Node.js 20 deprecation warning for `actions/checkout@v4`; not related to this change.
+
+Remote tree, checked via the GitHub contents API after the push: `reference/` returns 404 (gone from the public tree, as intended); `docs/local_api.yml` is present with blob sha `f629a712e52198c6c8843fe138e965fd1f8d764b`. This resolves the first "Cannot verify from disk" item above.
+
+This addendum is committed as a third docs-only commit ("docs: phase1-scrub report — push and CI addendum") whose SHA is reported in the chat reply, and that commit is pushed to `somnus` as well so the remote matches the tree. That second push triggers one further ci.yml run, which is not tracked in this report.
