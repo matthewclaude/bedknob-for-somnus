@@ -184,3 +184,43 @@ Everything else matched: all three URL constants, `ASSET_NAME`, `TAG_PREFIX`, ca
 ## Not verifiable without hardware
 
 Nothing — no code changed. Two GitHub-side facts (no Releases in `bedknob-for-somnus`; Pages not enabled there) were taken from the task, not verified, since this block is offline and read-only against the remote.
+
+## Correction and push addendum
+
+2026-09-10, later the same day. Correction commit's parent: `bfdb5b5`.
+
+### Gate (all four passed)
+
+```
+$ git rev-parse --short HEAD
+bfdb5b5
+$ git --no-optional-locks status --short --untracked-files=no
+(no output)
+$ git remote get-url --push origin
+no_push
+$ git ls-remote --heads somnus
+2619c5738a7016594a1be69c848ed1597552549d	refs/heads/main
+```
+
+Exactly one ref, `refs/heads/main`. The premise of the correction holds.
+
+### What was wrong
+
+**False premise 1 in the section above was itself a false finding.** The earlier pass ran `git log origin/gh-pages` and `git ls-tree origin/gh-pages`, saw twelve upstream `deploy:` commits and two `orion-dial-merged.bin` files, and wrote them into the spec as "this repo's inherited `gh-pages` branch". But `origin` in this checkout is the upstream repo the project forked from (`chris023/orion-waveshare-rotary-dial`, push URL `no_push`); the public source repo is the `somnus` remote (`matthewclaude/bedknob-for-somnus`). `origin/gh-pages` is upstream's own flasher deploy and says nothing about this repo. `git ls-remote --heads somnus` — the check that should have been run the first time — lists only `main`. So there is no inherited branch, no stale images for `keep_files` to preserve, no hand cleanup, and the first Pages deploy creates `gh-pages` from `_site` alone. The task's original premise ("holds no Releases and no Pages site") was correct as stated.
+
+### Correction diff (spec + index line, before this addendum)
+
+```
+$ git diff --stat
+ docs/REPORTS.md                 |  2 +-
+ docs/SPEC-repo-consolidation.md | 15 ++++++++++-----
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+```
+
+Changes to `docs/SPEC-repo-consolidation.md`: §1's parenthetical now records the `ls-remote` result and names `origin/gh-pages` as upstream's; §4(b) rewritten — branch does not exist, first deploy creates it, `keep_files: true` / no-`force_orphan` reasoning kept for the stable-vs-beta channel directories; Phase 6 item 6 (stale image cleanup) removed, list now ends at 5; §8 question 4 (inherited branch) removed, the enable-Pages question renumbered to 4. `grep -n 'orion-dial-merged\|inherited\|dead weight'` on the spec now hits only the corrected "nothing inherited" sentence in §4(b). Deviations 3 and 5 and False premise 1 in the sections above are superseded by this addendum; left in place as the record of what the first pass concluded.
+
+`docs/REPORTS.md`: the report's line reworded to drop the gh-pages "inexact premise" and to say the report carries this correction.
+
+### Push and CI
+
+(appended after the push — see below)
