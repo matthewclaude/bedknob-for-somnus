@@ -160,3 +160,42 @@ See the post-push addendum at the end of this report.
   followed by "not the firmware's source.** The source is public at". So the API serves the new text. Whether GitHub's rendered HTML page has refreshed its cache was not checked visually.
 - **The flasher site itself** (`matthewclaude.github.io/somnus-dial-releases`) is built from the `gh-pages` branch, not from this README, so it is unaffected by this change and was not re-checked.
 - **Whether any other public-facing text still implies the source is private** — outside the three READMEs the task named, no search was made beyond the STEP 3a grep, which found the old phrasing only in historical reports.
+
+## Post-push addendum (written after commit B, committed separately)
+
+Commit B (this report + its `docs/REPORTS.md` line): **`6fabbb976057809e75cd53a847b1507109f837fb`** — "docs: public-readme-fix report"
+
+```
+ docs/REPORT-public-readme-fix.md | 162 +++++++++++++++++++++++++++++++++++++++
+ docs/REPORTS.md                  |   1 +
+ 2 files changed, 163 insertions(+)
+```
+
+Push:
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   bb1215e..6fabbb9  main -> main
+```
+
+Commits carried (`git log --oneline bb1215e..HEAD`, `somnus/main` before the push was `bb1215e`):
+
+```
+6fabbb9 docs: public-readme-fix report
+ec8ce37 docs: the source is public now
+```
+
+`git ls-remote somnus refs/heads/main` after the push: `6fabbb976057809e75cd53a847b1507109f837fb`. `origin` was not touched (push URL is `no_push`).
+
+CI (`gh run list --repo matthewclaude/bedknob-for-somnus --limit 3`, columns: id, workflow, sha, event, status, conclusion, created):
+
+```
+34509791509 ci 6fabbb9 push in_progress  2026-09-10T17:41:51Z
+34508885630 ci bb1215e push completed success 2026-09-10T17:32:58Z
+34508416097 ci 68b854d push completed success 2026-09-10T17:28:19Z
+```
+
+`gh run watch 34509791509 --exit-status` returned 0. Final state: **ci.yml run 34509791509 on `6fabbb9` — completed, conclusion `success`** (single job `build`, success). This is the first CI run since the repo became public.
+
+This addendum is committed as a third docs-only commit ("docs: public-readme-fix report — push and CI addendum") whose SHA is reported in the chat reply, and pushed to `somnus`. That push triggers one further ci.yml run, not tracked here.
