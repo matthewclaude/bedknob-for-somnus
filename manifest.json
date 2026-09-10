@@ -1,0 +1,13 @@
+{
+  "name": "Bedknob for Somnus",
+  "version": "latest",
+  "new_install_prompt_erase": false,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "firmware/latest/somnus-dial-merged.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
