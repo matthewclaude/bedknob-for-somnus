@@ -111,3 +111,33 @@ False premises: none. Every quoted passage was on disk as described: the `dial_o
 ## 7. Could not be verified without hardware
 
 Nothing. No behaviour changed: the only firmware edit is a C comment, and the three URL constants it sits above are byte-identical, so the built binary's OTA requests are unchanged. No build or flash was needed or performed.
+
+## 8. Push and CI addendum
+
+Written after §1–§7 were committed as `11448b911f48d8f3780327b2835765e567367e8c` (short `11448b9`, subject "docs: post-publication sweep — dial_ota comment, SPEC-power-sensing paths, NAMING item 6"). That SHA could not go into the file its own commit carried (§4, §5); it is recorded here instead.
+
+Gate before the push: `git rev-parse --short HEAD` = `11448b9`; `git --no-optional-locks status --short --untracked-files=no` printed nothing; `git remote get-url --push origin` = `no_push`; `git log --oneline somnus/main..HEAD` = exactly the one line `11448b9`.
+
+First push (raw output):
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   492416b..11448b9  main -> main
+```
+
+Only `main` was pushed, only to `somnus`; no tags, `origin` untouched.
+
+CI (raw output of `gh run list --repo matthewclaude/bedknob-for-somnus --limit 3`, taken a few seconds after the push):
+
+```
+in_progress		docs: post-publication sweep — dial_ota comment, SPEC-power-sensing p…	ci	main	push	34517958212	16s	2026-09-10T19:02:06Z
+completed	success	docs: public-readme-fix report — push and CI addendum	ci	main	push	34510140392	3m10s	2026-09-10T17:45:21Z
+completed	success	docs: public-readme-fix report	ci	main	push	34509791509	3m8s	2026-09-10T17:41:51Z
+```
+
+The ci.yml run for `11448b9` is **34517958212** (`headSha` `11448b911f48d8f3780327b2835765e567367e8c`, event `push`). `gh run watch 34517958212 --repo matthewclaude/bedknob-for-somnus --exit-status` exited 0. Final state: **completed, conclusion `success`** — single job `build` (ID 103008043459, 3m1s: checkout, "Build firmware (firmware/dial-idf)"). One annotation, unrelated to this change: the runner warns that `actions/checkout@v4` targets Node.js 20 and is being forced onto Node.js 24. There was no release run; nothing was tagged.
+
+This section is committed on its own as "docs: post-public-sweep report — push and CI addendum" and pushed to `somnus` afterwards.
+
+**Deviation:** the instruction asked for the second push's raw output to be recorded in this section before that commit is made. That is impossible in this order — the second push carries the addendum commit, so its output exists only after the commit. The second push output is therefore reported in the chat reply, not in this file. It triggers one further ci.yml run, not tracked here.
