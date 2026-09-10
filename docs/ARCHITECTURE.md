@@ -12,7 +12,7 @@ knob dial (ESP32-S3)  ──Wi-Fi──►  Somnus Pad, http://<pad-ip>:8080  (L
 ```
 
 Those three endpoints are the pad's entire local API
-([`reference/local_api.yml`](../reference/local_api.yml), v0.2.0) and the
+([`docs/local_api.yml`](local_api.yml), v0.2.0) and the
 only contract the firmware relies on. The dial's other two peers are
 `pool.ntp.org` for the clock and GitHub for updates.
 

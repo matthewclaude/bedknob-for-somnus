@@ -233,7 +233,7 @@ before it was a 0.x beta.
 - [`docs/`](docs/) — design specs (`SPEC-*.md`), the architecture note, the
   screen renders. Specs are written before code and kept current with what
   actually shipped; each carries its status at the top.
-- [`reference/local_api.yml`](reference/local_api.yml) — Somnus's published local API spec
+- [`docs/local_api.yml`](docs/local_api.yml) — Somnus's published local API spec
   (v0.2.0), the only contract the firmware relies on.
 
 ## Related

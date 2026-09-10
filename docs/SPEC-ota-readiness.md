@@ -951,7 +951,7 @@ confirmed `1.4.2` — then, and only then, tag and push the first
 
 **2026-09-01.** `DIAL_PAD_DEFAULT_BASE_URL` (`dial_state.h:343`) and
 `SOMNUS_DEFAULT_BASE_URL` (`dial_somnus.h:53`) were temporarily set to
-`http://192.168.1.169:8080` — a real home IP — while pad discovery was
+`http://192.168.1.100:8080` — a real home IP — while pad discovery was
 being built and verified on hardware, per commit `9ff178e`'s neutralization
 of the *previous* hardcoded default. That reason is now gone: discovery
 (`components/dial_pad_discovery/`, `docs/SPEC-pad-discovery.md`) is proven
@@ -986,7 +986,7 @@ neutralization):
                  address, unrelated and correctly still present)
 ```
 
-Zero occurrences of `192.168.1.169` anywhere in the binary. `0.1.0` (§7)
+Zero occurrences of `192.168.1.100` anywhere in the binary. `0.1.0` (§7)
 is still present and unaffected by this change. Built, not flashed, per
 this session's instructions — NVS already holds the real discovered
 address on the one physical board, so the compiled default doesn't affect
@@ -1008,7 +1008,7 @@ file's content from scratch, this was surfaced back to the user mid-task;
 the user chose to skip both for now rather than have them created blind.
 **A future session: do not assume this note-worthy warning has been
 removed from either document** — check whether the files exist yet, and
-if so whether they still describe `192.168.1.169` as a live,
+if so whether they still describe `192.168.1.100` as a live,
 must-not-be-committed concern, since as of this pass that concern is
 resolved in code (§8 above) but may still read as open in those two docs
 once they're found or written.
