@@ -43,5 +43,6 @@ A `REPORT-*.md` file is Claude Code's fixed-path output for one task: a verdict 
 - `REPORT-sim-version-screens.md` — 2026-09-09 — simulator reads PROJECT_VER at build time; screens regenerated at 1.0.0 — **DONE** — commit `effb9c6` on `main` (on top of `7c106fb` = `somnus-v1.0.0`): the simulator now derives the installed version (1.0.0) and the advertised OTA version (1.0.1) from `firmware/dial-idf/CMakeLists.txt` at configure time, the two hardcoded literals are gone behind `#error` guards, and 6 of 49 screens regenerated with the new strings while the other 43 are byte-identical.
 - `TEST-F3-stuck-loop.md` — 2026-09-09 — Test plan: F3 — escape hatches work while stuck in the connect loop — (no verdict line)
 - `REPORT-release-latest-pointer.md` — 2026-09-10 — REPORT: release "latest" pointer verification — **somnus-v1.0.0 confirmed as the release GitHub serves as latest; firmware/latest/ serving the 1.0.0 binary by sha256.**
+- `REPORT-docs-commit.md` — 2026-09-10 — REPORT: docs commit — release latest-pointer verification; handoff report update — **COMMITTED.** Commit `eff6df3` on `main` (three docs files), not pushed; the message was later amended to drop an incorrect attribution trailer, tree unchanged.
 
 Regenerate this index when adding reports; it is hand-maintained, not built.
