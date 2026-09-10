@@ -44,5 +44,6 @@ A `REPORT-*.md` file is Claude Code's fixed-path output for one task: a verdict 
 - `TEST-F3-stuck-loop.md` — 2026-09-09 — Test plan: F3 — escape hatches work while stuck in the connect loop — (no verdict line)
 - `REPORT-release-latest-pointer.md` — 2026-09-10 — REPORT: release "latest" pointer verification — **somnus-v1.0.0 confirmed as the release GitHub serves as latest; firmware/latest/ serving the 1.0.0 binary by sha256.**
 - `REPORT-docs-commit.md` — 2026-09-10 — REPORT: docs commit — release latest-pointer verification; handoff report update — **COMMITTED.** Commit `eff6df3` on `main` (three docs files), not pushed; the message was later amended to drop an incorrect attribution trailer, tree unchanged.
+- `REPORT-docs-amend.md` — 2026-09-10 — REPORT: amend the docs commit message; track the docs-commit report — **BOTH STEPS DONE.** Step 1: `361a4cb` amended (message only, tree unchanged) to `eff6df3`; step 2: `docs/REPORT-docs-commit.md` + `docs/REPORTS.md` committed as `0b6c62f`. Neither commit pushed at the time of writing.
 
 Regenerate this index when adding reports; it is hand-maintained, not built.
