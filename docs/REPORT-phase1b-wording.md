@@ -221,3 +221,44 @@ See the post-push addendum at the end of this report.
 - **Whether the audit tool still behaves identically at runtime** against a live pad. Only `py_compile` was run (the task's stated check). The changed lines are a docstring and an error-path `print`; no logic changed. A live run needs a pad on the network and was not in scope.
 - **Whether `192.168.1.100` occurs in the 1.0.0 release binary.** Sentence 5 now says "zero occurrences of the home address", which restores the original claim's meaning; the actual scan was done in the 2026-09-01 session on that session's build, and has not been re-run here.
 - **The public repo's rendered state** after the push — see addendum for what the API showed.
+
+## Post-push addendum (written after commit B, committed separately)
+
+Commit B (this report + its `docs/REPORTS.md` line): **`b5248a1e2f318512c1381f79b68d503e15851b4e`** — "docs: phase1b-wording report"
+
+```
+ docs/REPORT-phase1b-wording.md | 223 +++++++++++++++++++++++++++++++++++++++++
+ docs/REPORTS.md                |   1 +
+ 2 files changed, 224 insertions(+)
+```
+
+Push:
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   51a85e9..b5248a1  main -> main
+```
+
+Commits carried (`git log --oneline 51a85e9..HEAD`, `somnus/main` before the push was `51a85e9`):
+
+```
+b5248a1 docs: phase1b-wording report
+4e86dbe docs: name the home-address default instead of printing a value; scrub it from the audit tool
+```
+
+`git ls-remote somnus refs/heads/main` after the push: `b5248a1e2f318512c1381f79b68d503e15851b4e`. `origin` was not touched (push URL is `no_push`).
+
+CI (`gh run list --repo matthewclaude/bedknob-for-somnus --limit 3`, columns: id, workflow, sha, event, status, conclusion, created):
+
+```
+34505156131 ci b5248a1 push in_progress  2026-09-10T16:56:31Z
+34504551360 ci 51a85e9 push completed success 2026-09-10T16:50:27Z
+34503940658 ci f77e7ee push completed success 2026-09-10T16:44:31Z
+```
+
+`gh run watch 34505156131 --exit-status` returned 0. Final state: **ci.yml run 34505156131 on `b5248a1` — completed, conclusion `success`** (single job `build`, success). (Run 34504551360 is the previous task's addendum push; also success.)
+
+Remote check via the GitHub contents API after the push: the served `tools/dial_display_audit.py` contains zero lines matching the home address. This resolves the "public repo's rendered state" item under Cannot verify from disk.
+
+This addendum is committed as a third docs-only commit ("docs: phase1b-wording report — push and CI addendum") whose SHA is reported in the chat reply, and pushed to `somnus` so the remote matches the tree. That push triggers one further ci.yml run, not tracked here.
