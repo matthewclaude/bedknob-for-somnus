@@ -26,7 +26,7 @@ construction is not worth losing.
 
 | Was | Now | Status |
 |---|---|---|
-| Somnus Dial / the dial | Bedknob for Somnus | **Copy surfaces done Sep 3** — root README, firmware READMEs, ARCHITECTURE.md, flasher page (title, H1, description, button, manifests' `name` field), SoftAP name `Bedknob-XXXX`, portal page title and heading. GitHub repo renamed to `matthewclaude/bedknob-for-somnus` Sep 5 (default branch `main` = the ported code); binary, tag and URL identifiers stay by design (see below). |
+| Somnus Dial / the dial | Bedknob for Somnus | **Copy surfaces done Sep 3** — root README, firmware READMEs, ARCHITECTURE.md, flasher page (title, H1, description, button, manifests' `name` field), SoftAP name `Bedknob-XXXX`, portal page title and heading. GitHub repo renamed to `matthewclaude/bedknob-for-somnus` Sep 5, public since Sep 10 2026 (default branch `main` = the ported code); binary, tag and URL identifiers stay by design (see below). |
 | SomnusDialPreview | Bedknob for Mac | **Done Sep 2** — package, target, module, directories, app struct, Info.plist, build.sh, docs. Builds clean, 9/9 tests pass. GitHub repo renamed to `matthewclaude/BedknobMac` Sep 5. |
 | SomnusWidget | Bedknob Mini | **Done Sep 5** — target/module/executable `BedknobMini`, bundle `Bedknob Mini.app`, id `com.matthew.bedknobmini`, hardcoded home IP scrubbed to the spec's `192.168.1.100`; rename only, no behavior change. Put under git the same day and pushed to a new private repo `matthewclaude/BedknobMini`. Local folder still `~/Projects/SomnusWidget` on purpose (paths in specs). |
 
@@ -60,6 +60,16 @@ construction is not worth losing.
    `~/Projects/SomnusWidget` is not a git repository at all (Bedknob Mini, item 2).
    Check going forward: `git log <remote>/main..HEAD` empty and
    `git --no-optional-locks status --short` empty means GitHub matches disk.
+6. **Sep 10 2026 going-public audit of naming surfaces — and the fixes.** The firmware
+   repo `matthewclaude/bedknob-for-somnus` became public Sep 10 2026. Found: the GitHub
+   About boxes (description, homepage, topics) on both `bedknob-for-somnus` and
+   `somnus-dial-releases` still carried pre-rename descriptions using "Somnus" as the
+   product name. **Fixed Sep 10** via `gh repo edit` to "Bedknob for Somnus … Not
+   affiliated with Somnus Lab". The About box is now on the list of surfaces to check.
+   **Still deferred, deliberately:** the cert-error screen string in `dial_state.h`
+   (`DIAL_CERT_ERR_MSG`) shows the pre-rename repo name
+   `matthewclaude/somnus-waveshare-rotary-dial` — GitHub redirects it, so it resolves —
+   and it is reserved for the OTA repoint beta.
 
 ## Naming assets
 

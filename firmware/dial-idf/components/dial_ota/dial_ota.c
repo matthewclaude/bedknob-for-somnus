@@ -28,9 +28,11 @@ extern const char trust_roots_pem_start[] asm("_binary_trust_roots_pem_start");
 static const char *TAG = "ota";
 
 // Points at the public binaries-only release repo (docs/SPEC-ota-readiness.md
-// §5), not the private source repo this firmware is built from -- GitHub
-// 404s every endpoint under a private repo to an unauthenticated client
-// (§1), and both the dial and ESP Web Tools are unauthenticated by design.
+// §5). The source repo is public too (since 2026-09-10), but releases keep
+// publishing to somnus-dial-releases because every shipped dial resolves
+// updates by exactly this URL; consolidating releases into the source repo
+// is a separate, planned step (the OTA repoint), not a change this constant
+// can make on its own.
 #define GITHUB_API_URL \
     "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/latest"
 // Beta channel only (docs/SPEC-ota-readiness.md §9.7, 2026-09-03 finding): GitHub's
