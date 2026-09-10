@@ -2,7 +2,7 @@
 
 **DONE** — the per-holder MIT copyright list and stb's "ALTERNATIVE B - Public Domain" text were recovered verbatim from the releases repo's `THIRD_PARTY_LICENSES` at `4097b6e` and restored into the firmware repo's `THIRD_PARTY_LICENSES.md` (commit `2207b1d` on `main`; the Apache-2.0 and OFL 1.1 blocks re-hash to their previous values), and the identical file was pushed to `matthewclaude/somnus-dial-releases` as `21c239d`. No firmware file touched. Firmware-repo push and CI: see the post-push addendum at the end.
 
-Date: 2026-09-11
+Date: 2026-09-10
 Repo: `~/Projects/somnus-waveshare-rotary-dial` (matthewclaude/bedknob-for-somnus), branch `main`
 Starting HEAD: `74f0feff0ded1498071d7410799ca77cb94bc88f` = `somnus/main` (tree clean)
 
@@ -185,3 +185,44 @@ See the post-push addendum at the end of this report.
 - **Whether the five copyright lines in the per-holder list are still what each upstream publishes today** (LVGL Kft 2021; Dave Gamble 2009-2017; The Bootstrap Authors 2019-2024; Sean Barrett 2017; posix_tz_db's `[year] [fullname]` placeholder). They were restored exactly as the 2026-09-04 pass wrote them; the RULE for this task forbade any other source, so none was re-checked against upstream.
 - **GitHub's rendering** of the restored plain-text blocks was not looked at visually. The raw file matches; how the flush-left Alternative B paragraph and the bulleted list render is as specified, not checked.
 - **CI at the time of writing** — see addendum.
+
+## Post-push addendum (written after commit B, committed separately)
+
+Commit B (this report + its `docs/REPORTS.md` line): **`6989896898a798796e4c539449b91d894fb07fb3`** — "docs: third-party-licenses-restore report"
+
+```
+ docs/REPORT-third-party-licenses-restore.md | 187 ++++++++++++++++++++++++++++
+ docs/REPORTS.md                             |   1 +
+ 2 files changed, 188 insertions(+)
+```
+
+Push:
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   74f0fef..6989896  main -> main
+```
+
+Commits carried (`git log --oneline 74f0fef..HEAD`, `somnus/main` before the push was `74f0fef`):
+
+```
+6989896 docs: third-party-licenses-restore report
+2207b1d docs: restore per-holder MIT notices and stb Alternative B text
+```
+
+`git ls-remote somnus refs/heads/main` after the push: `6989896898a798796e4c539449b91d894fb07fb3`. `origin` was not touched (push URL is `no_push`).
+
+CI (`gh run list --repo matthewclaude/bedknob-for-somnus --limit 3`, columns: id, workflow, sha, event, status, conclusion, created):
+
+```
+34507848144 ci 6989896 push in_progress  2026-09-10T17:22:49Z
+34507355885 ci 74f0fef push in_progress  2026-09-10T17:18:01Z
+34506773209 ci 83778e2 push completed success 2026-09-10T17:12:21Z
+```
+
+`gh run watch 34507848144 --exit-status` returned 0. Final state: **ci.yml run 34507848144 on `6989896` — completed, conclusion `success`** (single job `build`, success). (Run 34507355885 is the previous task's addendum push, still in progress when this listing was taken.)
+
+Correction made in this addendum commit: the report's Date line and its `docs/REPORTS.md` entry were first written as 2026-09-11; both now read 2026-09-10, the date the work was done. Nothing else in the report body changed.
+
+This addendum is committed as a third docs-only commit ("docs: third-party-licenses-restore report — push and CI addendum") whose SHA is reported in the chat reply, and pushed to `somnus`. That push triggers one further ci.yml run, not tracked here.
