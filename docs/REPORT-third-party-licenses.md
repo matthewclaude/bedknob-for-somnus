@@ -245,3 +245,44 @@ See the post-push addendum at the end of this report.
 - **Live flasher footer.** Checked over the network, not from disk: the served page at `https://matthewclaude.github.io/somnus-dial-releases/` (and the `gh-pages` branch's `index.html`, line 288) links the footer's "third-party" text to `https://github.com/matthewclaude/somnus-dial-releases/blob/main/THIRD_PARTY_LICENSES`, which returned HTTP 200 before the mirror push. Since the file kept its extensionless name and lives on `main`, that link now resolves to the updated file; the addendum records a post-push check of the raw content.
 - **Whether GitHub renders the plain-text license blocks acceptably.** The Apache text is indented, so GitHub's Markdown renderer will show it as an indented code block; the OFL and MIT texts are flush-left paragraphs. The task asked for plain text, not a fence, so this is as specified; not checked visually.
 - **Whether ESP-IDF v6.0's `LICENSE` is byte-identical to `https://www.apache.org/licenses/LICENSE-2.0.txt`.** Not fetched (the preferred source was available). Its sha256 `cfc7749b…` is the widely published hash of the canonical Apache-2.0 text, but that equivalence was not verified here.
+
+## Post-push addendum (written after commit B, committed separately)
+
+Commit B (this report + its `docs/REPORTS.md` line): **`83778e26d1ba524ee38ea8751efca1884d0d8111`** — "docs: third-party-licenses report"
+
+```
+ docs/REPORT-third-party-licenses.md | 247 ++++++++++++++++++++++++++++++++++++
+ docs/REPORTS.md                     |   1 +
+ 2 files changed, 248 insertions(+)
+```
+
+Push:
+
+```
+$ git push somnus main
+To github.com:matthewclaude/bedknob-for-somnus.git
+   1c8e37c..83778e2  main -> main
+```
+
+Commits carried (`git log --oneline 1c8e37c..HEAD`, `somnus/main` before the push was `1c8e37c`):
+
+```
+83778e2 docs: third-party-licenses report
+b0b0797 docs: ESP-IDF attribution; append Apache-2.0, OFL 1.1 and MIT texts
+```
+
+`git ls-remote somnus refs/heads/main` after the push: `83778e26d1ba524ee38ea8751efca1884d0d8111`. `origin` was not touched (push URL is `no_push`).
+
+CI (`gh run list --repo matthewclaude/bedknob-for-somnus --limit 3`, columns: id, workflow, sha, event, status, conclusion, created):
+
+```
+34506773209 ci 83778e2 push in_progress  2026-09-10T17:12:21Z
+34505701092 ci 1c8e37c push completed success 2026-09-10T17:01:54Z
+34505156131 ci b5248a1 push completed success 2026-09-10T16:56:31Z
+```
+
+`gh run watch 34506773209 --exit-status` returned 0. Final state: **ci.yml run 34506773209 on `83778e2` — completed, conclusion `success`** (single job `build`, success).
+
+Public releases repo, checked over the network after the mirror push: `https://raw.githubusercontent.com/matthewclaude/somnus-dial-releases/main/THIRD_PARTY_LICENSES` is byte-identical to this repo's `THIRD_PARTY_LICENSES.md` (`cmp` clean; `## ESP-IDF` at line 105, `## License texts` at line 168), and the flasher footer's link target `https://github.com/matthewclaude/somnus-dial-releases/blob/main/THIRD_PARTY_LICENSES` returns HTTP 200. This resolves the first "Cannot verify from disk" item.
+
+This addendum is committed as a third docs-only commit ("docs: third-party-licenses report — push and CI addendum") whose SHA is reported in the chat reply, and pushed to `somnus`. That push triggers one further ci.yml run, not tracked here.
