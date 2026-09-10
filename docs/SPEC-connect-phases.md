@@ -509,7 +509,7 @@ one `nav_policy` case-group entry, neither ever flapping.
   one-line fix — specified, not written.
 - Not building the "general nav yields to recent input" idea from §2 — named
   as a considered alternative, not recommended for this change.
-- Leaves the temporary `192.168.1.100` default (since reverted to `192.168.1.100`), the `main.c` connect-loop
+- Leaves the temporary home-address default (since reverted to `192.168.1.100`), the `main.c` connect-loop
   fix, the relative-scale fix, and the timezone work untouched, per the
   standing constraints.
 

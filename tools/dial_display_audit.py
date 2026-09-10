@@ -9,11 +9,10 @@ this script issues GET requests only, nothing else. No POST /api/power,
 no POST /api/target_t, anywhere in this file.
 
 Pad host comes ONLY from --host or the PAD_HOST env var -- deliberately no
-hardcoded default, even though the bench pad's current address (192.168.1.169)
-is visible in this repo's bench-logs/*.log. Pass it explicitly:
+hardcoded default. Pass the pad's address explicitly:
 
-    PAD_HOST=192.168.1.169 python3 tools/dial_display_audit.py
-    python3 tools/dial_display_audit.py --host 192.168.1.169
+    PAD_HOST=192.168.1.100 python3 tools/dial_display_audit.py
+    python3 tools/dial_display_audit.py --host 192.168.1.100
 
 Every printed line is also appended, verbatim and timestamped, to
 docs/dial-audit-run.log. Ctrl-C exits cleanly and prints a summary of the
@@ -85,8 +84,8 @@ def main():
     host = args.host or os.environ.get("PAD_HOST")
     if not host:
         print("ERROR: pad host not given. Use --host <ip> or set PAD_HOST.", file=sys.stderr)
-        print("(bench-logs/*.log shows this dial's pad at 192.168.1.169 as of "
-              "2026-09-06 -- verify before reuse, pad addresses change with DHCP.)",
+        print("(pad addresses change with DHCP -- check the dial's Settings screen "
+              "or your router's lease table for the current one.)",
               file=sys.stderr)
         sys.exit(2)
 

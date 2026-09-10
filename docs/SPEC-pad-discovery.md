@@ -59,7 +59,7 @@ last thing still requiring roughly 25 spin-and-commit operations on a
 character wheel (a *smaller* fix to that same problem — a per-octet
 redesign of the entry screen — was drafted but never built; this approach
 retires the need for either outright). This also retires the temporary
-`192.168.1.100` compiled default
+home-address compiled default
 currently sitting uncommitted in the working tree: once discovery exists, a
 fresh device needs no working compiled-in address at all — a scan finds the
 real one, and the compiled default reverts to the neutral, documentation-only
@@ -721,7 +721,7 @@ are illustrative, not final.
   `docs/SPEC-connect-phases.md`, pending review, not written here.
 - Not deciding the first-boot-phase-tone question — proposed in that same
   spec (a persisted `pad_ever_connected` flag), pending review.
-- Not touching the temporary `192.168.1.100` default (since reverted to
+- Not touching the temporary home-address default (since reverted to
   `192.168.1.100`, 2026-09-02), the `main.c` connect-loop fix, the
   relative-scale fix, or the timezone work.
 
