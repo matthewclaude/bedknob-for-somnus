@@ -27,14 +27,16 @@ extern const char trust_roots_pem_start[] asm("_binary_trust_roots_pem_start");
 
 static const char *TAG = "ota";
 
-// Points at the public binaries-only release repo (docs/SPEC-ota-readiness.md
-// §5). The source repo is public too (since 2026-09-10), but releases keep
-// publishing to somnus-dial-releases because every shipped dial resolves
-// updates by exactly this URL; consolidating releases into the source repo
-// is a separate, planned step (the OTA repoint), not a change this constant
-// can make on its own.
+// Points at the project's own public source repo, which serves Releases
+// as of 1.0.1-beta.1 (docs/SPEC-repo-consolidation.md). Before that, every
+// shipped dial resolved updates from the binaries-only
+// matthewclaude/somnus-dial-releases repo (docs/SPEC-ota-readiness.md §5),
+// by exactly the URL compiled in here -- so during the migration releases
+// are dual-published to somnus-dial-releases as well, which is where a
+// dial still on 1.0.0 finds this build. Nothing here falls back to the old
+// repo: a dial running this code polls only the URLs below.
 #define GITHUB_API_URL \
-    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/latest"
+    "https://api.github.com/repos/matthewclaude/bedknob-for-somnus/releases/latest"
 // Beta channel only (docs/SPEC-ota-readiness.md §9.7, 2026-09-03 finding): GitHub's
 // /releases list is ordered by created_at, which here is the date of the
 // one commit every release/tag points at, so every entry ties and a
@@ -42,11 +44,11 @@ static const char *TAG = "ota";
 // beta release landed sixth, past a per_page=5 cap. The tags endpoint is
 // scanned in full instead (below) and never assumed to be ordered either.
 #define GITHUB_API_URL_TAGS \
-    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/tags?per_page=50"
+    "https://api.github.com/repos/matthewclaude/bedknob-for-somnus/tags?per_page=50"
 // One release, by its exact tag name -- the beta channel's second request,
 // made only for the single tag check_beta() already picked as newest.
 #define GITHUB_API_URL_RELEASE_BY_TAG_FMT \
-    "https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/tags/%s"
+    "https://api.github.com/repos/matthewclaude/bedknob-for-somnus/releases/tags/%s"
 #define ASSET_NAME     "somnus-dial.bin"
 // "somnus-v" since 2026-09-01 (docs/SPEC-ota-readiness.md §7) -- the repo's
 // own release history through "dial-v1.4.2" is inherited lineage from the
@@ -299,10 +301,10 @@ static bool check_stable(const esp_app_desc_t *desc, const char *user_agent)
     int status = ota_http_get(GITHUB_API_URL, user_agent, &r, &err);
 
     // GitHub 404s /releases/latest when the repo has zero published
-    // releases -- expected right now for the freshly created
-    // matthewclaude/somnus-dial-releases repo, not a check failure. Report
-    // it exactly like "checked, nothing newer" rather than an error state,
-    // and don't fall back to any other repo.
+    // (non-prerelease) releases -- expected here until the first stable
+    // Release exists in matthewclaude/bedknob-for-somnus, not a check
+    // failure. Report it exactly like "checked, nothing newer" rather than
+    // an error state, and don't fall back to any other repo.
     if (err == ESP_OK && status == 404) {
         ESP_LOGI(TAG, "no releases published yet (HTTP 404)");
         set_status(OTA_IDLE, NULL, NULL);

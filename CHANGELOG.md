@@ -22,6 +22,21 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.1-beta.1 — 2026-09-10 (beta)
+
+The dial now checks for firmware updates at the project's own repository,
+`matthewclaude/bedknob-for-somnus`, where the source code also lives.
+Nothing else changes — same screens, same behaviour, same pad control.
+
+A dial already on 1.0.0 with Beta builds turned on will be offered this
+update as usual; after installing it, updates come from the new location
+automatically. If you flash a dial from the browser flasher, it continues
+to work exactly as before.
+
+Internal: the three GitHub API URLs in `dial_ota.c` and the repository name
+on the certificate-error screen updated; releases are published to both
+repositories during the migration.
+
 ## 1.0.0 — 2026-09-09
 
 Bedknob for Somnus 1.0. This is the `0.1.6` build renumbered — no code

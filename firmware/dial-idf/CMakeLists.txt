@@ -18,5 +18,5 @@ add_compile_options("-Wno-format")
 # which would have made every device silently reject any 0.x release as a
 # downgrade (is_newer() has no concept of a renumbering, only "older").
 # Somnus versioning: tag somnus-vX.Y.Z must equal PROJECT_VER exactly (release.yml verifies). 1.0.0 shipped 2026-09-09; see CHANGELOG.md.
-set(PROJECT_VER "1.0.0")
+set(PROJECT_VER "1.0.1-beta.1")
 project(somnus-dial)
