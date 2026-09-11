@@ -2,7 +2,7 @@
 
 > **Not affiliated with, endorsed by, or supported by Somnus Lab or Waveshare.**
 > An independent, community-built project. Current release
-> `somnus-v1.0.0`.
+> `somnus-v1.0.1`.
 
 Turn a knob to change the temperature of your bed. This project turns a
 **Waveshare ESP32-S3 round touch-LCD knob** into a standalone bedside dial
