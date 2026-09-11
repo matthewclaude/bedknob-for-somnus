@@ -69,6 +69,14 @@ static const char *TAG = "app";
  */
 #define POLL_CONFIRM_US   2000000    // 2s between the confirm polls after a write
 #define POLL_CONFIRM_N          3    // how many of them before returning to idle cadence
+/*
+ * ...and idle cadence itself follows the display tier. Once the face has gone
+ * to STANDBY nobody is reading what the poll fetches, so back off to once
+ * every five minutes and let the radio (and the pad's HTTP server) go quiet
+ * overnight; ACTIVE and DIMMED keep the 10s above. Leaving STANDBY forces the
+ * next read immediately (through the same quiet gate) — docs/SPEC-standby-poll.md.
+ */
+#define POLL_STANDBY_US 300000000    // STANDBY cadence: once every five minutes
 
 // Auto OTA check (M6): once per uptime-day, and only checks (never applies)
 // — see the gating comment at its call site for the full safe-window rule.
@@ -1111,6 +1119,10 @@ static void worker_task(void *arg)
     int     poll_confirms     = 0;   // fast reads still owed after a write
     int64_t last_ota_check_us = esp_timer_get_time();   // first auto-check ~24h after boot
     int poll_failures = 0;
+    // Display tier as of the previous tick — the STANDBY-exit edge below needs
+    // a transition, which a single dial_power_level() read can't give. Seeded
+    // from a real read so the first tick is a level, never an edge.
+    dial_power_level_t last_pwr_level = dial_power_level();
     for (;;) {
         app_cmd_t cmd;
         if (dial_cmd_receive(&cmd, 300)) {
@@ -1366,10 +1378,35 @@ static void worker_task(void *arg)
         }
 
         // No command this tick. Resync only when quiet AND due — "due" being
-        // sooner while we're still confirming a write the user just made.
+        // sooner while we're still confirming a write the user just made,
+        // and much later while the face is in STANDBY (POLL_STANDBY_US).
+        //
+        // One fresh tier sample per tick, used for both the cadence choice and
+        // the STANDBY-exit edge (deliberately not the update-prompt block's
+        // ota_pwr_level: this gate owns its own read). A spinlock-guarded read
+        // of one enum, documented safe from this task.
+        dial_power_level_t pwr_level = dial_power_level();
+        if (pwr_level != last_pwr_level) {
+            bool was_standby = (last_pwr_level == DPWR_STANDBY);
+            bool is_standby  = (pwr_level == DPWR_STANDBY);
+            if (was_standby && !is_standby) {
+                // Leaving STANDBY: the face is about to be looked at and the
+                // last read may be minutes old. Same idiom as the command
+                // paths above; the quiet gate below still applies, so this
+                // lands ~KNOB_SETTLE_US after the input that woke it.
+                last_poll_us = 0;                  // read it back now, not in 10s
+                ESP_LOGI(TAG, "poll: active cadence 10s");
+            } else if (is_standby && !was_standby) {
+                ESP_LOGI(TAG, "poll: standby cadence 300s");
+            }
+            // ACTIVE <-> DIMMED is not a cadence change (both 10s): no log.
+            last_pwr_level = pwr_level;
+        }
         int64_t now = esp_timer_get_time();
         if (now - dial_state_last_input_us() < KNOB_SETTLE_US) continue;
-        int64_t due = poll_confirms > 0 ? POLL_CONFIRM_US : POLL_INTERVAL_US;
+        int64_t due = poll_confirms > 0          ? POLL_CONFIRM_US
+                    : pwr_level == DPWR_STANDBY  ? POLL_STANDBY_US
+                    :                              POLL_INTERVAL_US;
         if (now - last_poll_us < due) continue;
         if (poll_confirms > 0) poll_confirms--;
 
