@@ -132,6 +132,15 @@ The flasher page is copied into `_site/` by the deploy job and so the same file,
 4. Remove the old-repo `action-gh-release` step and the old-repo `peaceiris` deploy from `release.yml`, then delete the `SOMNUS_RELEASES_TOKEN` secret and revoke the PAT.
 5. Archive `somnus-dial-releases`. Archive, not delete, not rename (§1).
 
+**Ordering constraint, recorded 2026-09-11** now that the precondition is met — `1.0.1` dual-published on 2026-09-11, §7.1 bench pass the same day (`docs/REPORT-1.0.1-bench-gate.md`). `release.yml`'s `on:` block is `push:` of tags matching `somnus-v*`, and nothing else. So a commit to `main` that repoints `web-flasher/index.html`, or that drops the old-repo publish steps, changes nothing that is live: the flasher pages at `matthewclaude.github.io/somnus-dial-releases/` and `matthewclaude.github.io/bedknob-for-somnus/` are whatever the last release run deployed to `gh-pages`, and only the next tag push redeploys them. Items 1, 2 and the workflow edits in item 4 are inert until a release carries them. The consequence for items 3 and 5: the old repo must not be frozen or archived until a release has actually deployed the repointed flasher and that page has been opened and checked live. Freezing it early would not error — an archived repo still answers every read, so the live flasher would keep fetching the old repo's `/releases/latest`, which stops moving the day dual-publishing stops, and first-install users would silently keep being offered the last build that repo ever saw. That is the same silent-staleness shape as the beta-not-found finding of 2026-09-03 (`docs/REPORT-ota-beta-not-found.md`).
+
+The phase therefore splits in two:
+
+- **6a — on disk, landing with the next release.** Items 1, 2 and the workflow half of item 4: repoint `index.html`'s `/releases/latest` fetch and its three footer links, add a link to the source repo itself, repoint the release-notes footer, remove the old-repo `action-gh-release` step and the old-repo `peaceiris` deploy, and rewrite the workflow's stale comments — the top-of-file block and the changelog-extractor note that still describe dual-publishing into `somnus-dial-releases` and the token that does it. These go live with `somnus-v1.0.2-beta.1`, the standby-poll release (`SPEC-standby-poll.md`) already queued behind this, rather than needing a release of their own.
+- **6b — after that release has deployed** and the new flasher page has been opened and confirmed to fetch `bedknob-for-somnus`: the secret half of item 4 (delete `SOMNUS_RELEASES_TOKEN`, revoke the PAT), then item 3 (the frozen-redirect README and the meta-refresh Pages index on the old repo), then item 5 (archive).
+
+In-repo-only publishing is safe from `1.0.2-beta.1` onward because `1.0.1` was the last dual-published release: a dial still on `1.0.0` migrates by installing the `1.0.1` Release that remains on the archived old repo, and the standing rule holds — that Release is never removed.
+
 Each of those is its own gated step with its own report. None of them happens in this beta.
 
 ## 6. Versioning and CHANGELOG
