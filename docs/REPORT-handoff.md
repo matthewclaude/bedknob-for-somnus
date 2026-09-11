@@ -1,103 +1,106 @@
-# Handoff — Sep 9 2026, end of session
+# Handoff — Sep 11 2026, end of session
 
 ## State of the tree
 
-Branch `main`, HEAD `11a00da` (docs: track housekeeping report), pushed;
-`somnus/main` == HEAD. Working tree clean: `git --no-optional-locks status
---short` is empty, nothing untracked. Latest tag `somnus-v1.0.0` (annotated,
-object `e4a35eb`) points at `7c106fb`; it exists on the `somnus` remote
-and nowhere else. `origin` (upstream) was never pushed; its push URL is still
-`no_push`.
+Branch `main`, HEAD `b35002a` (docs: spec-gate-consistency report), pushed;
+`somnus/main` == HEAD (`git rev-list --count somnus/main..HEAD` = 0). Working
+tree clean apart from this file and its one-line entry in `docs/REPORTS.md`,
+both rewritten after the last commit and left for you to commit. No
+`.git/index.lock`. Latest tag `somnus-v1.0.1-beta.1` (annotated, object
+`f78b7b4`) points at `2716be9`; it exists on the `somnus` remote and nowhere
+else. `origin` (upstream) was never pushed; its push URL is still `no_push`.
+`PROJECT_VER` is `1.0.1-beta.1` on line 21 of `firmware/dial-idf/CMakeLists.txt`.
 
-This file is the only thing this session leaves uncommitted — it was rewritten
-after the last commit and is left for you to commit.
+## What this session did
 
-## What shipped this session
-
-**Bedknob for Somnus 1.0.0 is published.** It is the 0.1.6 build renumbered
-(`PROJECT_VER` 0.1.6 → 1.0.0, no code change), stable, non-prerelease, with
-both assets on `matthewclaude/somnus-dial-releases`; `/releases/latest` is
-`somnus-v1.0.0` and Pages `firmware/latest/` serves the 1.0.0 merged image
-(1,743,152 bytes, HTTP 200). Release run 34412911352 succeeded
-(build-and-release 5m45s, deploy-pages 11s). The published body is the
-CHANGELOG 1.0.0 section byte-for-byte plus release.yml's standard footer.
-
-Commits, oldest first, all on `main` and pushed to `somnus`:
+Documentation only. `docs/SPEC-repo-consolidation.md` now matches what
+shipped, in three commits, all pushed by you at the end:
 
 | SHA | What |
 |---|---|
-| `c56cc4d` | release: somnus-v1.0.0 — PROJECT_VER, CHANGELOG 1.0.0 section + header rewrite, README release line + 1.0.0 paragraph, ARCHITECTURE beta-channel endpoint corrected to `/tags?per_page=50` + `/releases/tags/<tag>`, 0.1.6 graduation report tracked |
-| `7c106fb` | chore: stale "1.0.0 is reserved" CMake comment replaced; 1.0.0 commit report tracked — **tag somnus-v1.0.0 is here** |
-| `effb9c6` | sim: `simulator/CMakeLists.txt` reads PROJECT_VER at configure time (FATAL_ERROR if absent) and passes `SIM_APP_VERSION`=1.0.0 / `SIM_OTA_LATEST`=1.0.1 (patch+1); the hardcoded "0.1.4"/"1.4.3" literals in stubs.c/main.c replaced by `#error` guards; 6 of 49 screens regenerated (about, about-wifi-real/worst, update, update-prompt, update-failed), 43 byte-identical |
-| `195e77c` | docs: sim version/screens report |
-| `3fd1cc1` | docs housekeeping: five 0.1.5-era reports renamed to `REPORT-<version>-<step>.md` via git mv (prose refs updated, quoted git output left), `docs/TEST-F3-stuck-loop.md` now on disk (was Claude-Project-only), new `docs/REPORTS.md` index (40 entries) |
-| `11a00da` | docs: track housekeeping report |
+| `4a61622` | Status line: §2–§4 shipped in `somnus-v1.0.1-beta.1` on 2026-09-10, hardware-confirmed, dual-publish window open; still open = Phase 6 (§5) and the §7 re-run against 1.0.1 stable. §7 item 2 is now the Beta-builds-off check whose evidence is the verbatim `ota: no releases published yet (HTTP 404)` line; item 3's cat-based serial capture is keyed to that line; a note after item 5 records why the original item 2 (hostname in the serial log) was unobservable. Report `REPORT-spec-gate-reword.md` is in the same commit, at your instruction, so it carries no SHA. |
+| `d4abc6d` | §3.1's closing sentence no longer says the gate keeps Beta builds on to avoid "a 404 that looks like success"; it says that 404 is item 2's discriminator and the serial log, not the screen, proves which repo answered. §7 item 1's evidence is now the observable `ota: latest 1.0.1-beta.1, running 1.0.0 -- update available` line plus the reboot into 1.0.1-beta.1, with the clause that only the old repo could have served that to a 1.0.0 dial. |
+| `b35002a` | `REPORT-spec-gate-consistency.md` + its `REPORTS.md` line (separate commit, per the repo convention). |
 
-Reports written this session, all tracked and listed in `docs/REPORTS.md`:
-`REPORT-1.0.0-commit.md`, `REPORT-1.0.0-tag-push.md`,
-`REPORT-sim-version-screens.md`, `REPORT-sim-screens-push.md`,
-`REPORT-docs-housekeeping.md`. No spec changed this session, so no spec
-addendum.
+CI for `b35002a`: run 34629151192, `ci`, success. Nothing under `firmware/`,
+`.github/` or `web-flasher/` changed. Nothing was built or flashed.
 
-CI: every ci.yml run on today's pushes is green (34412910378, 34414740070,
-34416728040); the last one, 34418027434 for `11a00da` (a docs-only commit),
-read `in_progress ` when this handoff was written.
+## Two things verified while closing that were listed as owner-open
 
-## Conventions that changed today (also in memory)
+- **Pages is enabled on `bedknob-for-somnus`.** `gh api repos/.../pages`
+  reports `status=built`, source `gh-pages` root;
+  `https://matthewclaude.github.io/bedknob-for-somnus/` answers 200 and
+  `firmware/beta/somnus-dial-merged.bin` answers 200 at 1,743,152 bytes, the
+  same size as the old repo's copy. The §4(b) prerequisite is done.
+- **The §7 beta gate's serial capture exists on disk:**
+  `bench-logs/1.0.1-beta.1-ota.log` (gitignored via `.gitignore:28`, so it is
+  not in the repo), 9 lines, written 2026-09-10 15:29 local. Line 3 is
+  `I (129680) ota: no releases published yet (HTTP 404)`, the discriminating
+  line item 2 now asks for. The other eight lines are pad state:
+  `side A: on=0 set=18.0C water=24.3C`. The capture contains no item-1 line
+  (no `update available`, no App version banner): it starts after the
+  install and reboot. If you want the item-1 evidence on record, it is not in
+  this file.
 
-- **Reports are committed now**, by the *next* docs commit, never by the
-  commit they describe, and each gets a line in `docs/REPORTS.md`
-  (hand-maintained: filename, first-commit date, H1, one-sentence verdict).
-- **`PROJECT_VER` is on line 21** of `firmware/dial-idf/CMakeLists.txt`
-  (was 22 until `7c106fb`). Gate checks that say "line 22" need updating.
-- **The simulator can no longer show a stale version**: it fails to configure
-  if it cannot read PROJECT_VER, and `CMAKE_CONFIGURE_DEPENDS` re-runs
-  configure when the firmware CMakeLists changes. A version bump changes
-  exactly six PNGs; if any other PNG changes on a regen, the build
-  environment drifted.
-- `per_page=5` still appears in historical docs (REPORT-0.1.5-ci-check,
-  REPORT-ota-beta-not-found, SPEC-ota-readiness §9.3 (superseded by §9.7),
-  SPEC-night-window). Intentional record of the bug, not a doc error.
+Because `bench-logs/` is ignored, the spec's "goes into the bring-up record"
+requirement is satisfied only if that file, or its `ota:` line, is copied into
+HARDWARE-bringup-log.md (Claude-Project-only) or somewhere tracked. Not done
+here; your call.
+
+## Release state (unchanged this session)
+
+`somnus-v1.0.1-beta.1` is a prerelease in both `somnus-dial-releases` and
+`bedknob-for-somnus`, byte-identical assets. `/releases/latest` is
+`somnus-v1.0.0` on the old repo and 404 on the new one, verified again today
+with `gh api`. That 404 is what makes §7 item 2 work; it disappears the
+moment 1.0.1 stable is published in the new repo.
+
+## Conventions confirmed or added today (also in memory)
+
+- **The OTA client never logs a URL or repo name.** `dial_ota.c` uses the
+  three URL `#define`s only as `ota_http_get()` arguments and logs outcomes
+  (`latest X, running Y -- update available / up to date`,
+  `no releases published yet (HTTP 404)`, the `-- trying next tag` warnings).
+  Both repos sit behind `api.github.com`. Do not write a gate item that reads
+  a hostname out of the serial log.
+- A report that must sit in the same commit as the change it describes
+  cannot carry that commit's SHA and cannot state its own line count; the
+  repo's normal convention (report in the *next* docs commit) exists for this
+  reason and was restored for the second task.
+
+## Still open
+
+- **§7 re-run against 1.0.1 stable needs a new discriminator.** Once 1.0.1
+  stable exists in `bedknob-for-somnus`, a Beta-off check there returns the
+  stable Release, and the old repo (also dual-published) returns the same
+  tag. Neither the 404 nor the version string will tell the repos apart.
+  Candidates: a release published to the new repo only (the first non-dual
+  release, which is Phase 6 territory), or an asset-level difference. Decide
+  before cutting 1.0.1 stable, and write the item so it is observable.
+- Phase 6 cut-over (§5 items 1–5), after 1.0.1 stable and its gate.
+- The tags-endpoint 50-per-page cap (§3.2(c)) is on the record, not built.
+- `fb38c83`'s `Claude-Session` trailer has a one-character typo; pushed,
+  left as-is.
+- Layout audit Tier D and `SCR_SIDEPICK`/`side_picked` deletion; both owner
+  decisions, untouched since Sep 7.
+- The Sep 7 pad-restore question: the bench capture from 2026-09-10 shows the
+  pad at `on=0 set=18.0C`, i.e. off at 18 °C, which is the state the Sep 7
+  handoff said it should have been restored to. Treat as closed unless the
+  bed says otherwise.
+- Standby-poll cadence change (`SPEC-standby-poll.md`) still queues behind
+  this line.
 
 ## Not verified without hardware
 
-- **No dial has been seen installing 1.0.0 over the air** (0.1.6 → 1.0.0, or
-  0.1.5 → 1.0.0), and none was seen installing 0.1.6 either. The release is
-  in place for it; the next time the bench dial (on 0.1.6) is powered,
-  Menu → Update should read "v1.0.0 - tap to install" — worth one eyes-on
-  check and a line in HARDWARE-bringup-log.md.
-- Nothing was flashed this session. CI's build of `7c106fb` is the only
-  build of 1.0.0; the host simulator build of `effb9c6` compiled the same
-  UI sources with zero warnings.
-
-## Still open (carried forward)
-
-- **Pad restore** from the Sep 7 audit session: the pad was left `on @
-  24 °C` when it had been `off @ 18 °C`; whether that was restored by hand
-  is not recorded anywhere. Check the bed state.
-- Overnight soak verdict on 0.1.6-beta.3 was never reported; 0.1.6 and then
-  1.0.0 were graduated anyway.
-- Layout audit Tier D (brightness "%" placement, pad-discovery relayout) and
-  `SCR_SIDEPICK`/`side_picked` deletion — owner decisions, untouched.
-- TEST-F3 (escape hatches while stuck in the connect loop) is now on disk at
-  `docs/TEST-F3-stuck-loop.md`; whether it was ever run at the board is
-  still only in HARDWARE-bringup-log.md if anywhere.
-- Encoder detent-coalescing question from the Sep 7 audit: still untested,
-  still no symptom.
-- Next version line after 1.0.0 is your call (1.0.1 for fixes, 1.1.0 for a
-  feature); first beta would be `X.Y.Z-beta.1`, and the simulator will
-  advertise patch+1 automatically.
+- No dial has been seen installing a *stable* release over the air; the bench
+  dial's 1.0.0 → 1.0.1-beta.1 install on 2026-09-10 is the only OTA install
+  observed since 0.1.5 → 0.1.6-era testing.
+- That a Beta-off check pointed at the *old* repo reports 1.0.0 stable is
+  inferred from the API, not observed on a dial.
 
 ## Tooling / machine
 
-- `tools/dial_display_audit.py` and `docs/dial-audit-run.log` are tracked
-  (since the Sep 7 docs commit). No new tools this session.
-- Repo-root `build/` holds a configured dial_sim at 1.0.0 (gitignored).
-- Temp files removed: `/tmp/screens-before` (the pre-regen PNG backup).
-  Nothing in `/tmp` belongs to this session; the session scratchpad is
-  session-scoped and disposable.
-
-## Nothing else in flight
-
-No background jobs, no worktrees besides the main checkout, no open artifact
-watches. gh is authed as matthewclaude.
+- No new tools. `gh` is authed as matthewclaude; one worktree (the main
+  checkout); no background jobs; no artifact watches.
+- Session scratchpad emptied (before/after snippets and the two edit scripts
+  used for the spec rewrites). Nothing in `/tmp` belongs to this session.

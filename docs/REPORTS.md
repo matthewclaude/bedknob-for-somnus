@@ -16,7 +16,7 @@ A `REPORT-*.md` file is Claude Code's fixed-path output for one task: a verdict 
 - `REPORT-about-layout-battery-glyph.md` — 2026-09-04 — About layout pass + battery badge/percentage review (Sep 4 2026, evening) — (no verdict line)
 - `REPORT-battery-pct-about-redesign.md` — 2026-09-04 — Battery percentage + About redesign (SPEC-power-sensing.md §11) — (no verdict line)
 - `REPORT-docs-sync.md` — 2026-09-04 — docs-sync commit (README → 0.1.5, Sep 3–5 reports, NAMING audit, ignore Claude outputs) — **Verdict: DONE.** Gate passed, docs-only commit `5228de3` created on `firmware/somnus-port` and pushed to the `somnus` remote.
-- `REPORT-handoff.md` — 2026-09-04 — Handoff — Sep 7 2026, end of session — (no verdict line)
+- `REPORT-handoff.md` — 2026-09-04 — Handoff — Sep 11 2026, end of session — (no verdict line; rewritten each session)
 - `REPORT-layout-phase1.md` — 2026-09-04 — Screen layout pass, phase 1 (Section S + Tier A) — **DONE.** Two commits on `main`: `a009840` (Section S: 10 new scenarios + the S3 stub hook + the settings-pad re-aim, 40 PNGs regenerated as the BEFORE set) and `5bf68a5` (Tier A: A1–A5 in four `dial_ui` files, the AFTER PNGs, the two doc edits).
 - `REPORT-night-face.md` — 2026-09-04 — Run 3 — commit 4 (spec revision 3, three review fixes) — **DONE.** Commit 4 (all three revision-3 fixes, all in `scr_dial.c`) built clean with `idf.py build`, zero warnings; version/tag/CHANGELOG/push left untouched, `Claude outputs/` not added, as instructed.
 - `REPORT-ota-beta-not-found.md` — 2026-09-04 — manual OTA check — serial capture — (no verdict line)
