@@ -1,6 +1,6 @@
 # Spec: Standby poll cadence
 
-Status: **Draft, 2026-09-06. Not built. Scheduled as `0.1.7-beta.1`, after `0.1.6` graduates to stable.** Owner's call on 2026-09-06 that the STANDBY-tier polling is unnecessary load; this spec is the "spec on disk before code" step. Owner marked it not urgent and delegated the timing (Sep 6) — so it waits behind beta.3, the 0.1.6 graduation and the 1.0.0 decision, and does not get folded into any 0.1.6 beta. Reasoning in §8. Supersedes the "future task, nicety not requirement" note of 2026-09-04.
+Status: **Draft, 2026-09-06; amended 2026-09-11. Not built. Scheduled as `somnus-v1.0.2-beta.1`, queued behind the repo consolidation (`docs/SPEC-repo-consolidation.md`).** Owner's call on 2026-09-06 that the STANDBY-tier polling is unnecessary load; this spec is the "spec on disk before code" step. Owner marked it not urgent and delegated the timing (Sep 6), so it waited behind the `1.0.0` graduation and now waits behind the consolidation, which has a closing window and this does not. The `0.1.7-beta.1` slot it was first given no longer exists: the project renumbered on 2026-09-09, `0.1.6` shipped as `1.0.0`, and current stable is `1.0.1`. The cadence was changed from 60 s to 300 s on 2026-09-11 (§4). Reasoning on placement in §8. Supersedes the "future task, nicety not requirement" note of 2026-09-04.
 
 > **Note for an on-disk reader:** `V1-scope.md`, `START-HERE.md`, `HARDWARE-bringup-log.md`, `LICENSING.md` and `somnus-dial-project-summary.md` are **not in this repo** — they live only in the Claude Project. Everything this spec needs is restated here.
 
@@ -45,7 +45,7 @@ Other facts the change leans on:
 One new constant and one extra branch in `due`:
 
 ```c
-#define POLL_STANDBY_US  60000000    // STANDBY cadence: once a minute
+#define POLL_STANDBY_US 300000000    // STANDBY cadence: once every five minutes
 ```
 
 ```c
@@ -57,38 +57,46 @@ int64_t due = poll_confirms > 0            ? POLL_CONFIRM_US
 Rules, in priority order:
 
 1. **Confirm polls win.** After a write, the three 2 s confirm polls run regardless of tier. (A write from the dial implies input, which wakes the tier anyway; this rule exists so the ordering is explicit, not because the case is reachable.)
-2. **STANDBY polls once a minute.** ACTIVE and DIMMED are unchanged at 10 s. DIMMED is a short transition on the way to STANDBY, not a resting state; giving it its own cadence is a third number for no benefit.
-3. **Leaving STANDBY forces a poll due now.** The worker tracks the tier it last saw; on a transition out of `DPWR_STANDBY` it treats the poll as overdue. The existing `KNOB_SETTLE_US` gate still applies — the wake poll lands ~2.5 s after the last input, exactly as an idle poll does today. Worst-case number shown on wake: (60 s + 2.5 s) old, versus (10 s + 2.5 s) today. Deliberately **not** bypassing the settle gate for the wake poll: one gate, one rule, and the optimistic-state protection in `mut_device_state` was designed around it.
+2. **STANDBY polls once every five minutes.** ACTIVE and DIMMED are unchanged at 10 s. DIMMED is a short transition on the way to STANDBY, not a resting state; giving it its own cadence is a third number for no benefit.
+3. **Leaving STANDBY forces a poll due now.** The worker tracks the tier it last saw; on a transition out of `DPWR_STANDBY` it treats the poll as overdue. The existing `KNOB_SETTLE_US` gate still applies — the wake poll lands ~2.5 s after the last input, exactly as an idle poll does today. Worst-case number shown on wake: (300 s + 2.5 s) old, versus (10 s + 2.5 s) today. Deliberately **not** bypassing the settle gate for the wake poll: one gate, one rule, and the optimistic-state protection in `mut_device_state` was designed around it.
 4. **No user setting.** A constant. There is nothing to change from any device state and nothing for the sticky-picker lesson of `0.1.6-beta.2` to bite. If the number is wrong, it is wrong for everyone and gets fixed in a beta.
-5. **One INFO log line on each cadence change** (`poll: standby cadence 60s` / `poll: active cadence 10s`), so a serial capture proves the mechanism instead of someone counting request lines. Not per poll.
+5. **One INFO log line on each cadence change** (`poll: standby cadence 300s` / `poll: active cadence 10s`), so a serial capture proves the mechanism instead of someone counting request lines. Not per poll.
 
 Nothing else moves. Confirm count, settle time, idle cadence, the failure counter, `PH_DEGRADED`, the OTA gates, the wake-consume rule, discovery — untouched.
 
-## 4. Why 60 seconds
+## 4. Why 300 seconds, for this beta
 
-- **~85 % fewer requests overnight** (6/min → 1/min). Going from 10 s to 60 s captures nearly all of the win; 60 s → 300 s only takes another 13 % of the original and costs everything below.
-- **The standby face stays truthful.** A setpoint changed from the app appears on the dimmed face within a minute. Water temperature moves on the order of a degree a minute at most, so the night face's alternating water number is never visibly wrong.
-- **Outage detection stays sane.** Three failures at 60 s = 3 minutes to `PH_DEGRADED` in standby, versus 30 s today. Acceptable: nobody is looking, and the wake poll (§3.3) re-tests the pad within seconds of someone looking. At 300 s that would be 15 minutes and a wake into a stale face that hadn't noticed the pad was gone.
-- **Schedule tracking.** The pad's own 3-stage night schedule steps land on the dial within a minute of the pad applying them. Item 7's verification is repeatable at this cadence.
-- It is one constant. If a night on the bench says 30 s or 120 s, that is a one-line beta.
+The first draft of this section argued for 60 s from an assumed rate — "water moves on the order of a degree a minute at most" — and against 300 s on outage-detection grounds. The owner has since read an overnight history chart from the pad itself, and the case below is grounded in that instead. 300 s is the owner's choice for this beta, a deliberate try-it-and-see.
+
+**What the pad actually did overnight.** Pad state changed exactly twice in the window: the setpoint stepped from 64.4 °F to 68.0 °F at roughly 3:20–3:30, and dropped back at about 7:00 when the schedule ended. Between about 4:15 and 6:55 the water sat on 68.0 °F with ripples of roughly ±0.2 °F — the control loop hunting. At the whole-degree °F the dial renders, that stretch does not change at all. Fast movement is confined to the minutes after a step: the 3:30 heat-up is near-vertical at chart scale, consistent with about a degree a minute for that burst, and the drift after the pad goes off at 7:00 is about 68 → 72 °F over half an hour, roughly 0.13 °F per minute, flattening after that.
+
+*Caveat, recorded honestly:* the chart's own sampling interval is unknown, so a transient shorter than its resolution would not appear. The near-vertical segment at the 3:30 step is where such a transient would hide.
+
+- **~97 % fewer requests overnight** (6/min → 1 per 5 min: ~2,880 → ~96 over an eight-hour night), against the ~85 % that 60 s would have given (~480).
+- **Even 300 s oversamples heavily.** The night's information content is two state changes. ~96 polls against two changes is roughly 50 samples per change; 60 s would have been roughly 240 per change. Neither cadence is tuned to the signal; 300 s is merely less untuned.
+- **Where staleness actually lands.** Almost entirely in the few minutes after each schedule step: a step reaches the dimmed face up to five minutes late instead of up to one, and during the heat-up burst the water number can lag by a few degrees for those minutes. The rest of the night the water is within a fraction of a degree of where the last poll left it — ±0.2 °F on the plateau, well under a degree across any five-minute window of the post-off drift — which the whole-degree °F display cannot show. The plateau from 4:15 to 6:55 renders identically at 10 s, 60 s or 300 s.
+- **A passive glance wakes nothing.** Looking at the dimmed face does not touch the dial, so only touch triggers the wake poll (§3.3). The glance sees whatever the last standby poll left, up to five minutes old. This is the case Standby face = Temperature exists to serve, and the plateau observation above is why five minutes is tolerable there.
+- **Outage detection is the one cost this evidence does not address.** Three failures at 300 s is fifteen minutes to `PH_DEGRADED` and the staleness dot, versus three minutes at 60 s and 30 s today. The wake poll re-tests the pad within seconds of a touch, so the exposure is a passive glance at a face that has not yet noticed the pad is gone. The chart says nothing about this. It is the thing to watch on the bench night (§6 item 5).
+
+300 s is being tried for one beta. It is one constant. If the stale glance after a schedule step or the outage delay is noticeable, 120 s or 60 s is the expected fallback — a one-line change in the next beta.
 
 ## 5. The two questions, and the shape to check
 
 *Changeable from the state the device will be in when it needs changing?* Not applicable — no setting. *Read by anything?* The worker loop, which is the same code that owns the constant. The consumer cannot be dead because it is not separate.
 
-The shape that **can** go wrong here is the reverse one: a mechanism this spec quietly changes without meaning to. The reviewer must confirm each of these still behaves at a 60 s cadence, by reading the code, before anything is flashed:
+The shape that **can** go wrong here is the reverse one: a mechanism this spec quietly changes without meaning to. The reviewer must confirm each of these still behaves at a 300 s cadence, by reading the code, before anything is flashed:
 
-- The staleness dot (`scr_dial.c` ~431): is it driven by poll **failure** or by poll **age**? If it is age-based with a threshold under 60 s, the standby face would show the stale dot every minute. If so, the threshold moves with the cadence (e.g. `2 × current due`), and the spec is amended to say so.
+- The staleness dot (`scr_dial.c` ~431): is it driven by poll **failure** or by poll **age**? This check matters more at 300 s than it did at 60 s: if it is age-based with a threshold under 300 s, the dimmed face would show the stale dot for most of every five-minute window. If so, the threshold moves with the cadence (e.g. `2 × current due`), and the spec is amended to say so.
 - `dial_power_level()` called from `worker_task`: confirm it is safe to read from a task other than the one that computes the tier (it already appears in `main.c`'s OTA nav block — establish which task that runs on). If it is not, the tier is read through the state snapshot instead.
 - Anything else that assumes "a successful poll happened in the last ~10 s": grep for `POLL_INTERVAL_US` and for readers of the last-poll timestamp. The rolling-differential firmware port (`docs/SPEC-differential-firmware-port.md` §4) already sizes its buffer on the *fastest* cadence, so it is unaffected; anything sizing on the slowest is not.
 
 ## 6. Things to check on hardware, not assume
 
-1. **Cadence, by count.** Serial capture: let the dial time out to STANDBY, count poll lines over 10 minutes. Expect ~10, not ~60. Then wake it and count over 2 minutes at ACTIVE: expect ~12. The §3.5 log lines bracket each phase.
-2. **Wake poll.** With the dial in STANDBY, change the setpoint from the Somnus app, wait 5 s, touch the knob. The face must show the new setpoint within ~3 s of the touch (the settle gate), not up to a minute later.
-3. **External change in STANDBY.** Change the setpoint from the app while the dial sits in STANDBY with Standby face = Temperature. The dimmed face updates within 60 s. Restore the setpoint afterwards — it is a real bed.
-4. **Night face at STANDBY.** With the Tokyo-timezone trick, confirm the number/water alternation still runs at the dim floor and the water number tracks (it is keyed on heating/cooling state, which the poll supplies; a 60 s cadence must not freeze the alternation).
-5. **Outage in STANDBY.** Unplug the pad (or block it) with the dial in STANDBY. Expect `PH_DEGRADED` after ~3 minutes, staleness dot shown, and — on wake — a fresh poll attempt within seconds. Restore the pad, confirm recovery.
+1. **Cadence, by log line and by gap.** Serial capture with timestamps: let the dial time out to STANDBY and confirm the `poll: standby cadence 300s` line (§3.5) appears on the transition, then confirm the next three poll lines are ~300 s apart — a 15-minute window, which is also item 5's timescale. Counting polls over 10 minutes gives 2 samples at this cadence and cannot tell 300 s from 200 or 600; the gap between consecutive poll lines measures the constant directly, and the §3.5 lines exist so that nobody has to count. Then wake it, confirm `poll: active cadence 10s`, and count over 2 minutes at ACTIVE: expect ~12.
+2. **Wake poll.** With the dial in STANDBY, change the setpoint from the Somnus app, wait 5 s, touch the knob. The face must show the new setpoint within ~3 s of the touch (the settle gate), not up to five minutes later.
+3. **External change in STANDBY.** Change the setpoint from the app while the dial sits in STANDBY with Standby face = Temperature. The dimmed face updates within five minutes. Restore the setpoint afterwards — it is a real bed.
+4. **Night face at STANDBY.** With the Tokyo-timezone trick, confirm the number/water alternation still runs at the dim floor and the water number tracks (it is keyed on heating/cooling state, which the poll supplies; a 300 s cadence must not freeze the alternation).
+5. **Outage in STANDBY.** Unplug the pad (or block it) with the dial in STANDBY. Expect `PH_DEGRADED` after ~15 minutes, staleness dot shown, and — on wake — a fresh poll attempt within seconds. Restore the pad, confirm recovery. This is now the item carrying the most weight: §4's evidence covers the truthfulness of the face and says nothing about outage detection, so the fifteen-minute window is the one cost of 300 s that only the bench can size.
 6. **One unattended night**, repeating item 7's shape: the pad's 3-stage schedule tracked on the dial's face, an app write from bed propagated, morning log clean. This is the gate for the tag: the previous overnight proof ran at 10 s and does not carry over.
 7. **Unattended OTA still fires** at STANDBY if an update is available — unrelated code, but it is the one mechanism that only runs in the tier this spec touches, so it gets watched once.
 
@@ -102,7 +110,7 @@ Simulator: not applicable — no worker task, no poll.
 
 ## 8. Where it lands
 
-**Decided 2026-09-06: `0.1.7-beta.1`**, after `0.1.6` graduates to stable. `0.1.6` is otherwise a pure fix release on top of the standby face and is the clean `1.0.0` candidate; a behaviour change to the overnight poll loop is exactly the kind of thing that should get its own soak rather than ride into a stable graduation. Owner delegated the timing and marked it not urgent; `0.1.6-beta.4` was the alternative and was not taken.
+**Decided 2026-09-06, renumbered 2026-09-11: `somnus-v1.0.2-beta.1`**, queued behind the repo consolidation (`docs/SPEC-repo-consolidation.md` §5, whose Phase 6a lands with the same beta). The original decision was `0.1.7-beta.1`, after `0.1.6` graduated to stable; the project renumbered on 2026-09-09, `0.1.6` shipped as `1.0.0`, the `0.1.7` line no longer exists, and current stable is `1.0.1`. The reasoning behind the placement is unchanged: `0.1.6` was a pure fix release on top of the standby face and the clean `1.0.0` candidate, and a behaviour change to the overnight poll loop is exactly the kind of thing that should get its own soak rather than ride into a stable graduation. Owner delegated the timing and marked it not urgent (2026-09-06); `0.1.6-beta.4` was the alternative and was not taken.
 
 ## 9. Not in this spec
 
