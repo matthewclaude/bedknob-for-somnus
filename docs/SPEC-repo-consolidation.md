@@ -142,7 +142,7 @@ Each of those is its own gated step with its own report. None of them happens in
 
 ## 7. Hardware gate
 
-The beta tag itself is gated on the beta's own build (`idf.py build` clean; the simulator unaffected, since none of the four strings is rendered by it) and a bench pass of items 1–3 below against the *beta*. Tagging `1.0.1` **stable** repeats the gate against the stable build. Both passes use the one bench unit.
+Items 1–5 below are the gate for the **beta** tag: the beta's own build (`idf.py build` clean; the simulator unaffected, since none of the four strings is rendered by it) and a bench pass of items 1–3 against the *beta*. Tagging `1.0.1` **stable** is gated differently — by §7.1 below, not by re-running items 1–5 — because the check that tells the two repos apart (item 2) stops being possible the moment stable is dual-published. Both passes use the one bench unit.
 
 1. Bench dial on `1.0.0`, Beta builds **on** → Menu → Update → Check for updates → finds `1.0.1-beta.1` in the **old** repo → installs → reboots showing `1.0.1-beta.1` under Menu → About. The evidence is the Release fetch for `somnus-v1.0.1-beta.1` succeeding — the serial log's `ota: latest 1.0.1-beta.1, running 1.0.0 -- update available` line — and the reboot into `1.0.1-beta.1`. No log line carries a URL, but a dial still running `1.0.0` polls only the old repo, so only `somnus-dial-releases` could have served it that release; that is what makes the observation meaningful.
 2. Same dial, now on `1.0.1-beta.1` → Menu → Update → set Beta builds **off** → Check for updates. The serial log must show, verbatim, `ota: no releases published yet (HTTP 404)`. That line is what tells the two repos apart: with Beta builds off the dial asks `/releases/latest`, and `bedknob-for-somnus` has no non-prerelease Release yet, so GitHub answers 404 — whereas the same check pointed at `somnus-dial-releases` would find its `1.0.0` stable Release and report up to date, never logging that line.
@@ -151,6 +151,31 @@ The beta tag itself is gated on the beta's own build (`idf.py build` clean; the 
 5. Rollback, if the repointed build cannot see the new repo (item 2 fails, or ends `OTA_FAILED`): wire-flash the `1.0.0` merged image from the **old** flasher page, which stays live throughout the beta and the cut-over. Five minutes, one unit. Then the beta is withdrawn (delete the two Releases; the tag stays, which is harmless per §3.2(a) once a newer tag with a Release exists) and this spec gets a §9 saying what was wrong.
 
 *Note, recorded after the 2026-09-10 bench pass:* item 2 as originally written asked the serial log to show the request going to `api.github.com/repos/matthewclaude/bedknob-for-somnus/…`; that is unobservable on this hardware. The OTA client never logs the URL or the repo name it queried, only the outcome, and both repos are reached at the same host, `api.github.com`, so no serial capture can distinguish them by hostname — which is why item 2 is now the Beta-builds-off 404 check.
+
+### 7.1 The stable re-run (`somnus-v1.0.1`)
+
+The stable tag does not repeat items 1–5. It splits the question the beta gate answered in one bench pass into two halves, one answered at build time and one on hardware, because after `1.0.1` stable is dual-published the two repos serve identical content and the dial cannot tell them apart.
+
+- **Repo identity is verified at build time, not on hardware.** The three URL constants in `dial_ota.c` do not change between `1.0.1-beta.1` and `1.0.1`, so the only way identity could regress is a reverted constant, and that is a question about the built artifact, not about the dial's behaviour. The check is the one the beta was checked with (`docs/REPORT-1.0.1-beta.1-commit.md`, "Strings in the binary"), run from `firmware/dial-idf` after a clean `idf.py build` of the stable tag, and it must give the same numbers — 3, 0, 0:
+
+  ```
+  $ strings build/somnus-dial.bin | grep -c 'repos/matthewclaude/bedknob-for-somnus'
+  3
+  $ strings build/somnus-dial.bin | grep -c 'somnus-dial-releases'
+  0
+  $ strings build/somnus-dial.bin | grep -c 'somnus-waveshare-rotary-dial'
+  0
+  ```
+
+  The three hits are the `/releases/latest`, `/tags?per_page=50` and `/releases/tags/%s` URLs. Any other result means a constant was reverted and the tag must not be pushed.
+
+- **Behaviour is verified on hardware.** Bench dial on `1.0.1-beta.1`, Beta builds **off** → Menu → Update → Check for updates → offered `1.0.1` → installs → reboots showing `1.0.1` under Menu → About. This is the beta-to-stable direction through the new endpoint — a dial that only polls `bedknob-for-somnus` finding a stable Release there — which is what this release exists to prove. **A serial capture is required**, same method as item 3: the cat-based serial method from the bring-up notes, not `idf.py monitor`. The evidence is the `ota: latest 1.0.1, running 1.0.1-beta.1 -- update available` line and the reboot into `1.0.1`.
+
+- **No runtime discriminator between the two repos exists once stable is dual-published, and none should be looked for.** Item 2's 404 works only while `bedknob-for-somnus` has no non-prerelease Release. Publishing `1.0.1` stable gives it one, so from that moment `/releases/latest` answers `somnus-v1.0.1` from both repos, both tag lists top out at the same tag, and the 404 never appears again. The client logs outcomes, never the URL or repo name it queried, and both repos are reached at `api.github.com`. That is the dual-publish window working exactly as designed — the repos are deliberately serving identical content — not a defect and not a gate failure. Nobody should go looking for such a check or treat its absence as the stable gate failing; the build-time check above is what carries repo identity for stable.
+
+- **Timing.** Item 4's caution still applies, with the tag name being `somnus-v1.0.1`: not inside the ~6-minute tag-to-Release window of §3.2(b). Confirm with `gh run watch` that the release run has completed **and** that both Releases exist (`gh release view somnus-v1.0.1 --repo <each>`) before touching the dial.
+
+- **Rollback**, if the stable build misbehaves on the bench (the check is not offered `1.0.1`, or it ends `OTA_FAILED`, or the rebooted dial is wrong): same shape as item 5 — wire-flash the merged image from the **old** flasher page, which stays live until the Phase 6 cut-over. Five minutes, one unit. What happens to the stable Releases after that is the owner's call — §5's standing rule about the `1.0.1` Release on the old repo was written for a stable that passed, not one that was pulled — and this spec gets a §9 saying what was wrong.
 
 ## 8. Open questions for the owner, each with a recommended answer
 
