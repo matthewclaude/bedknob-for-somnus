@@ -2,6 +2,8 @@
 
 **Verdict: PASS.** One reader attach, no loss, 10 h 35 m 43 s of continuous coverage; 137 polls, of which 126 STANDBY-tier gaps sit at 300.0–301.6 s (mean 300.5 s) with no outlier; the pad's own schedule moved the setpoint four times (18 → 20 → 19 → 20 °C, then off / 18 °C) and each step was on the dial at the next poll, at most 300.4–300.7 s after the previous one; no assert / panic / abort / Guru / `E (` line; no `ESP-ROM` or `rst:0x`, so the dial ran the whole night on one boot. The tag gate for `somnus-v1.0.2-beta.1` is met on the evidence in `bench-logs/1.0.2-overnight.log`. Tagging is the owner's gated step and was not done.
 
+> **Superseded, 2026-09-12 (same morning):** the owner's fuller analysis task arrived after this report was committed; `docs/REPORT-1.0.2-overnight-analysis.md` is the report of record for §6 item 6. Same log, every figure recomputed there, same PASS.
+
 Date: 2026-09-12. Branch `main` at `397419e`, `PROJECT_VER` `1.0.1`, firmware commit `39af8f5` as flashed by wire in `REPORT-1.0.2-bench-cadence.md`, still running from its 2026-09-11 boot (≈ 19:50:08Z; tick → UTC is boot + tick, good to ±2 s; owner's clock is CDT, UTC−5). Capture started by `REPORT-1.0.2-overnight-start.md`. No flash, no pad write, no bump, no tag, no push.
 
 ## 1. Gate
