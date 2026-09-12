@@ -8,17 +8,13 @@
 # flasher page (web-flasher/) always points at the latest build.
 #
 # The tag is pushed to (and this workflow runs in) THIS repo, which is
-# public -- and since 1.0.1-beta.1 the Release object and the gh-pages site
-# are published here AND into the matthewclaude/somnus-dial-releases repo
-# (see docs/SPEC-repo-consolidation.md; docs/SPEC-ota-readiness.md §5 for
-# why that repo existed). The old repo keeps getting releases because every
-# shipped 1.0.0 dial polls it, and dual-publishing is how those dials find
-# the build that repoints them. Both cross-repo writes (the Release API and
-# the gh-pages branch push) use the SOMNUS_RELEASES_TOKEN secret -- a
-# fine-grained PAT scoped to
-# `contents: write` on that repo only, which covers both: a fine-grained
-# PAT's "Contents" permission is what gates the Releases API AND git pushes
-# to branches, so one token suffices for both jobs below.
+# public. The Release object and the gh-pages site are published here and
+# nowhere else (docs/SPEC-repo-consolidation.md, Phase 6a).
+# matthewclaude/somnus-dial-releases is the frozen pre-1.0.1 location that
+# dials at or below 1.0.0 polled (docs/SPEC-ota-readiness.md §5 for why it
+# existed). It is kept read-only and is never deleted or renamed, because
+# its 1.0.1 Release is the permanent over-the-air migration path for any
+# such dial. Nothing in this workflow writes to it.
 name: release
 
 on:
@@ -71,19 +67,16 @@ jobs:
             echo "::error::No '## $VER' section in CHANGELOG.md. Add one describing what changed, then re-tag."
             exit 1
           fi
-          # No "full changelog" compare link: the same notes get published
-          # into THIS repo and into matthewclaude/somnus-dial-releases (see
-          # top-of-file comment), and the latter has no commit/tag history
-          # of its own -- a compare link built from ${GITHUB_REPOSITORY}
-          # would resolve here but is dead text on the old repo's copy of
-          # the notes, and one built against the old repo wouldn't resolve
-          # at all (no tags to diff there). Revisit after the migration.
+          # No "full changelog" compare link yet. The notes are published
+          # into THIS repo only, so a compare link built from
+          # ${GITHUB_REPOSITORY} would now resolve; adding one is a separate
+          # change, not part of the Phase 6a cut-over.
           {
             echo 'body<<RELEASE_NOTES_EOF'
             printf '%s\n' "$BODY"
             echo
             echo "Dials already running the firmware pick this up on their own — see Menu → Update."
-            echo "For a first install, use the [browser flasher](https://matthewclaude.github.io/somnus-dial-releases/); \`somnus-dial-merged.bin\` below is the same image for flashing manually from offset 0x0."
+            echo "For a first install, use the [browser flasher](https://matthewclaude.github.io/bedknob-for-somnus/); \`somnus-dial-merged.bin\` below is the same image for flashing manually from offset 0x0."
             echo
             echo "Required Notice: Copyright (c) 2026 Chris Meyer (https://github.com/chris023/orion-waveshare-rotary-dial)"
             echo 'RELEASE_NOTES_EOF'
@@ -125,23 +118,10 @@ jobs:
           path: firmware/dial-idf/build/somnus-dial-merged.bin
           retention-days: 1
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: matthewclaude/somnus-dial-releases
-          token: ${{ secrets.SOMNUS_RELEASES_TOKEN }}
-          prerelease: ${{ steps.channel.outputs.prerelease }}
-          body: ${{ steps.notes.outputs.body }}
-          files: |
-            firmware/dial-idf/build/somnus-dial.bin
-            firmware/dial-idf/build/somnus-dial-merged.bin
-
-      # Same Release, same notes, same two files, into THIS repo -- the
-      # location dial_ota.c polls from 1.0.1-beta.1 on. No repository: or
+      # The only Release published: into THIS repo, which is where
+      # dial_ota.c has polled since 1.0.1-beta.1. No repository: or
       # token: keys: the action defaults to the workflow's own repo and to
       # GITHUB_TOKEN, which the workflow-level `contents: write` covers.
-      # Runs after the old-repo step on purpose: if this one fails, the repo
-      # that shipped 1.0.0 dials actually poll already has the Release.
       - name: Publish GitHub Release (this repo)
         uses: softprops/action-gh-release@v2
         with:
@@ -183,31 +163,14 @@ jobs:
           cp /tmp/somnus-dial-merged/somnus-dial-merged.bin \
              _site/firmware/${{ steps.channel.outputs.dir }}/somnus-dial-merged.bin
 
-      - name: Deploy to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          # Same cross-repo PAT as the release-publish job above (see
-          # top-of-file comment) -- external_repository + personal_token is
-          # peaceiris/actions-gh-pages's documented way to push a gh-pages
-          # branch into a different repo than the one the workflow runs in;
-          # the default GITHUB_TOKEN can only ever push within this repo.
-          personal_token: ${{ secrets.SOMNUS_RELEASES_TOKEN }}
-          external_repository: matthewclaude/somnus-dial-releases
-          publish_dir: ./_site
-          publish_branch: gh-pages
-          # NOT force_orphan: that wipes the branch on every deploy, which
-          # would delete the OTHER channel's firmware image. keep_files
-          # preserves firmware/latest/ when a beta publishes and vice versa.
-          keep_files: true
-
-      # The same _site into THIS repo's gh-pages branch, so the flasher
-      # exists at this repo's Pages URL too (docs/SPEC-repo-consolidation.md
-      # §4(b)). GITHUB_TOKEN is enough for a push within the workflow's own
-      # repo. This repo has no gh-pages branch yet: the first run creates it
-      # from _site alone. keep_files matters from the second run on, for the
-      # same stable-vs-beta directory reason as above. Serving it is a
-      # repo setting (Pages: gh-pages branch, root) that the workflow cannot
-      # enable.
+      # _site into THIS repo's gh-pages branch, the only place the flasher
+      # is deployed (docs/SPEC-repo-consolidation.md §4(b), Phase 6a).
+      # GITHUB_TOKEN is enough for a push within the workflow's own repo.
+      # The gh-pages branch exists: the 1.0.1-beta.1 run created it, and
+      # Pages is enabled on it (gh-pages branch, root) and serving.
+      # keep_files preserves the OTHER channel's directory across deploys:
+      # a beta deploy must not delete firmware/latest/ and vice versa.
+      # (NOT force_orphan, which wipes the branch on every deploy.)
       - name: Deploy to gh-pages (this repo)
         uses: peaceiris/actions-gh-pages@v4
         with:
