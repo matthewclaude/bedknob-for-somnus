@@ -277,15 +277,16 @@
   <footer>
     <span id="latest-version">Latest firmware: checking&hellip;</span>
     <span class="links">
-      <a href="https://github.com/matthewclaude/somnus-dial-releases">Releases</a>
+      <a href="https://github.com/matthewclaude/bedknob-for-somnus">Source</a>
+      <a href="https://github.com/matthewclaude/bedknob-for-somnus/releases">Releases</a>
       <a href="https://github.com/chris023/orion-waveshare-rotary-dial">Forked from Orion Dial</a>
-      <a href="https://github.com/matthewclaude/somnus-dial-releases/blob/main/LICENSE">License</a>
+      <a href="https://github.com/matthewclaude/bedknob-for-somnus/blob/main/LICENSE">License</a>
     </span>
     <p style="margin-top:.8rem;font-size:.75rem;opacity:.65">
       Firmware &copy; 2026 Chris Meyer, licensed
       <a href="https://polyformproject.org/licenses/noncommercial/1.0.0">PolyForm
       Noncommercial 1.0.0</a> — free for personal, noncommercial use; see
-      <a href="https://github.com/matthewclaude/somnus-dial-releases/blob/main/THIRD_PARTY_LICENSES">third-party
+      <a href="https://github.com/matthewclaude/bedknob-for-somnus/blob/main/THIRD_PARTY_LICENSES.md">third-party
       notices</a>. Flashing powered by
       <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
       The firmware is provided as-is, with no warranty, and you use it at
@@ -301,7 +302,7 @@
 <script>
   (function () {
     var el = document.getElementById("latest-version");
-    fetch("https://api.github.com/repos/matthewclaude/somnus-dial-releases/releases/latest")
+    fetch("https://api.github.com/repos/matthewclaude/bedknob-for-somnus/releases/latest")
       .then(function (r) {
         if (!r.ok) throw new Error("bad response");
         return r.json();
