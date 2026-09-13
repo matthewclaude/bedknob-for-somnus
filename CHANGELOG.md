@@ -22,6 +22,18 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.2-beta.1 — 2026-09-13 (beta)
+
+While the screen is off and the dial has gone to standby, it now asks the
+pad for its state once every five minutes instead of every ten seconds.
+Touching the knob still reads the pad immediately, so the face is current
+the moment you look at it. Nothing about the screens or pad control
+changes.
+
+Internal: `POLL_STANDBY_US` at 300 s in the worker loop's due computation;
+the cadence is logged when crossing into or out of standby; a pad outage
+in standby now shows as stale after about fifteen minutes instead of three.
+
 ## 1.0.1 — 2026-09-11
 
 The dial now checks for firmware updates at the project's own repository,
