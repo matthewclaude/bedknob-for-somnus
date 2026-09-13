@@ -1,44 +1,47 @@
-# somnus-dial-releases
+# somnus-dial-releases — archived
 
-Firmware releases and the browser flasher for **Bedknob for Somnus** — a bedside
-dial that turns a Waveshare ESP32-S3 round touch-LCD knob into a standalone
-temperature control for a Somnus Pad. Not affiliated with, endorsed by, or
-supported by Somnus Lab or Waveshare.
+**This repository is archived and no longer publishes anything.** It held the
+firmware releases and the browser flasher for **Bedknob for Somnus** — a
+bedside dial that turns a Waveshare ESP32-S3 round touch-LCD knob into a
+standalone temperature control for a Somnus Pad — while the firmware's source
+was still private. The source has been public since 2026-09-10, and from
+`1.0.2-beta.1` onward releases are published alongside it. Not affiliated
+with, endorsed by, or supported by Somnus Lab or Waveshare.
 
-**This repo holds binaries, a manifest, and this flasher page only — it is
-not the firmware's source.** The source is public at
-[matthewclaude/bedknob-for-somnus](https://github.com/matthewclaude/bedknob-for-somnus),
-source-available under the PolyForm Noncommercial terms described below.
-Releases are published here rather than alongside the source because the
-dial's over-the-air update client resolves them by this repo's URL.
+Everything now lives at
+**[matthewclaude/bedknob-for-somnus](https://github.com/matthewclaude/bedknob-for-somnus)**:
 
-## Install
+- **Source** — <https://github.com/matthewclaude/bedknob-for-somnus>
+- **Releases** — <https://github.com/matthewclaude/bedknob-for-somnus/releases>
+- **Browser flasher** — <https://matthewclaude.github.io/bedknob-for-somnus/>
 
-Open **[the flasher page](https://matthewclaude.github.io/somnus-dial-releases/)**
+The flasher page that used to be served from this repository now redirects
+to the new one.
+
+## If your dial is still on 1.0.0
+
+Dials on `1.0.0` check this repository for updates, not the new one. The last
+release published here, [`somnus-v1.0.1`](https://github.com/matthewclaude/somnus-dial-releases/releases/tag/somnus-v1.0.1),
+is deliberately left in place and is never removed: a `1.0.0` dial that runs
+Menu → Update → Check for updates still finds `1.0.1` here, installs it over
+the air, and from then on checks the new repository. Everything after `1.0.1`
+is found there.
+
+If that does not happen — the dial never went online to check, or GitHub
+changes what archived repositories serve — the fix is one wire flash: open
+**[the new flasher page](https://matthewclaude.github.io/bedknob-for-somnus/)**
 in Chrome or Edge on a desktop computer, plug the dial in over USB-C, and
-click Install. No software to install locally — the page flashes the board
-directly from your browser over Web Serial.
+click Install. Flashing from the page erases the dial's settings (Wi-Fi,
+timezone, pad address); over-the-air updates never do.
 
-Already have a dial running this firmware? You don't need this page again —
-updates arrive over the air (Menu → Update on the dial itself, or
-automatically overnight if you've turned that on).
+## What is still here
 
-## What's in a release
+The releases up to and including `somnus-v1.0.1` and their two files each:
 
-Each [release](https://github.com/matthewclaude/somnus-dial-releases/releases)
-carries two files:
-
-- `somnus-dial.bin` — the app-only image. This is what a dial already
-  running this firmware downloads and installs over the air; it must never
-  be flashed directly at offset `0x0`.
-- `somnus-dial-merged.bin` — the same firmware, bundled with the bootloader
-  and partition table into one image flashable at offset `0x0` on a blank
-  or already-flashed chip. This is what the browser flasher above uses, and
-  what you'd use with `esptool` manually.
-
-A release marked **pre-release** on GitHub is a beta build — visible only
-to dials that have turned on "Beta builds" under Menu → Update, or to the
-flasher page's beta checkbox.
+- `somnus-dial.bin` — the app-only image a running dial downloads over the
+  air; never flash it directly at offset `0x0`.
+- `somnus-dial-merged.bin` — the same firmware with bootloader and partition
+  table, flashable at offset `0x0` on a blank or already-flashed chip.
 
 ## License and attribution
 
@@ -48,4 +51,5 @@ licensed under the **PolyForm Noncommercial License 1.0.0** — free for
 personal, noncommercial use. See [`LICENSE`](LICENSE) for the full terms
 and required notice, and [`THIRD_PARTY_LICENSES`](THIRD_PARTY_LICENSES)
 for the hardware bring-up code, fonts, data, and libraries this project
-builds on, each under its own terms.
+builds on, each under its own terms. The current versions of both files are
+maintained in the source repository.
