@@ -10,7 +10,7 @@
 # The tag is pushed to (and this workflow runs in) THIS repo, which is
 # public. The Release object and the gh-pages site are published here and
 # nowhere else (docs/SPEC-repo-consolidation.md, Phase 6a).
-# matthewclaude/somnus-dial-releases is the frozen pre-1.0.1 location that
+# matthewclaude/somnus-dial-releases (archived 2026-09-13) is the frozen pre-1.0.1 location that
 # dials at or below 1.0.0 polled (docs/SPEC-ota-readiness.md §5 for why it
 # existed). It is kept read-only and is never deleted or renamed, because
 # its 1.0.1 Release is the permanent over-the-air migration path for any

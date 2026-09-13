@@ -10,7 +10,7 @@ over-the-air updates all run on the dial itself.
 ## Just want to use the dial?
 
 Flash it from your browser at
-[https://matthewclaude.github.io/somnus-dial-releases/](https://matthewclaude.github.io/somnus-dial-releases/)
+[https://matthewclaude.github.io/bedknob-for-somnus/](https://matthewclaude.github.io/bedknob-for-somnus/)
 — Chrome or Edge, a **USB-A to USB-C data cable**, click Install. No
 toolchain needed. That flash writes the whole chip and so **always erases** a
 dial's settings; after it, every future update arrives over the air
@@ -112,8 +112,8 @@ assigns; the CSV leaves them blank.
 
 ### Release images and manual esptool flashing
 
-Each GitHub Release (tag `somnus-vX.Y.Z`, published to
-[matthewclaude/somnus-dial-releases](https://github.com/matthewclaude/somnus-dial-releases))
+Each GitHub Release (tag `somnus-vX.Y.Z`, published on this repository's
+[Releases page](https://github.com/matthewclaude/bedknob-for-somnus/releases))
 carries two images:
 
 - **`somnus-dial.bin`** — the OTA app image, what the dial downloads for
@@ -221,7 +221,7 @@ device itself:
   dial as if freshly flashed.
 - **Recovering a bricked/misbehaving unit:** if the dial won't boot cleanly
   or a factory reset from Settings isn't reachable, the easy path is the
-  [browser flasher](https://matthewclaude.github.io/somnus-dial-releases/)
+  [browser flasher](https://matthewclaude.github.io/bedknob-for-somnus/)
   again — it always erases the whole chip, which is exactly what you want
   here. The developer equivalent, from a checkout with ESP-IDF set up:
   ```bash

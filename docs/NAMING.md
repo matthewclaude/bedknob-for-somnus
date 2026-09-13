@@ -43,7 +43,7 @@ construction is not worth losing.
 2. ~~**Bedknob Mini** — the whole rename.~~ **Done Sep 5 2026** (see table).
 3. ~~**Two GitHub repo renames**~~ — **done Sep 5 2026** via `gh repo rename`:
    `somnus-waveshare-rotary-dial` → `bedknob-for-somnus`, `SomnusDialPreview` →
-   `BedknobMac`. GitHub redirects the old names. `somnus-dial-releases` stays: its URL is
+   `BedknobMac`. GitHub redirects the old names. `somnus-dial-releases` stays (archived 2026-09-13, still served read-only): its URL is
    one of the identifiers above. Local folder names are unchanged on purpose.
 4. **The Claude Project** — docs, instructions, description and title ("Bedknob family")
    all updated Sep 2 2026. Only the summary's *filename*

@@ -194,8 +194,10 @@ about, update, updating, update prompt.
 
 ## Updates: `dial_ota`
 
-`dial_ota` checks the **public releases repo**
-`matthewclaude/somnus-dial-releases` over the GitHub API — `/releases/latest`
+`dial_ota` checks **this repository's own Releases**,
+`matthewclaude/bedknob-for-somnus`, over the GitHub API (since `1.0.1-beta.1`;
+a dial still on `1.0.0` polls the archived `somnus-dial-releases` repo, whose
+`1.0.1` Release is its migration path onto this one) — `/releases/latest`
 normally; with **Beta builds** on, the `/tags?per_page=50` list to find the
 newest `somnus-v*` tag and then `/releases/tags/<tag>` for that release's
 object, so prereleases count and a beta can never scroll out of a capped list

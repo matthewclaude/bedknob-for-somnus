@@ -50,7 +50,7 @@ SIDE faces.
 
 ### Flash from your browser
 
-**Open [matthewclaude.github.io/somnus-dial-releases](https://matthewclaude.github.io/somnus-dial-releases/)
+**Open [matthewclaude.github.io/bedknob-for-somnus](https://matthewclaude.github.io/bedknob-for-somnus/)
 in Chrome or Edge, plug the dial in with a USB-A to USB-C cable, and click
 Install.** No toolchain, no downloads. Everything else — Wi-Fi, timezone,
 finding your pad — happens on the dial's own screen, and future updates
@@ -208,8 +208,8 @@ notes, the partition layout and the firmware architecture are in
 
 ## Releases
 
-Firmware is published from this repository to
-[matthewclaude/somnus-dial-releases](https://github.com/matthewclaude/somnus-dial-releases),
+Firmware is published as GitHub Releases of this repository
+([bedknob-for-somnus/releases](https://github.com/matthewclaude/bedknob-for-somnus/releases)),
 which also hosts the browser flasher. Each release carries `somnus-dial.bin`
 (the OTA image the dial downloads) and `somnus-dial-merged.bin` (a full-flash
 image for manual flashing from offset `0x0`). Tags are `somnus-vX.Y.Z`;

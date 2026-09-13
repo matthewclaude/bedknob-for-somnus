@@ -3,7 +3,7 @@
 > **Reader's guide (added 2026-09-02, evening).** Roughly two-thirds of this file is
 > a dated investigation whose recommendations have since all been applied. Ground
 > truth today: tag prefix `somnus-v*`, `PROJECT_VER` tracks the tag, releases and the
-> flasher publish to the public `matthewclaude/somnus-dial-releases` via
+> flasher publish to this repo's own Releases and Pages, `matthewclaude/bedknob-for-somnus` (as-built history: releases were dual-published to `somnus-dial-releases` from `1.0.1-beta.1` to `1.0.1` and single-repo from `1.0.2-beta.1` on; that repo is archived as of 2026-09-13), with no
 > `SOMNUS_RELEASES_TOKEN`, `somnus-v0.1.3` is current, and a real OTA
 > (0.1.2, `ota_1` slot, `ESP_OTA_IMG_VALID`) is proven on hardware —
 > `HARDWARE-bringup-log.md` §14.4. **Still current:** §1.1 (a pre-repoint dial can

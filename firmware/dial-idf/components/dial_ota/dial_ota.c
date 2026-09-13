@@ -31,10 +31,12 @@ static const char *TAG = "ota";
 // as of 1.0.1-beta.1 (docs/SPEC-repo-consolidation.md). Before that, every
 // shipped dial resolved updates from the binaries-only
 // matthewclaude/somnus-dial-releases repo (docs/SPEC-ota-readiness.md §5),
-// by exactly the URL compiled in here -- so during the migration releases
-// are dual-published to somnus-dial-releases as well, which is where a
-// dial still on 1.0.0 finds this build. Nothing here falls back to the old
-// repo: a dial running this code polls only the URLs below.
+// by exactly the URL compiled in here. Releases were dual-published there
+// through 1.0.1 and are single-repo (this repo only) from 1.0.2-beta.1 on;
+// that repo is now archived, read-only, and its 1.0.1 Release is where a
+// dial still on 1.0.0 finds the build that repoints it here. Nothing here
+// falls back to the old repo: a dial running this code polls only the URLs
+// below.
 #define GITHUB_API_URL \
     "https://api.github.com/repos/matthewclaude/bedknob-for-somnus/releases/latest"
 // Beta channel only (docs/SPEC-ota-readiness.md §9.7, 2026-09-03 finding): GitHub's
