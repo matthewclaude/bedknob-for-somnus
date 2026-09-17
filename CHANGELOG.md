@@ -22,6 +22,18 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.2 — 2026-09-17
+
+While the screen is off and the dial has gone to standby, it now asks the
+pad for its state once every five minutes instead of every ten seconds.
+Touching the knob still reads the pad immediately, so the face is current
+the moment you look at it. Nothing about the screens or pad control
+changes. This is `1.0.2-beta.1` graduated to a stable release after a
+full night in use and an over-the-air install of its own.
+
+Internal: the `1.0.2-beta.1` build renumbered; no code change beyond the
+version string.
+
 ## 1.0.2-beta.1 — 2026-09-13 (beta)
 
 While the screen is off and the dial has gone to standby, it now asks the
