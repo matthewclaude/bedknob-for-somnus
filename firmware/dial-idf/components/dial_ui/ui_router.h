@@ -26,7 +26,6 @@ typedef enum {
     SCR_STANDBY,          // clock face (arg: zone_idx_t to wake to) — what DPWR_STANDBY shows only while Settings' Standby face is Clock; Temperature keeps SCR_DIAL up (main.c standby_screen(), docs/SPEC-standby-face.md)
     SCR_ERROR,            // offline / degraded, with retry countdown
     SCR_WELCOME,          // fresh-device onboarding splash (M4)
-    SCR_SIDEPICK,         // "which side of the bed?" (M4, reused from Settings)
     SCR_SETTINGS,         // settings list (M4, arg: unused/NULL — returns to SCR_MENU)
     SCR_TIMEZONE,         // curated timezone picker (docs/SPEC-timezone-source.md; arg: 0 = opened from SCR_SETTINGS, returns there; 1+zone_idx_t = raised by nav_policy's setup gate, returns to SCR_DIAL for that zone — scr_adjust_mode.c's s_origin packing)
     SCR_PAD_ADDRESS,      // edit the Somnus pad's base URL (arg: unused/NULL — returns to SCR_SETTINGS)

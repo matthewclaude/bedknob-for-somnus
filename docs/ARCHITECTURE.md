@@ -180,15 +180,14 @@ outline: a fresh device shows the welcome splash before Wi-Fi is up;
 picker and password wheel reachable from it); `PH_PAD_DISCOVERY` has its own
 live-progress screen; the other pre-ready phases show the connecting or
 error screen with the retry countdown. An OTA download takes the whole
-screen over regardless of phase. Two setup gates fire only at `PH_READY`:
+screen over regardless of phase. One setup gate fires only at `PH_READY`:
 the **timezone picker** when no zone has ever been applied (an iPhone-
-provisioned dial has none — `docs/SPEC-timezone-source.md`), and the
-**side pick** on a fresh Dual Sides dial. Once a user is on a screen they
-chose deliberately (Settings, the update sheet, a picker), a routine poll
-landing is not allowed to yank them off it.
+provisioned dial has none — `docs/SPEC-timezone-source.md`). Once a user
+is on a screen they chose deliberately (Settings, the update sheet, a
+picker), a routine poll landing is not allowed to yank them off it.
 
 Screens in the tree: connecting, pad discovery, Wi-Fi portal, network pick,
-passkey, dial, menu, standby clock, error, welcome, side pick, settings,
+passkey, dial, menu, standby clock, error, welcome, settings,
 timezone, pad address, adjust mode, brightness menu and picker, Wi-Fi,
 about, update, updating, update prompt.
 

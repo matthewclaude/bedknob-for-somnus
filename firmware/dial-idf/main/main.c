@@ -421,14 +421,6 @@ static screen_id_t nav_policy(const app_state_t *st, void **arg)
                 cur == SCR_PAD_ADDRESS || cur == SCR_TIMEZONE ||
                 cur == SCR_STANDBY_FACE ||
                 cur == SCR_NIGHT_MODE || cur == SCR_NIGHT_FACE) return cur;
-            // First link on a fresh device: pick a default side before showing
-            // the dial (SCR_SIDEPICK). Nothing to pick on a single-zone topper,
-            // so that device goes straight to its one face. The `cur` half of
-            // the OR keeps a poll from yanking the user off the picker
-            // mid-decision.
-            if (dial_state_is_dual(st) &&
-                ((st->fresh_device && !st->side_picked) || cur == SCR_SIDEPICK))
-                return SCR_SIDEPICK;
             *arg = (void *)(uintptr_t)st->ui_zone;
             return dial_power_level() == DPWR_STANDBY ? standby_screen(st) : SCR_DIAL;
         }

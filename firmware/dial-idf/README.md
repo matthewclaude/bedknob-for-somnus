@@ -193,8 +193,9 @@ device itself:
    type. If it finds nothing, Settings → Pad Address takes one by hand.
 5. **Bed Mode.** Settings → Bed Mode: **One Bed** or **Dual Sides**, matching
    the toggle in the Somnus app. The pad's API cannot report this, so the
-   dial trusts you and names the mode on the face. In Dual Sides mode a
-   fresh dial also asks "Which side of the bed?" once.
+   dial trusts you and names the mode on the face. In Dual Sides mode the
+   dial opens on the right side, and one swipe shows the left; it
+   remembers the last side you looked at.
 6. **The dial screen.** From here on: the live temperature dial, with a
    swipe to the other side (Dual Sides) and to the menu.
 

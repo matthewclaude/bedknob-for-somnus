@@ -444,9 +444,8 @@ static void create(lv_obj_t *scr, void *arg)
 
     s_list = dial_list_create(scr, ROW_H);
 
-    // No "My side" row: it only re-ran SCR_SIDEPICK, which sets the very same
-    // ui_zone that one swipe on the dial already sets (and persists) — the row
-    // changed nothing you couldn't change faster by swiping.
+    // No "My side" row: the side is set by swiping on the dial, which sets
+    // (and persists) ui_zone, so there is no Settings row for it.
     make_row(s_list, LV_SYMBOL_LEFT "  Back", row_back_cb, NULL);
 
     // "Adjustment mode" row intentionally omitted here — hidden, not

@@ -18,7 +18,6 @@ extern const ui_screen_t scr_dial;
 extern const ui_screen_t scr_menu;
 extern const ui_screen_t scr_standby;
 extern const ui_screen_t scr_welcome;
-extern const ui_screen_t scr_sidepick;
 extern const ui_screen_t scr_settings;
 extern const ui_screen_t scr_timezone;
 extern const ui_screen_t scr_pad_address;

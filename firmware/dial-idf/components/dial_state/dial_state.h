@@ -407,8 +407,8 @@ typedef struct {
     zone_state_t zones[ZONE_COUNT];
     // Which zones the device actually reports. Mirrors dial_somnus's
     // single-zone/dual-zone ("One Bed"/"Dual Sides") setting: everything
-    // that assumes a partner side (the side-swap chain, the page dots, the
-    // side picker) must gate on this rather than on ZONE_COUNT, same
+    // that assumes a partner side (the side-swap chain, the page dots) must
+    // gate on this rather than on ZONE_COUNT, same
     // reasoning as Orion's single-zone toppers before it. Valid once
     // have_state; see dial_state_is_dual().
     bool    zone_present[ZONE_COUNT];
@@ -481,19 +481,14 @@ typedef struct {
     // --- Onboarding (M4) ---
     // True for the whole session when the device booted with no stored Wi-Fi
     // credentials (set once in app_main from !dial_net_have_creds(), before
-    // dial_net_bringup runs the portal). Gates SCR_WELCOME/SCR_SIDEPICK so an
-    // already-provisioned device (upgraded firmware, never picked a side) is
-    // never routed through onboarding again.
+    // dial_net_bringup runs the portal). Gates SCR_WELCOME so an
+    // already-provisioned device (upgraded firmware) is never routed through
+    // onboarding again.
     bool fresh_device;
     // SCR_WELCOME dismissed (tap or knob). Session-only, deliberately NOT
     // persisted — the point is just to stop nav_policy from pinning the
     // welcome screen once the user acknowledges it.
     bool welcomed;
-    // True once a default side is known: either the user picked one on
-    // SCR_SIDEPICK, or (upgrade path) NVS already had a "zone" key from
-    // before this flag existed. Restored from that key's *existence* in
-    // dial_state_restore_prefs, not its value.
-    bool side_picked;
     // SCR_TIMEZONE's setup-gate prompt dismissed this session (docs/SPEC-
     // timezone-source.md's "Fix 1"). Session-only, deliberately NOT
     // persisted, same reasoning as `welcomed` above -- but here the reason
@@ -860,14 +855,13 @@ void dial_state_set_zone_on(zone_idx_t zone, bool on);
 // Record which side the UI is showing. The nav policy follows this, so any
 // screen that switches sides MUST commit it here (or the next state commit
 // navigates right back — the side choice lives in the store, not the router).
+// Persists "ui"/"zone" on change, and seeds "ui"/"relmode" from the current
+// Scale first if that key is absent (see dial_state_restore_prefs).
 void dial_state_set_ui_zone(zone_idx_t zone);
 
 // --- Onboarding / settings setters (M4) ---
 // Dismiss SCR_WELCOME. Not persisted (see app_state_t.welcomed).
 void dial_state_set_welcomed(void);
-// Mark that a default side is known (see app_state_t.side_picked). Callers
-// that pick a side also call dial_state_set_ui_zone() to persist it.
-void dial_state_set_side_picked(void);
 // Dismiss SCR_TIMEZONE's setup-gate prompt for this session. Not persisted
 // (see app_state_t.tz_prompted) -- call whenever the user leaves that screen,
 // whichever way, so nav_policy's gate stops re-forcing it but asks again

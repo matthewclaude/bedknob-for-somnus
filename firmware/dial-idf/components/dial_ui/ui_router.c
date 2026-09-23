@@ -84,7 +84,6 @@ static bool screen_blocks_sleep(screen_id_t id)
     case SCR_WIFI_PORTAL:    // "join this AP" instructions
     case SCR_NETPICK:        // picking a network with the knob
     case SCR_PASSKEY:        // one letter per detent — the worst case by far
-    case SCR_SIDEPICK:       // first-run side choice
     case SCR_UPDATING:       // install in progress; screen is the progress bar
     case SCR_UPDATE_PROMPT:  // an offer the user is reading
     case SCR_BRIGHTNESS:     // live backlight preview — sleeping mid-adjust

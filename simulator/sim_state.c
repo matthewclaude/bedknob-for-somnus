@@ -5,7 +5,7 @@
  *
  * Implements exactly the dial_state.h entry points the compiled dial_ui
  * screens call (verified against every scr_*.c + ui_router.c): dial_state_get,
- * set_ui_temp, set_zone_on, set_ui_zone, set_welcomed, set_side_picked,
+ * set_ui_temp, set_zone_on, set_ui_zone, set_welcomed,
  * set_units_c, set_rel_mode, set_haptics_level, set_rotation, set_wifi_join,
  * clear_wifi_join_failed, set_phase, stamp_input, get/set_bri_day_pct,
  * get/set_bri_night_pct, get/set_bri_night_clock_pct,
@@ -90,12 +90,6 @@ void dial_state_set_ui_zone(zone_idx_t zone)
 void dial_state_set_welcomed(void)
 {
     s_state.welcomed = true;
-    s_state.generation++;
-}
-
-void dial_state_set_side_picked(void)
-{
-    s_state.side_picked = true;
     s_state.generation++;
 }
 

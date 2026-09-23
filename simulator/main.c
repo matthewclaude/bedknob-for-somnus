@@ -251,7 +251,6 @@ static void apply_baseline(void)
     st->rotation = 0;
     st->haptics_level = 1;   // HAPTIC_LEVEL_AUTO
     st->welcomed = true;
-    st->side_picked = true;
     st->ui_zone = ZONE_A;
     st->away = false;
 
@@ -320,14 +319,6 @@ static void scenario_passkey(void)
     }
     pump_ms(200);
     snapshot("passkey");
-}
-
-static void scenario_sidepick(void)
-{
-    apply_baseline();
-    ui_router_go(SCR_SIDEPICK, NULL, LV_SCR_LOAD_ANIM_NONE);
-    pump_ms(300);
-    snapshot("sidepick");
 }
 
 static void scenario_connecting(void)
@@ -1159,7 +1150,6 @@ int main(void)
     scenario_wifi_portal();
     scenario_netpick();
     scenario_passkey();
-    scenario_sidepick();
     scenario_connecting();
     scenario_dial();
     scenario_dial_update();

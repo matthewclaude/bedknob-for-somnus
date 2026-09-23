@@ -254,10 +254,6 @@ void dial_state_restore_prefs(void)
     xSemaphoreTake(s_mux, portMAX_DELAY);
     if (have_zone) {
         s_state.ui_zone     = (zone_idx_t)zone;
-        // The "zone" key's mere existence means some earlier session already
-        // established a default side — including upgrades from before
-        // side_picked existed, so those devices never re-run SCR_SIDEPICK.
-        s_state.side_picked = true;
     }
     if (have_units)   s_state.units_c      = (units != 0);
     // No 0/1 -> bool translation needed: the "haptics" key's stored byte
@@ -409,6 +405,7 @@ void dial_state_set_ui_zone(zone_idx_t zone)
     xSemaphoreTake(s_mux, portMAX_DELAY);
     bool changed = (s_state.ui_zone != zone);
     s_state.ui_zone = zone;
+    bool rel = s_state.rel_mode;
     xSemaphoreGive(s_mux);
     // No generation bump: the caller is the screen that already navigated —
     // re-rendering here would race the transition it just started.
@@ -418,6 +415,15 @@ void dial_state_set_ui_zone(zone_idx_t zone)
     if (changed) {
         nvs_handle_t h;
         if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+            // Seed "relmode" (if absent) before the first "zone": this is the
+            // only writer of "zone", and dial_state_restore_prefs reads "zone"
+            // without "relmode" as a device set up before the relative scale
+            // and forces Absolute. Seeding the RAM value keeps a never-touched
+            // Scale where it is across the reboot; writing it first means a
+            // power loss between the two sets can't leave "zone" alone.
+            uint8_t existing;
+            if (nvs_get_u8(h, "relmode", &existing) != ESP_OK)
+                nvs_set_u8(h, "relmode", rel ? 1 : 0);
             nvs_set_u8(h, "zone", (uint8_t)zone);
             nvs_commit(h);
             nvs_close(h);
@@ -439,33 +445,6 @@ void dial_state_set_tz_prompted(void)
     s_state.tz_prompted = true;
     s_state.generation++;
     xSemaphoreGive(s_mux);
-}
-
-void dial_state_set_side_picked(void)
-{
-    xSemaphoreTake(s_mux, portMAX_DELAY);
-    s_state.side_picked = true;
-    bool rel = s_state.rel_mode;
-    s_state.generation++;
-    xSemaphoreGive(s_mux);
-
-    // Onboarding runs only on a fresh device (nav_policy gates SCR_SIDEPICK on
-    // !side_picked, and an upgrade restores side_picked from the existing
-    // "zone" key so it never reaches here). Persisting "relmode" now is what
-    // lets a fresh device's relative default survive a reboot even if the user
-    // never opens Settings — otherwise its second boot would see a "zone" key
-    // (written by the side pick) but no "relmode" and wrongly apply the
-    // upgrade→absolute rule in dial_state_restore_prefs. On an upgrade this
-    // code is unreachable, so a genuine ≤v1.0.6 device still lands on absolute.
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
-        uint8_t existing;
-        if (nvs_get_u8(h, "relmode", &existing) != ESP_OK) {
-            nvs_set_u8(h, "relmode", rel ? 1 : 0);
-            nvs_commit(h);
-        }
-        nvs_close(h);
-    }
 }
 
 void dial_state_set_units_c(bool units_c)
