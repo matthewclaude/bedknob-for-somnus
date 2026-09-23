@@ -4,6 +4,7 @@ Status: spec only, written 2026-09-23 against `547231f` (`somnus-v1.0.2`,
 `PROJECT_VER` 1.0.2, tree clean). No firmware source changes in this
 document's commit. The owner decided on 2026-09-05 to delete the side picker
 rather than fix it; this spec covers how to delete it safely, not whether.
+Owner decisions recorded 2026-09-23 (section 9); ready for the code change.
 
 Scope rule in force: no new features, one change per beta, spec on disk
 before code, hardware test before tag. The one change in 1.0.3-beta.1 is
@@ -425,27 +426,30 @@ write anything; only tapping it does (`:224`). **Never tap the Scale row in
 these tests.** The whole point is a device whose Scale was never set by
 hand. The face also shows it: relative numbers vs °F.
 
-**Rules for touching the pad.** The pad runs single-zone. In the dual-mode
-steps, change sides by **swiping only**. Do not turn the knob or tap the
-power disc on either face, because that would send a side1 write while the
-dial is set to Dual Sides. Wake the dial with a single fingertip tap, which
-writes nothing. At the end, set Bed Mode back to One Bed. Diff the pad's
-first and last state for the session.
+**Rules for touching the pad.** The pad stays single-zone; only the dial is
+set to Dual Sides (section 9, Q3). In the dual-mode steps (T2, T4), touch
+the glass only: change sides by **swiping**, and wake the dial with a
+single fingertip tap, which writes nothing. **No knob turns or presses** on
+either face: a turn changes the setpoint and a press toggles pad power, and
+either would send a side1 write while the dial is set to Dual Sides. Do not
+tap the power disc either. At the end, set Bed Mode back to One Bed. Diff
+the pad's first and last state for the session.
 
-**Reboot.** Use the board's reset button or a full power cycle. On the
-battery SKU, unplugging USB alone does not reboot it (it keeps running on
-the cell). See Open question 2.
+**Reboot.** Every reboot in this plan is a press of the board's **RST**
+button (section 9, Q2). NVS survives any reset, so a power cycle with the
+cell disconnected would prove nothing more. On the battery SKU, unplugging
+USB alone does not reboot it (it keeps running on the cell).
 
 | # | Steps | Observe on the dial | Serial needed? |
 |---|---|---|---|
 | T1 | Settings → Factory reset. Walk onboarding (welcome, Wi-Fi, pad). Bed Mode stays One Bed. | No side picker. Lands on the dial face labelled BOTH SIDES. Scale = Relative. | Yes: `sb_face: no key -> default` proves a genuinely empty `"ui"` namespace. Also confirm the router-up line and no panic. |
-| T1-r1, T1-r2 | Reboot, wait for the face, check Scale. Twice. | Scale = Relative both times. | Yes: two boot banners, to prove two real reboots happened. |
-| T4 (latent case) | Same device, now non-fresh: Settings → Bed Mode → Dual Sides. Back to the dial. Swipe right to LEFT SIDE. | No side picker (not fresh). LEFT SIDE face. | Yes: `zone mode set to dual (Dual Sides)`. There must be no `POST` line containing `"side1"`. |
-| T4-r1, T4-r2 | Reboot twice. | Wakes to LEFT SIDE. **Scale = Relative** both times. (On 1.0.2 this reads Absolute after the first reboot. That is the latent bug.) | Yes: boot banners, and no `"side1"` POST. |
-| T2 | Factory reset again. Walk onboarding. **In this first session**, after the pad links: Settings → Bed Mode → Dual Sides, back to the dial. | **No side picker.** The face opens on **RIGHT SIDE**. A right swipe shows LEFT SIDE, and a left swipe returns. | Yes: `sb_face: no key -> default`, dual zone-mode line, no `"side1"` POST. |
+| T1-r1, T1-r2 | Press RST, wait for the face, check Scale. Twice. | Scale = Relative both times. | Yes: two boot banners, to prove two real reboots happened. |
+| T4 (latent case) | Same device, now non-fresh: Settings → Bed Mode → Dual Sides. Back to the dial. Swipe right to LEFT SIDE. From here on, glass only: swipes, and single-fingertip taps to wake; no knob turns or presses. | No side picker (not fresh). LEFT SIDE face. | Yes: `zone mode set to dual (Dual Sides)`. There must be no `POST` line containing `"side1"`. |
+| T4-r1, T4-r2 | Press RST twice, waiting for the face each time. Wake with a fingertip tap only; no knob. | Wakes to LEFT SIDE. **Scale = Relative** both times. (On 1.0.2 this reads Absolute after the first reboot. That is the latent bug.) | Yes: boot banners, and no `"side1"` POST. |
+| T2 | Factory reset again. Walk onboarding. **In this first session**, after the pad links: Settings → Bed Mode → Dual Sides, back to the dial. From here on, glass only: swipes, and single-fingertip taps to wake; no knob turns or presses. | **No side picker.** The face opens on **RIGHT SIDE**. A right swipe shows LEFT SIDE, and a left swipe returns. | Yes: `sb_face: no key -> default`, dual zone-mode line, no `"side1"` POST. |
 | T2-a | Leave the dial on LEFT SIDE (so `"zone"` was written). | | |
-| T2-r1, T2-r2 | Reboot twice. | Wakes to LEFT SIDE. **Scale = Relative** both times. This is the regression check for §1.2(b). | Yes: boot banners, no `"side1"` POST. |
-| T2-z | Swipe back to RIGHT SIDE, reboot once. | Wakes to RIGHT SIDE, Scale = Relative. | Yes: boot banner. |
+| T2-r1, T2-r2 | Press RST twice, waiting for the face each time. Wake with a fingertip tap only; no knob. | Wakes to LEFT SIDE. **Scale = Relative** both times. This is the regression check for §1.2(b). | Yes: boot banners, no `"side1"` POST. |
+| T2-z | Swipe back to RIGHT SIDE, press RST once. No knob. | Wakes to RIGHT SIDE, Scale = Relative. | Yes: boot banner. |
 | T3 (upgrade) | The owner's daily dial on 1.0.2, Scale as they use it: OTA to the beta. | No side picker. Same side and same Scale as before the update. | Optional: the OTA and boot lines. |
 | Close | Bed Mode → One Bed on every bench dial. | BOTH SIDES label. | Diff the pad's state at the start and end of the session. |
 
@@ -491,7 +495,7 @@ itself.)
 
 ---
 
-## 9. Open questions for the owner
+## 9. Owner decisions (2026-09-23)
 
 1. **The latent-case fix rides along.** §1.3 is required to delete the
    picker without a regression. The same line also fixes a 1.0.2 bug in
@@ -502,12 +506,29 @@ itself.)
    in the release notes (§8)? If not, the only way to exclude it is to
    gate the seed on `fresh_device`, which would keep a known bug on
    purpose. This spec recommends shipping the fix.
+
+   **Decided:** yes. The fix for the latent 1.0.2 bug ships as part of the
+   deletion. It is one guarded write at the only writer of `"zone"` and
+   cannot be separated from the deletion. Gating the seed on
+   `fresh_device` to exclude it would keep a known bug on purpose, and is
+   rejected. The 1.0.3-beta.1 CHANGELOG section names both the deletion
+   and the fix.
 2. **Reboot method on the bench dial.** The reset button, or a full power
    cycle with the cell disconnected? Unplugging USB alone does not reboot
    the battery SKU.
+
+   **Decided:** the RST button. NVS survives any reset, so a power cycle
+   with the cell disconnected proves nothing more. Every "reboot" in
+   section 7 means a press of RST.
 3. **Dual-mode steps against a single-zone pad.** T2 and T4 set the *dial*
    to Dual Sides while the pad stays single-zone, and allow swipes only.
    Nothing in those steps sends a write, and the serial capture proves no
    `"side1"` POST. Is that acceptable, or would the owner rather switch the
    pad to dual in the Somnus app for the session? That would change the
    bed's state and need restoring afterwards.
+
+   **Decided:** acceptable. The pad stays in single-zone mode. Only the
+   dial is set to Dual Sides for T2 and T4. During those steps, wake the
+   dial with a single fingertip tap on the glass only. No knob turns or
+   presses: a turn changes the setpoint and a press toggles pad power. The
+   serial capture must show no side1 POST.
