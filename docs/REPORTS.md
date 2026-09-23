@@ -16,7 +16,7 @@ A `REPORT-*.md` file is Claude Code's fixed-path output for one task: a verdict 
 - `REPORT-about-layout-battery-glyph.md` — 2026-09-04 — About layout pass + battery badge/percentage review (Sep 4 2026, evening) — (no verdict line)
 - `REPORT-battery-pct-about-redesign.md` — 2026-09-04 — Battery percentage + About redesign (SPEC-power-sensing.md §11) — (no verdict line)
 - `REPORT-docs-sync.md` — 2026-09-04 — docs-sync commit (README → 0.1.5, Sep 3–5 reports, NAMING audit, ignore Claude outputs) — **Verdict: DONE.** Gate passed, docs-only commit `5228de3` created on `firmware/somnus-port` and pushed to the `somnus` remote.
-- `REPORT-handoff.md` — 2026-09-04 — Handoff — Sep 11 2026, end of session — (no verdict line; rewritten each session)
+- `REPORT-handoff.md` — 2026-09-04 — Handoff — Sep 23 2026, end of session — (no verdict line; rewritten each session)
 - `REPORT-layout-phase1.md` — 2026-09-04 — Screen layout pass, phase 1 (Section S + Tier A) — **DONE.** Two commits on `main`: `a009840` (Section S: 10 new scenarios + the S3 stub hook + the settings-pad re-aim, 40 PNGs regenerated as the BEFORE set) and `5bf68a5` (Tier A: A1–A5 in four `dial_ui` files, the AFTER PNGs, the two doc edits).
 - `REPORT-night-face.md` — 2026-09-04 — Run 3 — commit 4 (spec revision 3, three review fixes) — **DONE.** Commit 4 (all three revision-3 fixes, all in `scr_dial.c`) built clean with `idf.py build`, zero warnings; version/tag/CHANGELOG/push left untouched, `Claude outputs/` not added, as instructed.
 - `REPORT-ota-beta-not-found.md` — 2026-09-04 — manual OTA check — serial capture — (no verdict line)
@@ -87,5 +87,6 @@ A `REPORT-*.md` file is Claude Code's fixed-path output for one task: a verdict 
 - `REPORT-1.0.2-commit.md` — 2026-09-17 — REPORT: somnus-v1.0.2 stable release, block 1 of 2 (commit only) — **DONE** — commit `5512537`, three files, not tagged, not pushed.
 - `REPORT-1.0.2-tag-push.md` — 2026-09-17 — REPORT: somnus-v1.0.2 stable release, block 2 of 2 (tag, push, verify) — **DONE** — tagged at `5512537`, release run 35285754918 and ci run 35285753616 success, Release published as stable, releases/latest = `somnus-v1.0.2`, tag-push to publishedAt 3 m 06 s.
 - `REPORT-sidepick-spec.md` — 2026-09-23 — REPORT: SPEC-sidepick-deletion, the 1.0.3-beta.1 plan (spec only) — **SPEC WRITTEN** — committed as `5b23998`; found that deleting the picker alone would switch a fresh Dual Sides dial to Absolute after a swipe and a reboot; the fix is to seed "relmode" in dial_state_set_ui_zone, which also fixes a latent 1.0.2 case.
+- `REPORT-sidepick-code.md` — 2026-09-23 — REPORT: sidepick-code — SPEC-sidepick-deletion implemented (1.0.3-beta.1 change) — **CODE COMMITTED** — commit A `e14e671` (spec touch-up), commit B `fe5b139` (the change); gate, host test, firmware build, identity checks and simulator all passed; not pushed.
 
 Regenerate this index when adding reports; it is hand-maintained, not built.

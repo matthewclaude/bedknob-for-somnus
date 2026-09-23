@@ -466,7 +466,7 @@ nightly dial, so the steps run in this order:
 | T2-r1, T2-r2 | Press RST twice, waiting for the face each time. Wake with a fingertip tap only; no knob. | Wakes to LEFT SIDE. **Scale = Relative** both times. This is the regression check for §1.2(b). | Yes: boot banners, no `"side1"` POST. |
 | T2-z | Swipe back to RIGHT SIDE, press RST once. No knob. | Wakes to RIGHT SIDE, Scale = Relative. | Yes: boot banner. |
 | T3 (upgrade) | After publication, with the dial back on 1.0.2 as set out in step 4 of the order above: OTA to the beta. | No side picker. Same side and same Scale as before the update. | Optional: the OTA and boot lines. |
-| Close | Bed Mode → One Bed on every bench dial. | BOTH SIDES label. | Diff the pad's state at the start and end of the session. |
+| Close | Set the one dial, Bedknob #1, back to Bed Mode → One Bed. | BOTH SIDES label. | Diff the pad's state at the start and end of the session. |
 
 T1 and T2 both reboot twice, as the task requires. T4 reuses the T1 device
 because a device that was factory-reset and has never had Scale tapped is
