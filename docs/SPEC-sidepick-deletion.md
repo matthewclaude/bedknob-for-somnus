@@ -440,6 +440,21 @@ button (section 9, Q2). NVS survives any reset, so a power cycle with the
 cell disconnected would prove nothing more. On the battery SKU, unplugging
 USB alone does not reboot it (it keeps running on the cell).
 
+**Order of the session.** There is exactly one dial, and it is the owner's
+nightly dial, so the steps run in this order:
+1. Wire-flash the candidate with `idf.py flash`. That writes only the
+   bootloader, partition table, OTA data and app, so the dial's settings
+   are kept until T1's factory reset.
+2. Run T1, T1-r, T4, T4-r, T2, T2-a, T2-r and T2-z, then Close.
+3. Set the dial up again for nightly use (Wi-Fi, timezone, pad), since the
+   factory resets wiped these.
+4. T3 runs only after 1.0.3-beta.1 is published, as with 1.0.2-beta.1's OTA
+   bench. First put the dial back on 1.0.2 with its settings kept: wire-flash
+   a build of the tag `somnus-v1.0.2` with `idf.py flash` (never the browser
+   flasher, which always erases settings). Confirm About shows 1.0.2. Note
+   the side and the Scale. Then turn Beta builds On and tap Check for
+   updates.
+
 | # | Steps | Observe on the dial | Serial needed? |
 |---|---|---|---|
 | T1 | Settings → Factory reset. Walk onboarding (welcome, Wi-Fi, pad). Bed Mode stays One Bed. | No side picker. Lands on the dial face labelled BOTH SIDES. Scale = Relative. | Yes: `sb_face: no key -> default` proves a genuinely empty `"ui"` namespace. Also confirm the router-up line and no panic. |
@@ -450,7 +465,7 @@ USB alone does not reboot it (it keeps running on the cell).
 | T2-a | Leave the dial on LEFT SIDE (so `"zone"` was written). | | |
 | T2-r1, T2-r2 | Press RST twice, waiting for the face each time. Wake with a fingertip tap only; no knob. | Wakes to LEFT SIDE. **Scale = Relative** both times. This is the regression check for §1.2(b). | Yes: boot banners, no `"side1"` POST. |
 | T2-z | Swipe back to RIGHT SIDE, press RST once. No knob. | Wakes to RIGHT SIDE, Scale = Relative. | Yes: boot banner. |
-| T3 (upgrade) | The owner's daily dial on 1.0.2, Scale as they use it: OTA to the beta. | No side picker. Same side and same Scale as before the update. | Optional: the OTA and boot lines. |
+| T3 (upgrade) | After publication, with the dial back on 1.0.2 as set out in step 4 of the order above: OTA to the beta. | No side picker. Same side and same Scale as before the update. | Optional: the OTA and boot lines. |
 | Close | Bed Mode → One Bed on every bench dial. | BOTH SIDES label. | Diff the pad's state at the start and end of the session. |
 
 T1 and T2 both reboot twice, as the task requires. T4 reuses the T1 device
@@ -489,9 +504,9 @@ key is now seeded alongside the first "zone" write in
 dial_state_set_ui_zone instead of by the side picker.
 ```
 
-(If the owner rules the latent fix out of scope under Open question 1, drop
-the "Also fixed" paragraph. §1.3 is still required for the deletion
-itself.)
+(The owner kept the latent fix in scope (section 9, Q1), so the "Also
+fixed" paragraph stays. §1.3 would be required for the deletion itself
+either way.)
 
 ---
 
