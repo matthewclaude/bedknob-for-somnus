@@ -236,6 +236,18 @@ the bezel wherever that string already did.
 
 ## 8. README
 
+**Landed early.** Both rewordings below were pulled forward and committed
+in the docs commit "docs: README - ask Somnus support to enable the Local
+API before flashing (pulled forward from SPEC-local-api-hint)", ahead of the
+code: `README.md` (the requirements bullet) and `firmware/dial-idf/README.md`
+(the troubleshooting entry). The 1.0.4-beta.1 code change therefore no
+longer includes any README change. The items below are kept as the record
+of what was asked for; line numbers are at `335b8af`.
+
+When the Somnus app ships a Local API switch (§1), both READMEs go stale
+together with the hint's second line, and all three are reworded in that
+later beta.
+
 Two places, both to **reword** (no replacement strings dictated here):
 
 - `README.md:39-43` — the requirements bullet says that if the pad does not
@@ -249,9 +261,10 @@ Two places, both to **reword** (no replacement strings dictated here):
   question and to name Somnus support as the way to turn the API on. Keep
   the `curl` quick test.
 
-Both rewordings go in the same code commit as the change. They count as
-part of the one change, not a second one. When the app switch ships (§1), both
-are reworded again along with the hint.
+The earlier plan to put both rewordings in the code commit is superseded:
+they landed early in the docs commit named above, so the code commit does
+not touch either README. When the app switch ships (§1), both are reworded
+again along with the hint.
 
 ## 9. Draft CHANGELOG section (for the release commit; not in `CHANGELOG.md` yet)
 

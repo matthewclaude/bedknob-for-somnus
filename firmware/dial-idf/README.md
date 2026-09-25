@@ -208,14 +208,16 @@ device itself:
   **2.4 GHz only** — it cannot join 5 GHz-only networks. If your router
   broadcasts both bands under one SSID, make sure the 2.4 GHz radio is
   actually enabled.
-- **The dial is stuck on "Connecting…" / "Pad unreachable".** Those screens
+- **The dial is stuck on "Connecting…" / "Pad unreachable".** If the pad
+  never answers, the usual cause is that its **Local API is not enabled**.
+  Today only Somnus support can turn it on (there is no switch in the Somnus
+  app yet), so ask them first. `curl http://<pad-ip>:8080/api/state` from a
+  laptop is the quick test: no answer means the Local API is still off. Also
+  confirm the pad is on the same 2.4 GHz network as the dial. Those screens
   show the actual error and a retry countdown; the dial keeps retrying with
   backoff and rescans the subnet every few minutes. Menu → Wi-Fi → Change
   network, Menu → Update → Check for updates and Settings → Factory reset
-  all work while the dial is in this state. If the pad never answers,
-  confirm its local API is enabled and that it is on the same 2.4 GHz
-  network; `curl http://<pad-ip>:8080/api/state` from a laptop is the quick
-  test.
+  all work while the dial is in this state.
 - **Factory reset (from the dial):** Menu → Settings → Factory reset, tap
   twice within 3 seconds to confirm. This erases all stored Wi-Fi
   credentials, the pad address, timezone and preferences, and restarts the

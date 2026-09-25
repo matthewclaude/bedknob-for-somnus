@@ -36,11 +36,13 @@ and keeps everything else that made the original good. See
   will not work with this board (it negotiates plug orientation itself,
   which defeats the board's two-chip USB switch), and a charge-only cable
   powers the board while enumerating nothing.
-- **A Somnus Pad** on the same 2.4 GHz Wi-Fi network, with its **local API
-  enabled**. No Somnus account is involved. If your pad does not answer on
-  `http://<pad-ip>:8080/api/state`, the local API is off at the pad's
-  firmware level — that is a question for Somnus, not something the dial
-  can work around.
+- **A Somnus Pad** on the same 2.4 GHz Wi-Fi network, with its **Local API
+  enabled — ask Somnus support to turn it on, and do that first, before you
+  flash.** Today support is the only way to enable it; there is no switch in
+  the Somnus app yet (Somnus has said one is planned). The dial cannot work
+  until it is on. No Somnus account is involved. To confirm it is on,
+  `curl http://<pad-ip>:8080/api/state` from a laptop should answer with the
+  pad's state; if it does not, the Local API is still off.
 
 One dial does the whole job. In One Bed mode it controls the bed; in Dual
 Sides mode it controls both sides — swipe between the LEFT SIDE and RIGHT
