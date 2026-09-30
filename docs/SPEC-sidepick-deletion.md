@@ -468,6 +468,14 @@ nightly dial, so the steps run in this order:
 | T3 (upgrade) | After publication, with the dial back on 1.0.2 as set out in step 4 of the order above: OTA to the beta. | No side picker. Same side and same Scale as before the update. | Optional: the OTA and boot lines. |
 | Close | Set the one dial, Bedknob #1, back to Bed Mode → One Bed. | BOTH SIDES label. | Diff the pad's state at the start and end of the session. |
 
+**Note (2026-09-30, after the bench).** The T1 and T2 rows expect
+`sb_face: no key -> default` after a factory reset. That line cannot
+appear. After an NVS erase the `"ui"` namespace does not exist, so
+`dial_state_restore_prefs` returns at its `nvs_open(NVS_NS, NVS_READONLY,
+&h)` check (`dial_state.c:186`) before it logs anything. The proof of an
+empty namespace is the `factory reset requested — erasing NVS` line
+followed by a boot with no `sb_face` line at all.
+
 T1 and T2 both reboot twice, as the task requires. T4 reuses the T1 device
 because a device that was factory-reset and has never had Scale tapped is
 exactly the state that exposes the latent path.
