@@ -114,7 +114,9 @@ static bool do_request(const char *path, esp_http_client_method_t method,
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        set_error("http error: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "http error: %s", esp_err_to_name(err));
+        // User-facing hint for the Pad unreachable screen; the raw esp_err name goes to the serial log only.
+        set_error("%s", "Is the pad's Local API enabled?\nSomnus support can turn it on");
         free(acc.buf);
         return false;
     }

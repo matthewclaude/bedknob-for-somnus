@@ -851,7 +851,7 @@ static void scenario_pad_degraded_real(void)
     dial_state_set_pad_url("http://unreachable.invalid:8080");
     app_state_t *st = sim_state_ptr();
     snprintf(st->phase_err, sizeof(st->phase_err),
-             "Somnus pad at 192.168.1.100:8080 not responding (HTTP -1)");
+             "Is the pad's Local API enabled?\nSomnus support can turn it on");
     st->retry_in_s = 27;
     st->generation++;
     ui_router_go(SCR_CONNECTING, NULL, LV_SCR_LOAD_ANIM_NONE);
