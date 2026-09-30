@@ -22,6 +22,16 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.4-beta.1 — 2026-09-30 (beta)
+
+When the dial cannot reach your pad, the "Pad unreachable" screen now asks
+"Is the pad's Local API enabled?" and says Somnus support can turn it on,
+instead of showing a technical error code. The Local API has to be on for
+the dial to work, and today it is turned on by asking Somnus support.
+Nothing else about connecting, retrying or controlling the pad changes.
+
+Internal: the raw network error still goes to the serial log.
+
 ## 1.0.3-beta.1 — 2026-09-30 (beta)
 
 A new dial in Dual Sides mode no longer stops to ask "Which side of the
