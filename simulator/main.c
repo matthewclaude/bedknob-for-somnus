@@ -839,12 +839,12 @@ static void scenario_pad_discovery(void)
 }
 
 // PH_DEGRADED with a REALISTIC reason, not scenario_pad_unreachable's short
-// "(simulated)" one: the subtitle then wraps to four lines (the echoed
-// dial_somnus error, "Retrying in 27s", "Swipe left for menu") -- the
-// tallest case scr_connecting.c's block has to centre (audit §13). Same
-// "unreachable" URL trick to get the phase, then the reason and countdown
-// overwritten with what main.c's supervisor would actually publish. The
-// address is the pad API spec's example, not any real network.
+// "(simulated)" one: the subtitle is then four lines (dial_somnus's two-line
+// Local API hint, "Retrying in 27s", "Swipe left for menu"; none of them
+// wraps) -- still the tallest case scr_connecting.c's block has to centre
+// (audit §13). Same "unreachable" URL trick to get the phase, then the
+// reason and countdown overwritten with what main.c's supervisor would
+// actually publish. The hint carries no address, so no network is named.
 static void scenario_pad_degraded_real(void)
 {
     apply_baseline();

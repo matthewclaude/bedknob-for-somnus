@@ -1,9 +1,11 @@
 # SPEC — Plain-language hint when the pad does not answer (1.0.4-beta.1)
 
-Status: spec only, written 2026-09-25 against `335b8af` (`PROJECT_VER`
-1.0.2, tree clean; the 1.0.3-beta.1 change `fe5b139` is committed but not
-yet tagged). No firmware, simulator or README changes in this document's
-commit.
+Status: written 2026-09-25 against `335b8af` (`PROJECT_VER` 1.0.2). Code
+committed as `5e9bc69`. The §10 bench ran on 2026-09-30
+(`docs/REPORT-apihint-bench.md`): **PASS**, with one correction to this
+spec. On a dial that already holds pad state, the steady-state path keeps
+the dial face with its staleness dot and never shows the hint; §4 and §10
+step 3 are corrected below.
 
 Scope rule in force: no new features, one change per beta, spec on disk
 before code, hardware test before tag. The one change in 1.0.4-beta.1 is
@@ -115,9 +117,9 @@ older SPEC/REPORT quotes and are not code):
 
 | Where | Path | Gets the hint? |
 |---|---|---|
-| `main/main.c:960` | `CMD_PAD_SETTINGS_CHANGED`: user saved a Pad Address / Bed Mode, re-probe failed | Yes, if the new address does not answer |
-| `main/main.c:1065` | pre-READY connect loop (§2 step 5) | Yes — the case this spec is for |
-| `main/main.c:1418` | steady state: 3 consecutive poll failures | Yes, if the pad stops answering |
+| `main/main.c:960` | `CMD_PAD_SETTINGS_CHANGED`: user saved a Pad Address / Bed Mode, re-probe failed | Set, but not shown: a steady-state case (see below) |
+| `main/main.c:1065` | pre-READY connect loop (§2 step 5) | Yes — the case this spec is for, and the only one that shows it |
+| `main/main.c:1418` | steady state: 3 consecutive poll failures | Set, but not shown: the dial face keeps its staleness dot (see below) |
 | `components/dial_somnus/dial_somnus.c:42`, `.h:144`, `.h:107`, `.c:85` | definition, declaration, comments | — |
 | `components/dial_ui/scr_connecting.c:100` | comment | — |
 
@@ -134,9 +136,37 @@ older SPEC/REPORT quotes and are not code):
 | `simulator/main.c:240-244`, `:832`, `:853` | baseline reset; discovery and degraded-real scenarios |
 | `simulator/sim_state.c:223`, `:285` | sim's own `"pad unreachable (simulated)"` and setter |
 
+**Where the hint is actually shown (corrected after the 2026-09-30 bench;
+line numbers at `5e9bc69`, unchanged from `335b8af` in these files).**
+Setting `phase_err` is not the same as showing it. `nav_policy`
+(`main.c:171`) routes PH_DEGRADED together with PH_READY and PH_WIFI_LOST
+(`main.c:319-321`), and once the dial holds device state
+(`if (st->have_state)`, `main.c:340`) it returns the dial face
+(`main.c:425`). `scr_dial.c:731` then lights the staleness dot for any
+phase other than PH_READY. Only with no device state does the route fall
+through to `SCR_ERROR` (`main.c:454`), which is where
+`scr_connecting.c` renders the hint.
+
+- `main.c:1418` runs in the steady-state loop, after the first successful
+  poll has set `have_state` (`main.c:498`). The dial stays on its face with
+  the staleness dot; the hint is never displayed. This is the existing
+  silent-staleness design and this change leaves it alone.
+- `main.c:960` is the same case. `CMD_PAD_SETTINGS_CHANGED` reaches
+  `handle_immediate_cmd` only from the steady-state loop (`main.c:1126`,
+  `:1176`); before READY, `backoff_wait()` intercepts it and cuts the wait
+  short instead (`main.c:801-802`), and the retry goes through `:1065`. So a
+  Pad Address saved on a running dial that does not answer gives the
+  staleness dot, not the hint.
+- `main.c:1065` is the only path that shows the hint: the dial has had no
+  pad state since boot, either a fresh device or a dial rebooted while the
+  pad is down. (One narrow exception: if the very first poll after connect
+  fails, `main.c:1099`, the dial reaches READY without device state, and a
+  later `:1418` would show the hint. Not seen on the bench.)
+
 **A pad that was working and then drops off** (power cut, Wi-Fi drop on the
-pad side, a DHCP move) also gets the hint through `main.c:1418` or `:1065`
-after a reboot. **This is acceptable.** The hint is a question, not a claim,
+pad side, a DHCP move) therefore shows the staleness dot while the dial
+keeps running, and gets the hint only through `main.c:1065` after a reboot.
+**That is acceptable.** The hint is a question, not a claim,
 and "is the API enabled?" is still the right first thing to check. The
 headline still says what happened. The weak case is a pad whose API is on
 but which is powered off or off the network: the question sends the user to
@@ -297,11 +327,13 @@ Steps (serial captured with the cat-based logger into `bench-logs/`):
 1. Flash the 1.0.4-beta.1 candidate. Confirm READY on the live pad.
 2. Owner unplugs the pad. Wake the dial and keep it awake (the 60 s screen
    timeout would otherwise send it to STANDBY).
-3. After 3 failed polls (`main.c:1418`, 10 s cadence): the screen shows
-   "Pad unreachable" / hint line 1 / hint line 2 / "Retrying..." / "Swipe
-   left for menu". The serial shows `dial_somnus: http error: ESP_ERR_HTTP_...`.
-   Photograph the screen: both hint lines unwrapped, no clipping at the
-   bezel, headline and block not overlapping.
+3. After 3 failed polls (`main.c:1418`, 10 s cadence): the serial shows
+   `dial_somnus: http error: ESP_ERR_HTTP_...` followed by the hint. The
+   screen stays on the dial face with the yellow staleness dot, because the
+   dial already holds pad state (§4). *Corrected after the 2026-09-30 bench:
+   this step first expected the hint screen here.* The hint screen, and its
+   photograph (both hint lines unwrapped, no clipping at the bezel,
+   headline and block not overlapping), belong to step 4.
 4. Reboot the dial with the pad still unplugged: the pre-READY path
    (`main.c:1065`) shows the hint with a "Retrying in Ns" countdown
    (4 lines). Photograph it. A discovery scan runs. Note the one-tick
@@ -315,9 +347,14 @@ Steps (serial captured with the cat-based logger into `bench-logs/`):
 The real trigger, a pad with its Local API turned off, cannot be
 reproduced here: only Somnus support can switch it. The claim that such a pad
 refuses :8080 at the transport level, and does not answer with an HTTP
-status, rests on the reporting user's screen and is taken as given. If a
-pad with the API off ever turns out to answer with a status code, it would
-show `"pad returned HTTP %d"` and not the hint. That is outside this change.
+status, is now supported twice. The reporting user's dial (2026-09-25)
+showed `ESP_ERR_HTTP_CONNECT` while that pad's Local API was known to be off
+(no one had yet asked Somnus support to enable it), and the 2026-09-30 bench
+showed the same transport-level error from an unplugged pad, not an HTTP
+status. It closes fully when that user's API is enabled and the same dial
+connects. If a pad with the API off ever turns out to answer with a status
+code, it would show `"pad returned HTTP %d"` and not the hint. That is
+outside this change.
 
 ## 11. Sequencing
 
