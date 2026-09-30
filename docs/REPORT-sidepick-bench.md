@@ -2,7 +2,7 @@
 
 Date: 2026-09-30. Written from the Cowork session that ran the bench with the owner at the dial.
 
-**Verdict: PASS (T1, T1-r1, T1-r2, T4, T4-r1, T4-r2, T2, T2-a, T2-r1, T2-r2, T2-z, Close), with the deviations listed below. T3 (OTA from 1.0.2) is still open and can only run after 1.0.3-beta.1 is published.**
+**Verdict: PASS (T1, T1-r1, T1-r2, T4, T4-r1, T4-r2, T2, T2-a, T2-r1, T2-r2, T2-z, Close, T3), with the deviations listed below. T3 was run on 2026-09-30 after somnus-v1.0.3-beta.1 was published.**
 
 ## Setup
 - Candidate: HEAD 042840b (includes fe5b139), wire-flashed with `idf.py flash` to /dev/cu.usbmodem83401. See docs/REPORT-sidepick-bench-flash.md for the gate, build (0 warnings, 0 errors) and flash output.
@@ -20,6 +20,7 @@ Date: 2026-09-30. Written from the Cowork session that ran the bench with the ow
 - T2-a: left on LEFT SIDE. T2-r1: LEFT SIDE, −10 (attach6, no POST). T2-r2: LEFT SIDE, −10 (attach7, no POST).
 - T2-z: swiped to RIGHT SIDE, RST: RIGHT SIDE, −10 (attach8, no POST).
 - Close: `zone mode set to single (One Bed)` (attach8). Capture stopped.
+- T3 (OTA upgrade): the published somnus-v1.0.2 app (asset SHA-256 58e10172…cff9, matching the API digest) was written to 0x20000, with otadata at 0x19000 and NVS untouched (docs/REPORT-sidepick-t3-flash.md). The dial came back in One Bed with its pad and Wi-Fi kept. After an RST, the baseline was About 1.0.2, BOTH SIDES, −10 (t3-attach2: `App version: 1.0.2`). With Beta builds On, Check for updates gave `ota: latest 1.0.3-beta.1, running 1.0.2 -- update available`. The image was written to ota_1 at 0x420000 (`OTA image written and verified`), followed by a SW reset, `Loaded app from partition at offset 0x420000`, `App version: 1.0.3-beta.1`, `boot pending-verify: true (rollback armed)`, One Bed, and `app marked valid; rollback cancelled`. The owner saw no side picker, BOTH SIDES, −10, and About 1.0.3-beta.1: same side and same Scale as before the update. No POST, panic or error lines.
 
 ## Pad state, before and after
 - Before: side0 off, target 17.0, current 23.53; side1 off, target 17.0, current 23.33; error false.
@@ -36,5 +37,5 @@ Date: 2026-09-30. Written from the Cowork session that ran the bench with the ow
 7. The image identifies as 1.0.2, not 1.0.3-beta.1 (the version bump comes with the release commit).
 
 ## Not verified
-- T3: OTA from a settings-kept 1.0.2 to the published 1.0.3-beta.1, keeping the same side and Scale. This runs after publication.
+- T3 was run in One Bed only. An OTA from a Dual Sides dial was not exercised.
 - The Settings Scale row text. Scale was read from the face number rather than the row.
