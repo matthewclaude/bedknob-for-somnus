@@ -22,6 +22,22 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.3-beta.1 — 2026-09-30 (beta)
+
+A new dial in Dual Sides mode no longer stops to ask "Which side of the
+bed?" after it first reaches the pad. It opens on the right side, as it
+already did for anyone who never saw that question, and one swipe shows
+the left. The dial still remembers the last side you looked at.
+
+Also fixed: switching an existing dial from One Bed to Dual Sides and then
+swiping to the other side could change Scale from Relative to Absolute on
+the next restart, even though you never changed it. Scale now stays where
+you left it.
+
+Internal: SCR_SIDEPICK and the side_picked flag are removed; the "relmode"
+key is now seeded alongside the first "zone" write in
+dial_state_set_ui_zone instead of by the side picker.
+
 ## 1.0.2 — 2026-09-17
 
 While the screen is off and the dial has gone to standby, it now asks the
