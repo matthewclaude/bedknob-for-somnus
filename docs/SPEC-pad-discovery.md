@@ -189,14 +189,46 @@ at the end of the Two-pass section for the numbers that actually ship.
 
 **Subnet size cap:** tighter than Swift's `/22` (1024 hosts) cap, and
 deliberately so — Swift's number assumed 40-way concurrency; this scan runs
-at 4-way, roughly a tenth of that. A `/22` here would be ~1024/4*0.6s ≈ 153
-seconds (2.5 minutes) — not tolerable at any progress-screen quality. **Cap
-the scan at 256 hosts (`/24` or tighter).** Looser than that (`/23`, `/22`,
-`/16`, …) is rare on a consumer router in the first place; skip the scan
-entirely rather than attempt it, same as Swift does for its own cap, just at
-a number sized to this hardware's real concurrency instead of copied from
-the reference. **Not reopened by either refinement below**, per the
-instructions — both operate strictly within this cap and this concurrency.
+at 4-way, roughly a tenth of that. A whole `/22` here would be ~1024/4*0.6s ≈
+153 seconds (2.5 minutes) — not tolerable at any progress-screen quality.
+**Cap the scan at two `/24` blocks (512 candidate slots).**
+
+- **`/24` or tighter:** the whole subnet, exactly as below (tiers 0–4 of
+  Refinement 1, at most 254 hosts).
+- **Wider than `/24` (`/23`, `/22`, `/16`, `/8`, …): never skipped.** The
+  2026-09-01 version skipped the scan here, on the assumption that such
+  subnets are rare on consumer routers. They are not: **eero**'s default LAN
+  is `192.168.4.0/22` (netmask `255.255.252.0`, hosts `192.168.4.1`–
+  `192.168.7.254`), and a real user's pad at `192.168.4.100` had to be typed
+  in by hand (2026-10-04). Instead the scan covers at most two `/24` blocks,
+  whatever the netmask:
+  1. the subnet's **first** `/24` (`network & 255.255.255.0`, e.g.
+     `192.168.4.0/24` on eero) — routers hand out addresses from the bottom
+     of the range;
+  2. the `/24` containing the **dial's own address**, if that is a
+     different block (e.g. `192.168.5.0/24` for a dial at `192.168.5.20`).
+
+  Order: tier 0 (the stored pad address ± 5, as below, kept only where it
+  falls inside the real subnet *and* one of the two blocks), then the first
+  block's `.100`–`.150` and `.1`–`.20`, then the dial's own ± 10, then the
+  rest of the first block ascending, then the rest of the dial's block
+  ascending. The pool-start tier leads here (on a `/24` the dial's own
+  neighbourhood leads) because on a wide subnet the dial may sit in a
+  different block from where the router starts leasing.
+
+  The real subnet's network and broadcast addresses and the dial's own
+  address are never probed; a block's interior `.0`/`.255` are, when they
+  are ordinary hosts of the wider subnet (e.g. `192.168.4.255` on a `/22`).
+  At most 255 + 255 = 510 candidates, so the worst case doubles to
+  `ceil(510/4) × (0.3 + 0.6)s` ≈ 115 s — accepted because the likely
+  addresses sit in the first 91 candidates (`ceil(91/4) × 0.3s` ≈ 7 s into
+  pass 1), and a scan that finds the pad slowly beats one that never runs.
+  A pad outside both blocks (e.g. `192.168.6.x` on eero) is not found by the
+  scan; the user can still enter its address by hand.
+
+The scan log names what it covers, e.g. `scan: subnet 192.168.4.0/22 wider
+than /24, scanning blocks 192.168.4.0/24 and 192.168.5.0/24`. Cooldown, port,
+timeouts, concurrency and response validation are unchanged by the cap.
 
 Derive the actual subnet from the live interface, not an assumed `/24`:
 `dial_net.c`'s `dial_net_ip()` (`dial_wifi.c:238`) already calls

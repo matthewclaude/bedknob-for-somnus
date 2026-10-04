@@ -88,9 +88,10 @@ non-reentrant, and the scan needs several probes in flight. Each probe is its
 own short-lived `esp_http_client`, four at a time, against port 8080 on an
 ordered candidate list (the failed address's neighbourhood, the dial's own
 DHCP neighbourhood, the conventional static and DHCP ranges, then everything
-else); `/24` or tighter only, 256 hosts max. Pass 1 uses a 300 ms timeout;
+else); a subnet wider than `/24` scans two `/24` blocks only (its first
+block and the dial's own), 512 candidates max. Pass 1 uses a 300 ms timeout;
 only if that finds nothing does pass 2 sweep again at 600 ms, so the worst
-case is about 57.6 s. A hit is validated by decoding the response as the
+case is about 57.6 s on a `/24` and about 115 s on a wider subnet. A hit is validated by decoding the response as the
 pad's `/api/state` JSON, never by trusting a 200 alone. The first failure
 after boot always scans; after that a 5-minute cooldown keeps an unreachable
 pad from having its subnet swept on every retry. A found address is

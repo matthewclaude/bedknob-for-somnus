@@ -52,5 +52,6 @@ void dial_pad_discovery_mark_attempted(void);
 // by this call. On a match, writes "http://<ip>:8080" into `out_url`
 // (must be at least DIAL_PAD_URL_MAX_LEN+1 bytes) and returns true. Blocks
 // the calling task for the duration of the scan -- seconds in the common
-// case, up to ~57.6s worst case if nothing is found by either pass.
+// case, up to ~57.6s worst case on a /24 if nothing is found by either pass
+// (~115s on a subnet wider than /24, which scans two /24 blocks).
 bool dial_pad_discovery_scan(const char *failed_url, char *out_url, size_t out_sz);

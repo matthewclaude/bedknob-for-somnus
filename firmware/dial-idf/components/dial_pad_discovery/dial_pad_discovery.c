@@ -26,7 +26,10 @@ static const char *TAG = "pad_discovery";
 #define TIMEOUT_PASS1_MS     300    // measured against the real pad
                                      // (cold ttfb 61-189ms) x ~1.6
 #define TIMEOUT_PASS2_MS     600
-#define MAX_HOSTS            256    // cap: /24 or tighter only
+#define BLOCK_HOSTS          256    // one /24 block
+#define MAX_BLOCKS           2      // wider than /24: subnet's first /24 +
+                                     // the dial's own /24, never more
+#define MAX_HOSTS            (BLOCK_HOSTS * MAX_BLOCKS)   // 512
 #define SCAN_COOLDOWN_US     (5LL * 60 * 1000000)   // 5 minutes
 #define PROBE_RESP_BUF       1024   // the pad's /api/state body is small
 
@@ -88,67 +91,122 @@ typedef struct {
     uint32_t *out;
     int       cap;
     int       count;
-    bool      seen[MAX_HOSTS];
+    uint32_t  network;                 // the REAL subnet's bounds, so a
+    uint32_t  broadcast;               // wide subnet's interior .0/.255 stay
+    uint32_t  self_ip;                 // probeable but its own never are
+    uint32_t  block_base[MAX_BLOCKS];  // each spans base .. base+255
+    int       nblocks;
+    bool      seen[MAX_HOSTS];         // BLOCK_HOSTS slots per block
 } builder_t;
 
 static uint32_t clampu(uint32_t v, uint32_t lo, uint32_t hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-static void add_ip(builder_t *b, uint32_t ip, uint32_t network, uint32_t broadcast, uint32_t self_ip)
+static void add_ip(builder_t *b, uint32_t ip)
 {
-    if (ip <= network || ip >= broadcast) return;          // network/broadcast/out-of-range
-    uint32_t offset = ip - network;
-    if (offset >= (uint32_t)MAX_HOSTS) return;
-    if (b->seen[offset]) return;
-    b->seen[offset] = true;
-    if (ip == self_ip) return;                              // never probe ourselves
+    if (ip <= b->network || ip >= b->broadcast) return;    // network/broadcast/out-of-range
+    int slot = -1;
+    for (int k = 0; k < b->nblocks; k++) {
+        uint32_t offset = ip - b->block_base[k];
+        if (ip >= b->block_base[k] && offset < (uint32_t)BLOCK_HOSTS) { slot = k * BLOCK_HOSTS + (int)offset; break; }
+    }
+    if (slot < 0) return;                                   // outside the scanned block(s)
+    if (b->seen[slot]) return;
+    b->seen[slot] = true;
+    if (ip == b->self_ip) return;                           // never probe ourselves
     if (b->count < b->cap) b->out[b->count++] = ip;
 }
 
-static void add_range(builder_t *b, uint32_t lo, uint32_t hi, uint32_t network, uint32_t broadcast, uint32_t self_ip)
+static void add_range(builder_t *b, uint32_t lo, uint32_t hi)
 {
-    for (uint32_t ip = lo; ip <= hi; ip++) add_ip(b, ip, network, broadcast, self_ip);
+    if (lo > hi) return;
+    for (uint32_t ip = lo; ; ip++) {           // no ip <= hi test: hi may be 0xFFFFFFFF
+        add_ip(b, ip);
+        if (ip == hi) break;
+    }
 }
 
-// Returns candidate count, or -1 if the subnet is looser than /24 (skip the
-// scan entirely rather than attempt an intolerably long sweep -- spec's
-// "Subnet size cap").
+// Returns candidate count, or -1 if the subnet has no host addresses at all.
+// /24 or tighter: the whole subnet, tiers 0-4 exactly as before. Wider than
+// /24: never skipped, but capped at two /24 blocks (spec's "Subnet size
+// cap") -- the subnet's first /24 (routers lease from the bottom of the
+// range; e.g. eero's default 192.168.4.0/22 -> 192.168.4.0/24) and the /24
+// holding the dial's own address, if different. Writes the scanned block
+// bases to blocks_out (MAX_BLOCKS entries) and their count to *nblocks_out.
 static int build_candidate_list(uint32_t *out, int cap, uint32_t self_ip, uint32_t netmask,
-                                 bool have_persisted, uint32_t persisted_ip)
+                                 bool have_persisted, uint32_t persisted_ip,
+                                 uint32_t *blocks_out, int *nblocks_out)
 {
     uint32_t network   = self_ip & netmask;
     uint32_t host_span = ~netmask;              // e.g. 255 for a /24
     uint32_t broadcast = network | host_span;
 
-    if (host_span == 0 || host_span > 255) return -1;
+    *nblocks_out = 0;
+    if (host_span == 0) return -1;
 
-    builder_t b = { .out = out, .cap = cap, .count = 0 };
-    memset(b.seen, 0, sizeof(b.seen));
+    static builder_t b;                         // 512-entry seen table; one scan at a time
+    memset(&b, 0, sizeof(b));
+    b.out = out;
+    b.cap = cap;
+    b.network = network;
+    b.broadcast = broadcast;
+    b.self_ip = self_ip;
+
+    bool wide = host_span > 255;
+    if (!wide) {
+        b.block_base[b.nblocks++] = network;   // whole subnet fits one block
+    } else {
+        b.block_base[b.nblocks++] = network & 0xFFFFFF00u;
+        if ((self_ip & 0xFFFFFF00u) != b.block_base[0])
+            b.block_base[b.nblocks++] = self_ip & 0xFFFFFF00u;
+    }
+    for (int k = 0; k < b.nblocks; k++) blocks_out[k] = b.block_base[k];
+    *nblocks_out = b.nblocks;
 
     // Tier 0 (re-scan only): the address that just failed, + its immediate
     // neighbors. Skipped entirely on a fresh device (no real prior address
     // to hypothesize from) -- callers only pass have_persisted=true when
-    // the failed URL parsed as a real, non-default IPv4 address.
+    // the failed URL parsed as a real, non-default IPv4 address. On a wide
+    // subnet, any of these outside the scanned block(s) is dropped by add_ip.
     if (have_persisted && persisted_ip > network && persisted_ip < broadcast) {
-        add_ip(&b, persisted_ip, network, broadcast, self_ip);
+        add_ip(&b, persisted_ip);
         add_range(&b, clampu(persisted_ip - 5, network + 1, broadcast - 1),
-                      clampu(persisted_ip + 5, network + 1, broadcast - 1),
-                  network, broadcast, self_ip);
+                      clampu(persisted_ip + 5, network + 1, broadcast - 1));
     }
 
-    // Tier 1: the dial's own DHCP neighborhood.
+    if (!wide) {
+        // Tier 1: the dial's own DHCP neighborhood.
+        add_range(&b, clampu(self_ip - 10, network + 1, broadcast - 1),
+                      clampu(self_ip + 10, network + 1, broadcast - 1));
+
+        // Tier 2: conventional low/static range.
+        add_range(&b, network + 1, clampu(network + 20, network + 1, broadcast - 1));
+
+        // Tier 3: conventional DHCP pool start.
+        if (network + 100 < broadcast)
+            add_range(&b, network + 100, clampu(network + 150, network + 100, broadcast - 1));
+
+        // Tier 4: everything else, ascending.
+        add_range(&b, network + 1, broadcast - 1);
+        return b.count;
+    }
+
+    // Wide subnet. Block 0's base is the real network address, so its .1
+    // onward are hosts; add_ip keeps every address inside the real subnet.
+    uint32_t first = b.block_base[0];
+
+    // Tier 3 then tier 2 of the first block: the pool start, then the low/
+    // static range -- the bottom of the range is where the router leases.
+    add_range(&b, first + 100, first + 150);
+    add_range(&b, first + 1, first + 20);
+
+    // Tier 1: the dial's own neighborhood, inside whichever block(s) it
+    // touches (its own block, or the first one if that is its own).
     add_range(&b, clampu(self_ip - 10, network + 1, broadcast - 1),
-                  clampu(self_ip + 10, network + 1, broadcast - 1),
-              network, broadcast, self_ip);
+                  clampu(self_ip + 10, network + 1, broadcast - 1));
 
-    // Tier 2: conventional low/static range.
-    add_range(&b, network + 1, clampu(network + 20, network + 1, broadcast - 1), network, broadcast, self_ip);
-
-    // Tier 3: conventional DHCP pool start.
-    if (network + 100 < broadcast)
-        add_range(&b, network + 100, clampu(network + 150, network + 100, broadcast - 1), network, broadcast, self_ip);
-
-    // Tier 4: everything else, ascending.
-    add_range(&b, network + 1, broadcast - 1, network, broadcast, self_ip);
+    // Tier 4: the rest of each block, ascending, first block first.
+    for (int k = 0; k < b.nblocks; k++)
+        add_range(&b, b.block_base[k], b.block_base[k] + (BLOCK_HOSTS - 1));
 
     return b.count;
 }
@@ -381,10 +439,35 @@ bool dial_pad_discovery_scan(const char *failed_url, char *out_url, size_t out_s
                            strcmp(failed_url, DIAL_PAD_DEFAULT_BASE_URL) != 0;
 
     static uint32_t s_candidates[MAX_HOSTS];   // one scan at a time; not reentrant
-    int n = build_candidate_list(s_candidates, MAX_HOSTS, self_ip, netmask, have_persisted, persisted_ip);
+    uint32_t blocks[MAX_BLOCKS] = { 0 };
+    int nblocks;
+    int n = build_candidate_list(s_candidates, MAX_HOSTS, self_ip, netmask, have_persisted, persisted_ip,
+                                 blocks, &nblocks);
     if (n <= 0) {
-        ESP_LOGW(TAG, "scan: subnet looser than /24 (or invalid), skipping");
+        ESP_LOGW(TAG, "scan: subnet has no other host addresses, skipping");
         return false;
+    }
+
+    uint32_t network = self_ip & netmask;
+    int prefix = __builtin_popcount(netmask);
+    if (prefix >= 24) {
+        ESP_LOGI(TAG, "scan: subnet %u.%u.%u.%u/%d, scanning all of it",
+                 (unsigned)(network >> 24) & 0xFF, (unsigned)(network >> 16) & 0xFF,
+                 (unsigned)(network >> 8) & 0xFF, (unsigned)network & 0xFF, prefix);
+    } else if (nblocks == 1) {
+        ESP_LOGI(TAG, "scan: subnet %u.%u.%u.%u/%d wider than /24, scanning block %u.%u.%u.0/24",
+                 (unsigned)(network >> 24) & 0xFF, (unsigned)(network >> 16) & 0xFF,
+                 (unsigned)(network >> 8) & 0xFF, (unsigned)network & 0xFF, prefix,
+                 (unsigned)(blocks[0] >> 24) & 0xFF, (unsigned)(blocks[0] >> 16) & 0xFF,
+                 (unsigned)(blocks[0] >> 8) & 0xFF);
+    } else {
+        ESP_LOGI(TAG, "scan: subnet %u.%u.%u.%u/%d wider than /24, scanning blocks %u.%u.%u.0/24 and %u.%u.%u.0/24",
+                 (unsigned)(network >> 24) & 0xFF, (unsigned)(network >> 16) & 0xFF,
+                 (unsigned)(network >> 8) & 0xFF, (unsigned)network & 0xFF, prefix,
+                 (unsigned)(blocks[0] >> 24) & 0xFF, (unsigned)(blocks[0] >> 16) & 0xFF,
+                 (unsigned)(blocks[0] >> 8) & 0xFF,
+                 (unsigned)(blocks[1] >> 24) & 0xFF, (unsigned)(blocks[1] >> 16) & 0xFF,
+                 (unsigned)(blocks[1] >> 8) & 0xFF);
     }
 
     esp_log_level_t saved_levels[QUIET_TAGS_N];
