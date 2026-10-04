@@ -22,6 +22,12 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.4-beta.2 — 2026-10-04 (beta)
+
+The dial can now find your pad by itself on routers that use larger
+networks, such as eero mesh systems. Before, on those networks the dial
+gave up looking and you had to type the pad's address in by hand.
+
 ## 1.0.4-beta.1 — 2026-09-30 (beta)
 
 When the dial cannot reach your pad, the "Pad unreachable" screen now asks
