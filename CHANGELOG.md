@@ -22,6 +22,31 @@ Add the new section in the same commit that bumps `PROJECT_VER`.
 Releases marked **(beta)** are prereleases, visible only to dials with
 "Beta builds" turned on.
 
+## 1.0.4 — 2026-10-10
+
+This release brings everything from the 1.0.3 and 1.0.4 betas to dials
+on stable updates.
+
+The dial can now find your pad by itself on routers that use larger
+networks, such as eero mesh systems. Before, on those networks the dial
+gave up looking and you had to type the pad's address in by hand.
+
+When the dial cannot reach your pad, the "Pad unreachable" screen now
+asks "Is the pad's Local API enabled?" and says Somnus support can turn
+it on, instead of showing a technical error code. The Local API has to
+be on for the dial to work, and today it is turned on by asking Somnus
+support.
+
+A new dial in Dual Sides mode no longer stops to ask "Which side of the
+bed?" after it first reaches the pad. It opens on the right side, and
+one swipe shows the left. The dial still remembers the last side you
+looked at.
+
+Also fixed: switching an existing dial from One Bed to Dual Sides and
+then swiping to the other side could change Scale from Relative to
+Absolute on the next restart, even though you never changed it. Scale
+now stays where you left it.
+
 ## 1.0.4-beta.2 — 2026-10-04 (beta)
 
 The dial can now find your pad by itself on routers that use larger
