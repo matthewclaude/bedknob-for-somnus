@@ -2,7 +2,7 @@
 
 > **Not affiliated with, endorsed by, or supported by Somnus Lab or Waveshare.**
 > An independent, community-built project. Current release
-> `somnus-v1.0.2`.
+> `somnus-v1.0.4`.
 
 A note before you build: Bedknob is a free hobby project, shared as-is. It
 isn't a retail product, and there's no setup or how-to support. Bug reports

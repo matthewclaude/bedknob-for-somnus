@@ -5,7 +5,11 @@ committed as `5e9bc69`. The §10 bench ran on 2026-09-30
 (`docs/REPORT-apihint-bench.md`): **PASS**, with one correction to this
 spec. On a dial that already holds pad state, the steady-state path keeps
 the dial face with its staleness dot and never shows the hint; §4 and §10
-step 3 are corrected below.
+step 3 are corrected below. Shipped in `somnus-v1.0.4-beta.1` (release
+commit `1d01f3b`, 2026-09-30; `docs/REPORT-1.0.4-beta.1-commit.md`,
+`docs/REPORT-1.0.4-beta.1-tag-push.md`) and on stable in `somnus-v1.0.4`
+(release commit `14e9900`, 2026-10-10; `docs/REPORT-stable-discovery.md`,
+`docs/REPORT-changelog-1.0.4.md`).
 
 Scope rule in force: no new features, one change per beta, spec on disk
 before code, hardware test before tag. The one change in 1.0.4-beta.1 is

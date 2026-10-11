@@ -7,6 +7,15 @@ screen, found the real pad, went to the dial face, and re-persisted the
 address itself. Record in `docs/HARDWARE-bringup-log.md` and `V1-scope.md`
 item 1.
 
+**Amended 2026-10-11 — wide-subnet change.** On a subnet wider than /24,
+discovery now scans the subnet's first /24 plus the dial's own /24 instead
+of skipping (commit `4e46454`, `docs/REPORT-pad-discovery-wide-subnet.md`).
+Released in `somnus-v1.0.4-beta.2` (release commit `1598b27`, 2026-10-04;
+`docs/REPORT-1.0.4-beta.2-release-prep.md`) and on stable in `somnus-v1.0.4`
+(release commit `14e9900`, 2026-10-10; `docs/REPORT-stable-discovery.md`).
+Field note — 2026-10-11: a fresh setup after a dial factory reset found the
+pad on an eero 192.168.4.x network (owner report).
+
 > **As built vs. as specified — read this before citing the integration
 > section.** What shipped is the design in this document *except* the phase
 > model: the connect loop still sets `PH_SOMNUS_CONNECTING`, and the trapped-

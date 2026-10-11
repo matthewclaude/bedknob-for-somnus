@@ -5,6 +5,11 @@ Status: spec only, written 2026-09-23 against `547231f` (`somnus-v1.0.2`,
 document's commit. The owner decided on 2026-09-05 to delete the side picker
 rather than fix it; this spec covers how to delete it safely, not whether.
 Owner decisions recorded 2026-09-23 (section 9); ready for the code change.
+Code committed as `fe5b139` (`docs/REPORT-sidepick-code.md`), §7 bench PASS
+(`docs/REPORT-sidepick-bench.md`). Shipped in `somnus-v1.0.3-beta.1`
+(release commit `5a6e692`, 2026-09-30; `docs/REPORT-1.0.3-beta.1-commit.md`,
+`docs/REPORT-1.0.3-beta.1-tag-push.md`) and on stable in `somnus-v1.0.4`
+(release commit `14e9900`, 2026-10-10; `docs/REPORT-changelog-1.0.4.md`).
 
 Scope rule in force: no new features, one change per beta, spec on disk
 before code, hardware test before tag. The one change in 1.0.3-beta.1 is
