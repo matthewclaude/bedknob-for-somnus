@@ -6,8 +6,9 @@
 
 A note before you build: Bedknob is a free hobby project, shared as-is. It
 isn't a retail product, and there's no setup or how-to support. Bug reports
-are welcome: if something in the firmware is broken, open an issue with what
-you did, what you expected, and what happened.
+are welcome: if something in the firmware is broken,
+[open an issue](https://github.com/matthewclaude/bedknob-for-somnus/issues)
+with what you did, what you expected, and what happened.
 
 Turn a knob to change the temperature of your bed. This project turns a
 **Waveshare ESP32-S3 round touch-LCD knob** into a standalone bedside dial
