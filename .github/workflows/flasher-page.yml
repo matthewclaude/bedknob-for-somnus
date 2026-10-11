@@ -1,0 +1,65 @@
+# Redeploys the browser flasher PAGE only: web-flasher/index.html,
+# web-flasher/manifest.json and web-flasher/manifest-beta.json, copied to the
+# root of this repo's gh-pages branch. Run it by hand (workflow_dispatch) after
+# a page-only change on main, so the page goes live without cutting a release.
+#
+# It never carries firmware. Firmware images reach gh-pages ONLY through
+# release.yml on a somnus-v* tag (firmware/latest/ for stable, firmware/beta/
+# for beta). The guard step below fails the run if _site holds anything under
+# firmware/ or any file other than the three page files.
+#
+# keep_files: true is what preserves firmware/latest/ and firmware/beta/ on
+# gh-pages across this deploy; it is the same setting release.yml uses. Never
+# use force_orphan here: it rebuilds gh-pages from _site alone and would
+# delete every firmware image the flasher serves.
+name: flasher-page
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-page:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble Pages site (page files only)
+        run: |
+          mkdir -p _site
+          cp web-flasher/index.html web-flasher/manifest.json web-flasher/manifest-beta.json _site/
+
+      - name: Guard - page files only, nothing under firmware/
+        run: |
+          if [ -e _site/firmware ]; then
+            echo "::error::_site contains firmware/; this workflow must never deploy firmware images"
+            exit 1
+          fi
+          ACTUAL="$(cd _site && find . -mindepth 1 | sed 's|^\./||' | LC_ALL=C sort)"
+          EXPECTED="$(printf '%s\n' index.html manifest-beta.json manifest.json)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::_site must contain exactly index.html, manifest.json and manifest-beta.json"
+            echo "Found:"
+            printf '%s\n' "$ACTUAL"
+            exit 1
+          fi
+          echo "_site contents OK:"
+          printf '%s\n' "$ACTUAL"
+
+      # Same settings as release.yml's deploy-pages step. keep_files leaves
+      # firmware/latest/ and firmware/beta/ on gh-pages untouched.
+      # (NOT force_orphan, which wipes the branch on every deploy.)
+      - name: Deploy to gh-pages (this repo)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          keep_files: true
