@@ -106,6 +106,8 @@ Weight this properly: **Chris has the same battery-equipped SKU** (most of these
 
 A board with a hard power button, a `5V` net, a charger and no PMIC on the S3 side is the signature of a single "power bank" SoC (IP5306 class: charger + boost + button in one part). If that is what Waveshare fitted, it **auto-powers-off when load current stays below a threshold (tens of mA) for tens of seconds.** The dial never trips it today because the LCD and radio draw far more than that continuously. **Any future "screen off on battery" or deep-sleep feature must be tested on battery for at least a minute before anyone believes it works** — the symptom would be the dial powering itself off, not sleeping. Unverified; recorded so the first person to try deep sleep does not spend an evening on it.
 
+**2026-10-01, owner-confirmed:** with the side power switch off and USB plugged in, the cell charges. The charger sits ahead of the power switch; the switch only gates the battery feeding the board. That settles where the switch sits, not which part the charger is: the charger IC is still unknown, and the auto-power-off hazard above remains unverified.
+
 ### 9.4 Nothing to build (superseded by 9.5)
 
 Written before the factory-firmware check. No firmware feature was expected from this. The §6 plan (power source + supply health from GPIO1, with §4's hysteresis) stands unchanged, and 9.2's discharge log is the only step that could upgrade it to a gauge.
